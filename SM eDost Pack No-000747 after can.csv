@@ -1,0 +1,2 @@
+Index,Direction,Timesteamp,Name,ID,PGN(H),Addr Src(H),Addr Dst(H),Format,Type,Length,Data,Comment,
+1,Receive,253.2925,--,000003C4,--,--,--,Standard,Data frm,08,00 00 13 88 00 12 02 73 ,,
