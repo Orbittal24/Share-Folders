@@ -104,4 +104,4 @@ EXEC InsertEOLUsers
 
 -------------------------------------------------------------
 
-wmic qfe list | find "5062572"
+https://dev.mysql.com/downloads/file/?id=544661
