@@ -7,14 +7,14 @@ BEGIN
     SET NOCOUNT ON;
     
     -- Create temporary table with static username/password values
-    CREATE TABLE #UserCredentials (
+    CREATE TABLE [taco_treceability_master].[taco_treceability].[UserCredentials]  (
         User_Num INT IDENTITY(1,1),
         User_Name VARCHAR(55),
         Password VARCHAR(255)
     );
     
     -- Insert static username/password values
-    INSERT INTO #UserCredentials (User_Name, Password)
+    INSERT INTO [taco_treceability_master].[taco_treceability].[UserCredentials] (User_Name, Password)
     VALUES 
         ('EOL_1', '$2a$12$H4Ospjd8HdyCJydmln5oK.iQoP3cuoKf0QLbRhuy4n0ZvEfbiqniq'),
         ('EOL_2', '$2a$12$cbr0nm28sUVg7bwXc9FiU.BIqMrrftNl21ZDor743tPaS.DKG4jVe'),
@@ -91,10 +91,12 @@ BEGIN
         -- 12 Line IDs: 1-8 (numeric) and A-D (alpha)
         (VALUES ('1'),('2'),('3'),('4'),('5'),('6'),('7'),('8'),('A'),('B'),('C'),('D')) AS L(Line_ID)
     CROSS JOIN 
-        #UserCredentials C;  -- Static credentials
+        [taco_treceability_master].[taco_treceability].[UserCredentials] C;  -- Static credentials
     
-    DROP TABLE #UserCredentials;
+    DROP TABLE [taco_treceability_master].[taco_treceability].[UserCredentials] ;
     
     PRINT 'Successfully inserted ' + CAST(@@ROWCOUNT AS VARCHAR) + ' user records.';
 END;
 GO
+
+EXEC InsertEOLUsers
