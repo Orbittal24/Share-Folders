@@ -1,0 +1,30 @@
+Manifest-Version: 1.0
+Created-By: Maven Archiver 3.6.3
+Build-Jdk-Spec: 17
+Specification-Title: Config File Provider Plugin
+Specification-Version: 0.0
+Implementation-Title: Config File Provider Plugin
+Implementation-Version: 994.v3d4a_5fa_f353a_
+Group-Id: org.jenkins-ci.plugins
+Artifact-Id: config-file-provider
+Short-Name: config-file-provider
+Long-Name: Config File Provider Plugin
+Url: https://github.com/jenkinsci/config-file-provider-plugin
+Compatible-Since-Version: 2.15
+Plugin-Version: 994.v3d4a_5fa_f353a_
+Hudson-Version: 2.504.1
+Jenkins-Version: 2.504.1
+Plugin-Dependencies: ionicons-api:88.va_4187cb_eddf1,cloudbees-folder:6.
+ 1036.vb_94fd035b_287;resolution:=optional,credentials-binding:696.v2566
+ 88029804,credentials:1415.v831096eb_5534,plain-credentials:199.v9f8e1f7
+ 41799,script-security:1373.vb_b_4a_a_c26fa_00,ssh-credentials:359.v2191
+ c4cf635f,token-macro:444.v52de7e9c573d
+Plugin-Developers: Olivier Lamy:olamy:,Dominik Bartholdi:imod:
+Plugin-License-Name: MIT License
+Plugin-License-Url: http://opensource.org/licenses/MIT
+Plugin-ScmConnection: scm:git:https://github.com/jenkinsci/config-file-p
+ rovider-plugin.git
+Plugin-ScmTag: 3d4a5faf353a646290f855795ed01c8d9d1bfe06
+Plugin-ScmUrl: https://github.com/jenkinsci/config-file-provider-plugin
+Implementation-Build: 3d4a5faf353a646290f855795ed01c8d9d1bfe06
+

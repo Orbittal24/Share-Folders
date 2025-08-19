@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>org.jvnet.hudson.plugins</groupId>
+  <artifactId>postbuild-task</artifactId>
+  <version>78.v24529f1f5cdb_</version>
+  <packaging>hpi</packaging>
+  <name>Post build task</name>
+  <description>Allows to execute a batch/shell task depending on the build log output.</description>
+  <url>https://github.com/jenkinsci/postbuild-task-plugin</url>
+  <inceptionYear>2016</inceptionYear>
+  <organization>
+    <name>Ushus Technologies</name>
+    <url>http://www.ushustech.com</url>
+  </organization>
+  <licenses>
+    <license>
+      <name>The MIT license</name>
+      <url>https://opensource.org/licenses/MIT</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <id>shinodkm</id>
+      <name>Shinod Mohandas</name>
+      <email>shinodkm@gmail.com</email>
+      <organization>Ushus Technologies</organization>
+      <organizationUrl>http://www.ushustech.com/</organizationUrl>
+      <roles>
+        <role>Software Engineer</role>
+      </roles>
+      <timezone>+5.30</timezone>
+    </developer>
+    <developer>
+      <id>castorpilot</id>
+      <name>Fred</name>
+      <email>castorpilot@gmail.com</email>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/jenkinsci/postbuild-task-plugin.git</connection>
+    <developerConnection>scm:git:git@github.com:jenkinsci/postbuild-task-plugin.git</developerConnection>
+    <tag>24529f1f5cdbfe21af986a1e38cbbe076b65a487</tag>
+    <url>https://github.com/jenkinsci/postbuild-task-plugin</url>
+  </scm>
+  <distributionManagement>
+    <repository>
+      <id>maven.jenkins-ci.org</id>
+      <url>https://repo.jenkins-ci.org/releases/</url>
+    </repository>
+    <snapshotRepository>
+      <id>maven.jenkins-ci.org</id>
+      <url>https://repo.jenkins-ci.org/snapshots/</url>
+    </snapshotRepository>
+  </distributionManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.jenkins-ci.main</groupId>
+      <artifactId>jenkins-core</artifactId>
+      <version>2.479.1</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.servlet</groupId>
+      <artifactId>jakarta.servlet-api</artifactId>
+      <version>5.0.0</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>commons-logging</groupId>
+      <artifactId>commons-logging</artifactId>
+      <version>1.3.4</version>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.jenkins-ci.tools</groupId>
+        <artifactId>maven-hpi-plugin</artifactId>
+        <version>3.65</version>
+        <extensions>true</extensions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

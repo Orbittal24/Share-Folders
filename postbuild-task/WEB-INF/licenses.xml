@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<l:dependencies xmlns:l='licenses' groupId='org.jvnet.hudson.plugins' artifactId='postbuild-task' version='78.v24529f1f5cdb_'><l:dependency name='Post build task' groupId='org.jvnet.hudson.plugins' artifactId='postbuild-task' version='78.v24529f1f5cdb_' url='https://github.com/jenkinsci/postbuild-task-plugin'><l:description>Allows to execute a batch/shell task depending on the build log output.</l:description><l:license name='The MIT license' url='https://opensource.org/licenses/MIT'/></l:dependency></l:dependencies>

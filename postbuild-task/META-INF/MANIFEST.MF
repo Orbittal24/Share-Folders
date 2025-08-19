@@ -1,0 +1,27 @@
+Manifest-Version: 1.0
+Created-By: Maven Archiver 3.6.0
+Build-Jdk-Spec: 17
+Specification-Title: Post build task
+Specification-Version: 0.0
+Specification-Vendor: Ushus Technologies
+Implementation-Title: Post build task
+Implementation-Version: 78.v24529f1f5cdb_
+Implementation-Vendor: Ushus Technologies
+Group-Id: org.jvnet.hudson.plugins
+Artifact-Id: postbuild-task
+Short-Name: postbuild-task
+Long-Name: Post build task
+Url: https://github.com/jenkinsci/postbuild-task-plugin
+Plugin-Version: 78.v24529f1f5cdb_
+Hudson-Version: 2.479.1
+Jenkins-Version: 2.479.1
+Plugin-Developers: Shinod Mohandas:shinodkm:shinodkm@gmail.com,Fred:cast
+ orpilot:castorpilot@gmail.com
+Plugin-License-Name: The MIT license
+Plugin-License-Url: https://opensource.org/licenses/MIT
+Plugin-ScmConnection: scm:git:https://github.com/jenkinsci/postbuild-tas
+ k-plugin.git
+Plugin-ScmTag: 24529f1f5cdbfe21af986a1e38cbbe076b65a487
+Plugin-ScmUrl: https://github.com/jenkinsci/postbuild-task-plugin
+Implementation-Build: 24529f1f5cdbfe21af986a1e38cbbe076b65a487
+

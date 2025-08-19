@@ -1,0 +1,27 @@
+Manifest-Version: 1.0
+Created-By: Maven Archiver 3.6.0
+Build-Jdk-Spec: 17
+Specification-Title: Startup Trigger
+Specification-Version: 2.9
+Implementation-Title: Startup Trigger
+Implementation-Version: 2.9.4
+Group-Id: org.jenkins-ci.plugins
+Artifact-Id: startup-trigger-plugin
+Short-Name: startup-trigger-plugin
+Long-Name: Startup Trigger
+Url: https://github.com/jenkinsci/startup-trigger-plugin
+Plugin-Version: 2.9.4
+Hudson-Version: 2.401.3
+Jenkins-Version: 2.401.3
+Plugin-Dependencies: workflow-job:1326.ve643e00e9220;resolution:=optiona
+ l,nodelabelparameter:1.12.0;resolution:=optional
+Plugin-Developers: Emory Penney:ejpenney:treadstoneit@gmail.com
+Plugin-License-Name: MIT license
+Plugin-License-Url: https://opensource.org/licenses/MIT
+Plugin-ScmConnection: scm:git:https://github.com/jenkinsci/startup-trigg
+ er-plugin.git
+Plugin-ScmTag: startup-trigger-plugin-2.9.4
+Plugin-ScmUrl: https://github.com/jenkinsci/startup-trigger-plugin
+Plugin-GitHash: efe9c94be0155b9cf2c3efca12d405f5e33c5231
+Implementation-Build: efe9c94be0155b9cf2c3efca12d405f5e33c5231
+
