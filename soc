@@ -191,4 +191,28 @@ socket.on("getFinalQRCodeStatus_nova_pa_gun5", async (battery_qrcode) => {
     }
 });
 
+feeeeeeeeeeeee
+socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
+    globalBatteryFinalQRCode = battery_qrcode;
+
+    if (data.error) {
+        Swal.fire("Error", "Could not fetch process status. Try again.", "error");
+        return;
+    }
+
+    if (data.audit_status === "NOT OK") {
+        Swal.fire({
+            title: "Voltage IR Pending!",
+            text: `Pending for module and barcode: ${globalBatteryFinalQRCode}`,
+            icon: "info",
+            confirmButtonText: "Bypass Check"
+        }).then(() => {
+            console.log("Bypassing checks:", globalBatteryFinalQRCode);
+            checkPasscode("valid", globalBatteryFinalQRCode);
+        });
+    } else {
+        // Status OK -> proceed normally
+        handleBarcode2(globalBatteryFinalQRCode);
+    }
+});
 
