@@ -60,6 +60,7 @@ socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
 
 
 //////////////////actual
+fe
 socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
     globalBatteryFinalQRCode = battery_qrcode;
 
@@ -83,3 +84,48 @@ socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
         handleBarcode2(globalBatteryFinalQRCode);
     }
 });
+
+/////////actual be
+const axios = require("axios");
+
+socket.on("getFinalQRCodeStatus_nova_pa_gun5", async (battery_qrcode) => {
+    try {
+        // Build request body for API
+        const requestData = {
+            station_id: 8, // <-- adjust dynamically if needed
+            line_id: 1,    // <-- adjust dynamically if needed
+            customer_qrcode: battery_qrcode
+        };
+
+        // Call API
+        const response = await axios.post("http://your-api-server/station_interlock", requestData);
+
+        // Parse response
+        const result = response.data;
+        let pendingProcesses = [];
+
+        if (Array.isArray(result) && result.length > 0) {
+            const rows = result[0].rows[0]; // first object inside rows
+            const audit_status = result[0].audit_status;
+
+            // Check each process in rows
+            for (let [process, status] of Object.entries(rows)) {
+                if (status !== "OK") {
+                    pendingProcesses.push(process);
+                }
+            }
+
+            // Check audit status
+            if (audit_status !== "OK") {
+                pendingProcesses.push("Audit Status");
+            }
+        }
+
+        socket.emit("setFinalQRCodeStatus", { pendingProcesses }, battery_qrcode);
+
+    } catch (error) {
+        console.error("API error:", error.message);
+        socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+    }
+});
+
