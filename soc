@@ -216,13 +216,18 @@ socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
     }
 });
 
-const response = await axios.post(
-  "https://Misapp.tataautocomp.com:5555/station_interlock",
-  requestData,
-  {
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer YOUR_TOKEN_HERE"
-    }
-  }
-);
+const response = await fetch(`https://${process.env.NEXT_PUBLIC_API_IP}:5555/station_interlock`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    station_id: state.stationData[0].Station_ID,
+                    line_id: Number(lineID),
+                    customer_qrcode: barcode,
+                }),
+            });
+            if (!response.ok) {
+                console.error("Interlock API error", response);
+                return;
+            }
