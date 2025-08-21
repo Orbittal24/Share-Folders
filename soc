@@ -57,3 +57,29 @@ socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
         handleBarcode2(globalBatteryFinalQRCode);
     }
 });
+
+
+//////////////////actual
+socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
+    globalBatteryFinalQRCode = battery_qrcode;
+
+    if (data.error) {
+        Swal.fire("Error", "Could not fetch process status. Try again.", "error");
+        return;
+    }
+
+    if (data.pendingProcesses.length > 0) {
+        Swal.fire({
+            title: `Pending Processes for Module: ${globalBatteryFinalQRCode}`,
+            html: `<ul>${data.pendingProcesses.map(p => `<li>${p}</li>`).join("")}</ul>`,
+            icon: "info",
+            confirmButtonText: "Bypass Check"
+        }).then(() => {
+            console.log("Bypassing checks:", globalBatteryFinalQRCode);
+            checkPasscode("valid", globalBatteryFinalQRCode);
+        });
+    } else {
+        // All processes completed
+        handleBarcode2(globalBatteryFinalQRCode);
+    }
+});
