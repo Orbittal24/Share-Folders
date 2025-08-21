@@ -154,3 +154,5 @@ socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
     }
 });
 
+https://Misapp.tataautocomp.com:5555
+
