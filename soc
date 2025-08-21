@@ -156,3 +156,39 @@ socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
 
 https://Misapp.tataautocomp.com:5555
 
+const axios = require("axios");
+
+socket.on("getFinalQRCodeStatus_nova_pa_gun5", async (battery_qrcode) => {
+    try {
+        const requestData = {
+            station_id: 33, 
+            line_id: 4,    
+            customer_qrcode: battery_qrcode
+        };
+        console.log("requestData", requestData);
+
+        // Call API
+        const response = await axios.post(
+            "https://Misapp.tataautocomp.com:5555/station_interlock",
+            requestData
+        );
+
+        const result = response.data;
+        console.log("result", result);
+
+        let audit_status = "NOT OK";
+
+        if (Array.isArray(result) && result.length > 0) {
+            audit_status = result[0].audit_status || "NOT OK";
+        }
+
+        // Just send audit_status back to frontend
+        socket.emit("setFinalQRCodeStatus", { audit_status }, battery_qrcode);
+
+    } catch (error) {
+        console.error("API error:", error.message);
+        socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+    }
+});
+
+
