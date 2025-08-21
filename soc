@@ -1,0 +1,59 @@
+js
+const axios = require('axios');
+
+socket.on('getFinalQRCodeStatus_nova_pa_gun5', async (battery_qrcode) => {
+    try {
+        // Call your API with barcode
+        const response = await axios.post("http://your-api-server/api/getStatus", {
+            barcode: battery_qrcode
+        });
+
+        // Assume API returns something like:
+        // { ModulePrintStatus: "OK", Welding_status: "Pending", IR_V_status: "OK", FinalQRCodePrint_status: "Pending" }
+
+        let dataObj = {
+            ModulePrintStatus: response.data.ModulePrintStatus === "OK",
+            Welding_status: response.data.Welding_status === "OK",
+            IR_V_status: response.data.IR_V_status === "OK",
+            FinalQRCodePrint_status: response.data.FinalQRCodePrint_status === "OK"
+        };
+
+        socket.emit("setFinalQRCodeStatus", dataObj, battery_qrcode);
+    } catch (error) {
+        console.error("API error:", error.message);
+        socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+    }
+});
+
+html
+socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
+    globalBatteryFinalQRCode = battery_qrcode;
+    console.log("setFinalQRCodeStatus:", data);
+
+    if (data.error) {
+        Swal.fire("Error", "Could not fetch process status. Try again.", "error");
+        return;
+    }
+
+    // Collect pending processes
+    let pendingProcesses = [];
+    if (!data.ModulePrintStatus) pendingProcesses.push("Module Printing");
+    if (!data.Welding_status) pendingProcesses.push("Welding");
+    if (!data.IR_V_status) pendingProcesses.push("Voltage & IR Testing");
+    if (!data.FinalQRCodePrint_status) pendingProcesses.push("Final QR Code Printing");
+
+    if (pendingProcesses.length > 0) {
+        Swal.fire({
+            title: `Pending Processes for Module: ${globalBatteryFinalQRCode}`,
+            html: `<ul>${pendingProcesses.map(p => `<li>${p}</li>`).join("")}</ul>`,
+            icon: "info",
+            confirmButtonText: "Bypass Check"
+        }).then(() => {
+            console.log("Bypassing checks:", globalBatteryFinalQRCode);
+            checkPasscode("valid", globalBatteryFinalQRCode);
+        });
+    } else {
+        // All good → proceed
+        handleBarcode2(globalBatteryFinalQRCode);
+    }
+});
