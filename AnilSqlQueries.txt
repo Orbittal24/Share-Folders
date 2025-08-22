@@ -104,4 +104,4 @@ EXEC InsertEOLUsers
 
 -------------------------------------------------------------
 
-https://dev.mysql.com/downloads/file/?id=544661
+Go to the official SSMS download page: https://aka.ms/ssmsfullsetup
