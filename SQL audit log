@@ -72,3 +72,27 @@ ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
 set size
 CREATE SERVER AUDIT Audit_TacoDB1
 TO FILE ( FILEPATH = 'C:\SQLAudit\', MAXSIZE = 100 MB, ROLLOVER_ON_FILE = ON );
+
+/////////
+ALter 
+
+USE taco_treceability;
+GO
+
+-- First disable before dropping
+ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables1
+WITH (STATE = OFF);
+GO
+
+-- Drop existing spec
+DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
+GO
+
+-- Recreate with proper groups
+CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables1
+FOR SERVER AUDIT Audit_TacoDB1
+    ADD (DATABASE_OBJECT_CHANGE_GROUP),   -- Captures ALTER / CREATE / DROP inside the DB
+    ADD (UPDATE ON DATABASE::taco_treceability BY [public]),
+    ADD (DELETE ON DATABASE::taco_treceability BY [public])
+WITH (STATE = ON);
+GO
