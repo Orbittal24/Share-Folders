@@ -7,6 +7,8 @@ SELECT
     is_state_enabled
 FROM sys.server_audits;
 
+Audit_TacoDB	5174BEF2-A105-418E-9514-44247740C77C	1000	1
+
 
 And for database audit specifications:
 
@@ -15,6 +17,8 @@ SELECT
     audit_guid,
     is_state_enabled
 FROM sys.database_audit_specifications;
+
+Audit_AllTables	5174BEF2-A105-418E-9514-44247740C77C	1
 
 
 ✅ Notes:
@@ -25,3 +29,8 @@ To read actual audit logs (regardless of version), always use:
 
 SELECT *
 FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT);
+
+Msg 33224, Level 16, State 4, Line 1
+The specified pattern did not return any files or does not represent a valid file share. Verify the pattern parameter and rerun the command.
+
+Completion time: 2025-08-23T14:18:18.9809690+05:30
