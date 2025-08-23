@@ -112,3 +112,28 @@ Msg 319, Level 15, State 1, Line 14
 Incorrect syntax near the keyword 'with'. If this statement is a common table expression, an xmlnamespaces clause or a change tracking context clause, the previous statement must be terminated with a semicolon.
 
 Completion time: 2025-08-23T17:20:24.6232845+05:30
+
+
+
+/////
+USE taco_treceability;
+GO
+
+-- First disable before dropping
+ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables1
+WITH (STATE = OFF);
+GO
+
+-- Drop existing spec
+DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
+GO
+
+-- Recreate with proper groups
+CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables1
+FOR SERVER AUDIT Audit_TacoDB1
+    ADD (DATABASE_OBJECT_CHANGE_GROUP),   -- Captures ALTER / CREATE / DROP inside the DB
+    ADD (UPDATE ON DATABASE::taco_treceability BY [public]),
+    ADD (DELETE ON DATABASE::taco_treceability BY [public])
+WITH (STATE = ON);
+GO
+
