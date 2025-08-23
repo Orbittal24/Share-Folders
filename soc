@@ -1,1 +1,62 @@
-https://www.apexsql.com/sql-tools-log/
+🔹 Step 1: Create a Server Audit
+
+This tells SQL Server where to store audit logs.
+
+USE master;
+GO
+
+-- Create an audit that writes to a file
+CREATE SERVER AUDIT Audit_ProductionCount
+TO FILE (FILEPATH = 'C:\SQLAudit\')  -- Make sure this folder exists and SQL Server has write access
+WITH (ON_FAILURE = CONTINUE);        -- Or SHUTDOWN if you want SQL to stop when auditing fails
+GO
+
+-- Enable the audit
+ALTER SERVER AUDIT Audit_ProductionCount
+WITH (STATE = ON);
+GO
+
+🔹 Step 2: Create a Database Audit Specification
+
+This tells SQL Server what actions to track in your database.
+
+USE taco_treceability;
+GO
+
+CREATE DATABASE AUDIT SPECIFICATION Audit_Delete_ProductionCount
+FOR SERVER AUDIT Audit_ProductionCount
+ADD (DELETE ON OBJECT::taco_treceability.production_count BY [public]) -- track deletes
+-- Optionally, track updates and inserts as well:
+-- ADD (INSERT ON OBJECT::taco_treceability.production_count BY [public]),
+-- ADD (UPDATE ON OBJECT::taco_treceability.production_count BY [public])
+WITH (STATE = ON);
+GO
+
+🔹 Step 3: Verify Audit is Running
+SELECT name, is_state_enabled, audit_file_path 
+FROM sys.server_audits;
+
+SELECT name, is_state_enabled 
+FROM sys.database_audit_specifications;
+
+🔹 Step 4: Read Audit Logs
+
+Audit logs are written to the folder you specified (C:\SQLAudit\).
+To read them in SQL Server:
+
+SELECT *
+FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT)
+WHERE object_name = 'production_count';
+
+
+This will show:
+
+Who performed the delete (server_principal_name)
+
+When it happened (event_time)
+
+Which table (object_name)
+
+Statement executed (statement)
+
+✅ After this, every DELETE on production_count will be logged. You can also track INSERT or UPDATE by adding them to the audit specification.
