@@ -47,7 +47,7 @@ Test a DELETE to generate an audit entry:
 DELETE TOP (1) FROM taco_treceability.production_count;
 
 
-Read the audit log:
+Read the audit log: to see the records
 
 SELECT *
 FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT)
@@ -63,6 +63,10 @@ Enables server audit + database audit on the entire database
 Runs a test DELETE
 
 Reads the audit log
+
+
+OFF aufit
+ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
 
 This ensures auditing is fully working for taco_treceability.
 
