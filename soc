@@ -1,38 +1,45 @@
+Got it 👍 You want to enable auditing for the entire database (taco_treceability) instead of just one table. Since it has a large number of tables, it’s better to create a Database Audit Specification that applies to the whole database.
+
+Here’s how you can do it:
+
 🔹 Step 1: Create a Server Audit
 
-This tells SQL Server where to store audit logs.
+This defines where logs will be stored.
 
 USE master;
 GO
 
--- Create an audit that writes to a file
-CREATE SERVER AUDIT Audit_ProductionCount
-TO FILE (FILEPATH = 'C:\SQLAudit\')  -- Make sure this folder exists and SQL Server has write access
-WITH (ON_FAILURE = CONTINUE);        -- Or SHUTDOWN if you want SQL to stop when auditing fails
+CREATE SERVER AUDIT Audit_TacoDB
+TO FILE (FILEPATH = 'C:\SQLAudit\')  -- Change this path, ensure SQL has write permissions
+WITH (ON_FAILURE = CONTINUE);
 GO
 
--- Enable the audit
-ALTER SERVER AUDIT Audit_ProductionCount
-WITH (STATE = ON);
+ALTER SERVER AUDIT Audit_TacoDB
+WITH (STATE = ON);  -- Turn it ON
 GO
 
 🔹 Step 2: Create a Database Audit Specification
 
-This tells SQL Server what actions to track in your database.
+This will capture all DML actions (INSERT, UPDATE, DELETE) on the taco_treceability database.
 
 USE taco_treceability;
 GO
 
-CREATE DATABASE AUDIT SPECIFICATION Audit_Delete_ProductionCount
-FOR SERVER AUDIT Audit_ProductionCount
-ADD (DELETE ON OBJECT::taco_treceability.production_count BY [public]) -- track deletes
--- Optionally, track updates and inserts as well:
--- ADD (INSERT ON OBJECT::taco_treceability.production_count BY [public]),
--- ADD (UPDATE ON OBJECT::taco_treceability.production_count BY [public])
+CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables
+FOR SERVER AUDIT Audit_TacoDB
+-- Track all inserts
+ADD (INSERT ON DATABASE::taco_treceability BY [public]),
+-- Track all updates
+ADD (UPDATE ON DATABASE::taco_treceability BY [public]),
+-- Track all deletes
+ADD (DELETE ON DATABASE::taco_treceability BY [public])
 WITH (STATE = ON);
 GO
 
-🔹 Step 3: Verify Audit is Running
+🔹 Step 3: Verify Audit
+
+Check if the audit is enabled:
+
 SELECT name, is_state_enabled, audit_file_path 
 FROM sys.server_audits;
 
@@ -41,36 +48,39 @@ FROM sys.database_audit_specifications;
 
 🔹 Step 4: Read Audit Logs
 
-Audit logs are written to the folder you specified (C:\SQLAudit\).
+All actions across all tables in taco_treceability will be logged to the .sqlaudit files.
+
 To read them in SQL Server:
 
-SELECT *
+SELECT 
+    event_time,
+    action_id,
+    statement,
+    server_principal_name AS executed_by,
+    object_name,
+    database_name,
+    schema_name
 FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT)
-WHERE object_name = 'production_count';
+WHERE database_name = 'taco_treceability';
 
+🔹 What This Will Capture
 
-This will show:
-
-Who performed the delete (server_principal_name)
+Who executed (server_principal_name)
 
 When it happened (event_time)
 
+What action (action_id: I=Insert, U=Update, D=Delete)
+
 Which table (object_name)
 
-Statement executed (statement)
+The query executed (statement)
 
-✅ After this, every DELETE on production_count will be logged. You can also track INSERT or UPDATE by adding them to the audit specification.
+⚠️ Important Considerations:
 
+This will log every insert/update/delete on all tables, so the audit files can grow very large quickly.
 
-delete
-USE master;
-GO
+Best practice: Store audit logs on a separate disk.
 
--- First disable the audit if it is enabled
-ALTER SERVER AUDIT Audit_ProductionCount
-WITH (STATE = OFF);
-GO
+If you only care about DELETE, you can remove the INSERT and UPDATE lines from the audit specification.
 
--- Then drop the audit
-DROP SERVER AUDIT Audit_ProductionCount;
-GO
+👉 Do you want me to give you a DELETE-only version (to reduce log size), or do you want to keep INSERT + UPDATE + DELETE for full history tracking?
