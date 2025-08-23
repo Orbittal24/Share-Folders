@@ -147,16 +147,50 @@ ALTER DATABASE [taco_treceability_pack_assembly] SET  READ_WRITE
 GO
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-SELECT name, is_state_enabled, audit_file_path 
+Here’s the correct way to check audits:
+
+1️⃣ Check Server Audits
+SELECT 
+    name,
+    audit_guid,
+    audit_file_path AS file_path,   -- only in SQL Server 2012+
+    queue_delay,
+    is_state_enabled
 FROM sys.server_audits;
 
-SELECT name, is_state_enabled 
+
+If your version does not have audit_file_path, use:
+
+SELECT 
+    name,
+    audit_guid,
+    queue_delay,
+    is_state_enabled
+FROM sys.server_audits;
+
+2️⃣ Check Database Audit Specifications
+SELECT 
+    name,
+    audit_guid,
+    is_state_enabled
 FROM sys.database_audit_specifications;
 
-Msg 207, Level 16, State 1, Line 1
-Invalid column name 'audit_file_path'.
 
-Completion time: 2025-08-23T14:04:28.2035206+05:30
+✅ Notes:
+
+sys.server_audits shows the audit definitions (where logs go, enabled/disabled).
+
+sys.database_audit_specifications shows which database objects/actions are being audited.
+
+To see the actual audit log entries, you always use:
+
+SELECT *
+FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT);
+
+
+If you want, I can give a version-safe query that works on all SQL Server versions to list all enabled server audits and database audit specs for your taco_treceability database. This avoids the audit_file_path error.
+
+Do you want me to do that?
 
 
 
