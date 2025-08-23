@@ -1,0 +1,27 @@
+Here’s a version-safe query to check your server audits:
+
+SELECT 
+    name,
+    audit_guid,
+    queue_delay,
+    is_state_enabled
+FROM sys.server_audits;
+
+
+And for database audit specifications:
+
+SELECT 
+    name,
+    audit_guid,
+    is_state_enabled
+FROM sys.database_audit_specifications;
+
+
+✅ Notes:
+
+audit_file_path was introduced in SQL Server 2012 for certain file audits. Older versions just write to default locations or require checking the sys.fn_get_audit_file path manually.
+
+To read actual audit logs (regardless of version), always use:
+
+SELECT *
+FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT);
