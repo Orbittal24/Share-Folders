@@ -84,3 +84,20 @@ Best practice: Store audit logs on a separate disk.
 If you only care about DELETE, you can remove the INSERT and UPDATE lines from the audit specification.
 
 👉 Do you want me to give you a DELETE-only version (to reduce log size), or do you want to keep INSERT + UPDATE + DELETE for full history tracking?
+
+
+USE taco_treceability;
+GO
+
+-- First drop the existing spec
+DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
+GO
+
+-- Recreate with ALTER + UPDATE + DELETE
+CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables1
+FOR SERVER AUDIT Audit_TacoDB1
+    ADD (ALTER ON DATABASE::taco_treceability BY [public]),
+    ADD (UPDATE ON DATABASE::taco_treceability BY [public]),
+    ADD (DELETE ON DATABASE::taco_treceability BY [public])
+WITH (STATE = ON);
+GO
