@@ -64,10 +64,11 @@ Runs a test DELETE
 
 Reads the audit log
 
-
-OFF aufit
+///////////////////
+OFF audit
 ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
 
-This ensures auditing is fully working for taco_treceability.
-
-Do you want me to do that?
+//////////
+set size
+CREATE SERVER AUDIT Audit_TacoDB1
+TO FILE ( FILEPATH = 'C:\SQLAudit\', MAXSIZE = 100 MB, ROLLOVER_ON_FILE = ON );
