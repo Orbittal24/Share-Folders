@@ -138,7 +138,9 @@ WITH (STATE = ON);
 GO
 
 
-Msg 102, Level 15, State 1, Line 2
-Incorrect syntax near 'ROLLOVER_ON_FILE'.
-
-Completion time: 2025-08-23T17:31:53.6727967+05:30
+CREATE SERVER AUDIT Audit_TacoDB1
+TO FILE (
+    FILEPATH = 'C:\SQLAudit\',
+    MAXSIZE = 100 MB,
+    MAX_ROLLOVER_FILES = 10  -- keep 10 files, then overwrite oldest
+);
