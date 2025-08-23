@@ -60,3 +60,17 @@ Which table (object_name)
 Statement executed (statement)
 
 ✅ After this, every DELETE on production_count will be logged. You can also track INSERT or UPDATE by adding them to the audit specification.
+
+
+delete
+USE master;
+GO
+
+-- First disable the audit if it is enabled
+ALTER SERVER AUDIT Audit_ProductionCount
+WITH (STATE = OFF);
+GO
+
+-- Then drop the audit
+DROP SERVER AUDIT Audit_ProductionCount;
+GO
