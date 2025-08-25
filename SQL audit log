@@ -98,7 +98,7 @@ WITH (STATE = ON);
 GO
 
 
-//////////////Delete
+//////////////Delete SERVER AUDIT
 USE master;
 GO
 
@@ -110,3 +110,17 @@ GO
 -- Drop the server audit
 DROP SERVER AUDIT Audit_TacoDB1;
 GO
+
+///////Delete SPECIFICATION
+USE taco_treceability;
+GO
+
+-- Disable the Database Audit Specification first
+ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables1
+WITH (STATE = OFF);
+GO
+
+-- Drop the Database Audit Specification
+DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
+GO
+
