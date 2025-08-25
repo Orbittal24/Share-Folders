@@ -128,7 +128,7 @@ GO
 USE taco_treceability;
 GO
 
--- Drop existing spec if it already exists (optional safeguard)
+-- Drop existing spec if it already exists
 IF EXISTS (SELECT * FROM sys.database_audit_specifications WHERE name = 'Audit_AllTables')
 BEGIN
     ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables
@@ -137,24 +137,16 @@ BEGIN
 END
 GO
 
--- Recreate with UPDATE, DELETE, TRUNCATE
-USE taco_treceability;
-GO
-
--- Drop if it already exists
-IF EXISTS (SELECT * FROM sys.database_audit_specifications WHERE name = 'Audit_AllTables')
-BEGIN
-    ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables
-    WITH (STATE = OFF);
-    DROP DATABASE AUDIT SPECIFICATION Audit_AllTables;
-END
-GO
-
--- Correct spec (no TRUNCATE keyword, use SCHEMA_OBJECT_CHANGE_GROUP instead)
+-- Correct spec
 CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables
 FOR SERVER AUDIT Audit_TacoDB
-    ADD (UPDATE ON DATABASE BY [public]),
-    ADD (DELETE ON DATABASE BY [public]),
+    ADD (UPDATE ON SCHEMA::dbo BY [public]),   -- Tracks UPDATEs on dbo schema
+    ADD (DELETE ON SCHEMA::dbo BY [public]),   -- Tracks DELETEs on dbo schema
+    ADD (SCHEMA_OBJECT_CHANGE_GROUP)           -- Captures TRUNCATE + DDL changes
+WITH (STATE = ON);
+GO
+
+
     ADD (SCHEMA_OBJECT_CHANGE_GROUP)  -- This is what captures TRUNCATE
 WITH (STATE = ON);
 GO
