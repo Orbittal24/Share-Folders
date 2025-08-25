@@ -128,7 +128,7 @@ GO
 USE taco_treceability;
 GO
 
--- Drop existing spec if it already exists
+-- Drop if already exists
 IF EXISTS (SELECT * FROM sys.database_audit_specifications WHERE name = 'Audit_AllTables')
 BEGIN
     ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables
@@ -140,9 +140,9 @@ GO
 -- Correct spec
 CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables
 FOR SERVER AUDIT Audit_TacoDB
-    ADD (UPDATE ON SCHEMA::dbo BY [public]),
-    ADD (DELETE ON SCHEMA::dbo BY [public]),
-    ADD (SCHEMA_OBJECT_CHANGE_GROUP)  -- ✅ no ON clause here
+    ADD (UPDATE ON SCHEMA::dbo BY public),
+    ADD (DELETE ON SCHEMA::dbo BY public),
+    ADD (SCHEMA_OBJECT_CHANGE_GROUP) -- no ON/ BY here
 WITH (STATE = ON);
 GO
 
