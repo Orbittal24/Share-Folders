@@ -147,4 +147,27 @@ WITH (STATE = ON);
 GO
 
 
+step2
+USE taco_treceability;
+GO
+
+-- Drop old spec
+IF EXISTS (SELECT * FROM sys.database_audit_specifications WHERE name = 'Audit_AllTables')
+BEGIN
+    ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables
+    WITH (STATE = OFF);
+    DROP DATABASE AUDIT SPECIFICATION Audit_AllTables;
+END
+GO
+
+-- Create spec attached to correct server audit
+CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables
+FOR SERVER AUDIT Audit_TacoDB1   -- <-- must match Step 1
+    ADD (UPDATE ON SCHEMA::dbo BY public),
+    ADD (DELETE ON SCHEMA::dbo BY public),
+    ADD (SCHEMA_OBJECT_CHANGE_GROUP)
+WITH (STATE = ON);
+GO
+
+
 
