@@ -169,5 +169,8 @@ FOR SERVER AUDIT Audit_TacoDB1   -- <-- must match Step 1
 WITH (STATE = ON);
 GO
 
-
+to see
+SELECT *
+FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT)
+WHERE database_name = 'taco_treceability';
 
