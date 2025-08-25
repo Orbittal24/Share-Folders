@@ -5,3 +5,10 @@ const response = await fetch("https://Misapp.tataautocomp.com:5555/station_inter
     },
     body: JSON.stringify(requestData),
 });
+
+
+{
+  "station_id": 8,
+  "line_id": 1,
+  "customer_qrcode": "01TMB04T100024F6P0100001"
+}
