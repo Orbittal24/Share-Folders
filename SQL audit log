@@ -96,3 +96,17 @@ FOR SERVER AUDIT Audit_TacoDB1
     ADD (DELETE ON DATABASE::taco_treceability BY [public])
 WITH (STATE = ON);
 GO
+
+
+//////////////Delete
+USE master;
+GO
+
+-- Disable the server audit first
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = OFF);
+GO
+
+-- Drop the server audit
+DROP SERVER AUDIT Audit_TacoDB1;
+GO
