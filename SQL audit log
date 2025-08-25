@@ -174,3 +174,22 @@ SELECT *
 FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT)
 WHERE database_name = 'taco_treceability';
 
+
+new
+USE master;
+GO
+
+-- Create server audit if not exists
+IF NOT EXISTS (SELECT * FROM sys.server_audits WHERE name = 'Audit_TacoDB2')
+BEGIN
+    CREATE SERVER AUDIT Audit_TacoDB2
+    TO FILE (FILEPATH = 'C:\SQLAudit\')  -- SQL Server service account must have write permissions
+    WITH (ON_FAILURE = CONTINUE);
+    ALTER SERVER AUDIT Audit_TacoDB2 WITH (STATE = ON);
+END
+ELSE
+BEGIN
+    ALTER SERVER AUDIT Audit_TacoDB2 WITH (STATE = ON);
+END
+GO
+
