@@ -140,15 +140,11 @@ GO
 -- Correct spec
 CREATE DATABASE AUDIT SPECIFICATION Audit_AllTables
 FOR SERVER AUDIT Audit_TacoDB
-    ADD (UPDATE ON SCHEMA::dbo BY [public]),   -- Tracks UPDATEs on dbo schema
-    ADD (DELETE ON SCHEMA::dbo BY [public]),   -- Tracks DELETEs on dbo schema
-    ADD (SCHEMA_OBJECT_CHANGE_GROUP)           -- Captures TRUNCATE + DDL changes
+    ADD (UPDATE ON SCHEMA::dbo BY [public]),
+    ADD (DELETE ON SCHEMA::dbo BY [public]),
+    ADD (SCHEMA_OBJECT_CHANGE_GROUP)  -- ✅ no ON clause here
 WITH (STATE = ON);
 GO
 
-
-    ADD (SCHEMA_OBJECT_CHANGE_GROUP)  -- This is what captures TRUNCATE
-WITH (STATE = ON);
-GO
 
 
