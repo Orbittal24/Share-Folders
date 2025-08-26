@@ -80,7 +80,7 @@ Go to the official SSMS download page: https://aka.ms/ssmsfullsetup
 
 58   $2a$12$J5SdP7MfsbPzO7Ag7QIz5OSefaU9cSOGZIV8iRTgG.4VE4rpIwVNW
 
- 
+59  $2a$12$9vDiCtX8ovZvzyat.URxfuXT7da//KSRFmKEKfOAmQlUgpU1yvqP6
 
 60  $2a$12$0avV8Z7Hu2Y4Md.i2fDKUuWWxxS5BFa0k0aKRqof1eZ9r5.idix.O
 
