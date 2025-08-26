@@ -9,18 +9,27 @@ socket.on("setFinalQRCodeStatus", function (data, battery_qrcode) {
     // Safely extract voltage_ir_status from rows[0]
     const voltageStatus = data[0]?.rows?.[0]?.voltage_ir_status || "OK";
 
-    if (voltageStatus === "NOT OK") {
+    function showVoltagePopup() {
         Swal.fire({
             title: "Voltage IR Pending!",
             text: `Pending for module and barcode: ${globalBatteryFinalQRCode}`,
             icon: "info",
-            confirmButtonText: "Bypass Check"
+            confirmButtonText: "OK",
+            allowOutsideClick: false, // prevent closing by clicking outside
+            allowEscapeKey: false     // prevent closing with Esc
         }).then(() => {
-            console.log("Bypassing checks:", globalBatteryFinalQRCode);
-            checkPasscode("valid", globalBatteryFinalQRCode);
+            // If still NOT OK, show popup again
+            if (voltageStatus === "NOT OK") {
+                showVoltagePopup();
+            } else {
+                handleBarcode2(globalBatteryFinalQRCode);
+            }
         });
+    }
+
+    if (voltageStatus === "NOT OK") {
+        showVoltagePopup();
     } else {
-        // Status OK -> proceed normally
         handleBarcode2(globalBatteryFinalQRCode);
     }
 });
