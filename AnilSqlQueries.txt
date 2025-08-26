@@ -74,5 +74,56 @@ EXEC InsertEOLUsers
 
 
 -------------------------------------------------------------
-$2a$12$NqdS2YxOLOpo0AhZLu544Or/0aeRSKvBHqDk6flP2Jepz7yQPD8Ji
+ 
 Go to the official SSMS download page: https://aka.ms/ssmsfullsetup
+
+
+58   $2a$12$QE2.3HNsUeP3/l3wsKHlJeBferdWy8ohmH1fmTFmctAfwPIjzzzVe
+
+ 
+
+60  $2a$12$0avV8Z7Hu2Y4Md.i2fDKUuWWxxS5BFa0k0aKRqof1eZ9r5.idix.O
+
+ 
+
+61  $2a$12$Rg2VBVSlZCOtcV4KQAX4Ru2vJ2xL4tPSGMGmZtq2f9vKM8JH3HSH.
+
+ 
+
+62   $2a$12$z/ROwAvCcX534YagKjf4quFIjGiE/4reoh66LH8HrrukKxmmUKIHW
+
+ 
+
+63  $2a$12$8.6nri8xZ7lvUtoIi0y46OoGbuxyjNXRgoZCa0i84hShjYkHnhL3q
+
+ 
+
+64  $2a$12$CS7G1pCxw5MumCWNKxajHObRIjTtDq4X01PmWSiEZT1adL1AtKedK
+
+ 
+
+65   $2a$12$usZsKczTLnO5UcYGDqEAzO0JuBoZ9INwDzBysaWIyzgUyzHQ.hpEm
+
+ 
+
+66  $2a$12$0X8TL7kZzJiJwcIQqAmWBuybuurC1uD80LeLrHDjgoNZZjDuIrpKu
+
+ 
+
+67  $2a$12$CXi2vYYmyBF8iPg7FsJr/u7Ea631ki80jAUWeibOC7q0htwal/As6
+
+ 
+
+68  $2a$12$ZCY34Fz2hseieYR581XCF.gXK/OxQJ3BGusoLjrCXnhBZdtdo8oi.
+
+ 
+
+69  $2a$12$5vrxsB9pWSophubdQbPqt.21XeEC9k49GE9uYbkETCLz4Arq0.bPa
+
+ 
+
+70  $2a$12$DYCvJ/bEwRwft3tRu/EKHuxsRmiLq/1hzUcLRcA36ywv4J7Z3M/za
+
+ 
+
+
