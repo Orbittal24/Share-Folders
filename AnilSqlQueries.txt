@@ -77,7 +77,7 @@ EXEC InsertEOLUsers
  
 Go to the official SSMS download page: https://aka.ms/ssmsfullsetup
 
-50  $2a$12$vL/SKHOv63YB2yIIL.uvyuYIlTbv/lU8IS7xj8kbAIPzPaKJ4OGDC
+50  $2a$12$cNjCVSefmTfgNh.FS9cgwexYxfVxIdQB8UeX1lySMf6hovbOsFfCC
 
 58   $2a$12$J5SdP7MfsbPzO7Ag7QIz5OSefaU9cSOGZIV8iRTgG.4VE4rpIwVNW
 
