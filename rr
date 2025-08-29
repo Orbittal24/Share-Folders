@@ -2,7 +2,7 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
     try {
         console.log('pack_name, pack_no:::::::::::', pack_name, pack_no);
 
-        // Step 1: Get pack_id using pack_name
+        // Step 1: Get pack_id from first API
         const apiUrl = `https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name.trim())}`;
 
         const response = await fetch(apiUrl, {
@@ -20,7 +20,6 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
         const result = await response.json();
         console.log("Pack API result:", JSON.stringify(result, null, 2));
 
-        // Extract pack_id
         let pack_id = null;
         if (Array.isArray(result) && result.length > 0) {
             pack_id = result[0].pack_id || null;
@@ -33,8 +32,12 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
 
         console.log("Resolved pack_id:", pack_id);
 
-        // Step 2: Call another API with pack_id
-        const secondApiUrl = `https://Misapp.tataautocomp.com:5555/another_endpoint?pack_id=${pack_id}&pack_no=${pack_no}`;
+        // Step 2: Extract last 6 digits of pack_no
+        const last6Digits = pack_no.slice(-6);
+        console.log("Last 6 digits of pack_no:", last6Digits);
+
+        // Step 3: Call second API
+        const secondApiUrl = `https://Misapp.tataautocomp.com:5555/pack-duplicates?Pack_No=${last6Digits}&Pack_ID=${pack_id}`;
 
         const secondResponse = await fetch(secondApiUrl, {
             method: "GET",
@@ -51,7 +54,7 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
         const secondResult = await secondResponse.json();
         console.log("Second API result:", JSON.stringify(secondResult, null, 2));
 
-        // You can now use secondResult further (process, save to DB, etc.)
+        // At this point, you can do further processing with secondResult
 
     } catch (error) {
         console.error("Error in getGlobalIngersollData:", error.message);
