@@ -1,15 +1,16 @@
+import fetch from "node-fetch";   // if you're in Node.js <18, otherwise remove this
+
+// Socket event
 socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
     try {
-        console.log('pack_name, pack_no:::::::::::', pack_name, pack_no);
+        console.log('pack_name, pack_no :::::::::::::', pack_name, pack_no);
 
-        // Step 1: Get pack_id from first API
+        // ------------------- STEP 1: Call first API -------------------
         const apiUrl = `https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name.trim())}`;
 
         const response = await fetch(apiUrl, {
             method: "GET",
-            headers: {
-                "Content-Type": "application/json",
-            }
+            headers: { "Content-Type": "application/json" }
         });
 
         if (!response.ok) {
@@ -22,7 +23,8 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
 
         let pack_id = null;
         if (Array.isArray(result) && result.length > 0) {
-            pack_id = result[0].pack_id || null;
+            // ✅ fixed key name: Pack_ID (case sensitive)
+            pack_id = result[0].Pack_ID || null;
         }
 
         if (!pack_id) {
@@ -32,18 +34,16 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
 
         console.log("Resolved pack_id:", pack_id);
 
-        // Step 2: Extract last 6 digits of pack_no
+        // ------------------- STEP 2: Extract last 6 digits -------------------
         const last6Digits = pack_no.slice(-6);
         console.log("Last 6 digits of pack_no:", last6Digits);
 
-        // Step 3: Call second API
+        // ------------------- STEP 3: Call second API -------------------
         const secondApiUrl = `https://Misapp.tataautocomp.com:5555/pack-duplicates?Pack_No=${last6Digits}&Pack_ID=${pack_id}`;
 
         const secondResponse = await fetch(secondApiUrl, {
             method: "GET",
-            headers: {
-                "Content-Type": "application/json",
-            }
+            headers: { "Content-Type": "application/json" }
         });
 
         if (!secondResponse.ok) {
@@ -52,9 +52,19 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
         }
 
         const secondResult = await secondResponse.json();
-        console.log("Second API result:", JSON.stringify(secondResult, null, 2));
+        console.log("Second API raw result:", JSON.stringify(secondResult, null, 2));
 
-        // At this point, you can do further processing with secondResult
+        // ------------------- STEP 4: Clean output -------------------
+        if (Array.isArray(secondResult) && secondResult.length > 0) {
+            console.log("Duplicates found:");
+            secondResult.forEach((dup, idx) => {
+                console.log(
+                    `#${idx + 1} → Pack_No: ${dup.Pack_No || "N/A"}, Pack_ID: ${dup.Pack_ID || "N/A"}`
+                );
+            });
+        } else {
+            console.log("✅ No duplicates found for Pack_No:", last6Digits);
+        }
 
     } catch (error) {
         console.error("Error in getGlobalIngersollData:", error.message);
