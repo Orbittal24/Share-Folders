@@ -1,53 +1,59 @@
-const response = await fetch("https://Misapp.tataautocomp.com:5555/station_interlock", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/json",
-    },
-    body: JSON.stringify(requestData),
-});
-
-
-{
-  "station_id": 8,
-  "line_id": 1,
-  "customer_qrcode": "01TMB04T100024F6P0100001"
-}
-
-
-///////////////////////////////
-socket.on("getFinalQRCodeStatus_nova_pa_gun5", async (battery_qrcode) => {
+socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
     try {
-        const requestData = {
-            station_id: 7,
-            line_id: 4,
-            customer_qrcode: battery_qrcode
-        };
-        console.log("requestData:::::::", requestData);
+        console.log('pack_name, pack_no:::::::::::', pack_name, pack_no);
 
-        // Call API
-        const response = await fetch("https://Misapp.tataautocomp.com:5555/station_interlock", {
-            method: "POST",
+        // Step 1: Get pack_id using pack_name
+        const apiUrl = `https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name.trim())}`;
+
+        const response = await fetch(apiUrl, {
+            method: "GET",
             headers: {
                 "Content-Type": "application/json",
-            },
-            body: JSON.stringify(requestData),
+            }
         });
 
         if (!response.ok) {
-            console.error("Interlock API error:", response.status, response.statusText);
-            socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+            console.error("Pack API error:", response.status, response.statusText);
             return;
         }
 
-        // Parse JSON body
         const result = await response.json();
-        console.log("API result:", result);
+        console.log("Pack API result:", JSON.stringify(result, null, 2));
 
-        // Send entire API response back to frontend
-        socket.emit("setFinalQRCodeStatus", result, battery_qrcode);
+        // Extract pack_id
+        let pack_id = null;
+        if (Array.isArray(result) && result.length > 0) {
+            pack_id = result[0].pack_id || null;
+        }
+
+        if (!pack_id) {
+            console.error("No pack_id found for pack_name:", pack_name);
+            return;
+        }
+
+        console.log("Resolved pack_id:", pack_id);
+
+        // Step 2: Call another API with pack_id
+        const secondApiUrl = `https://Misapp.tataautocomp.com:5555/another_endpoint?pack_id=${pack_id}&pack_no=${pack_no}`;
+
+        const secondResponse = await fetch(secondApiUrl, {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+            }
+        });
+
+        if (!secondResponse.ok) {
+            console.error("Second API error:", secondResponse.status, secondResponse.statusText);
+            return;
+        }
+
+        const secondResult = await secondResponse.json();
+        console.log("Second API result:", JSON.stringify(secondResult, null, 2));
+
+        // You can now use secondResult further (process, save to DB, etc.)
 
     } catch (error) {
-        console.error("API error:", error.message);
-        socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+        console.error("Error in getGlobalIngersollData:", error.message);
     }
 });
