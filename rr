@@ -1,8 +1,10 @@
+back
+
 socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
     console.log('pack_name, pack_no:::::::::::', pack_name, pack_no);
 
     try {
-        // First API call to get Pack_ID
+        // 1️⃣ First API: Get Pack_ID
         const packResponse = await fetch(`https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name)}`);
         const packData = await packResponse.json();
         console.log("Pack API result:", packData);
@@ -13,11 +15,9 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
         }
 
         const pack_id = packData[0].Pack_ID;
-
-        // Extract last 6 digits of pack_no
         const last6 = pack_no.slice(-6);
 
-        // Second API call using pack_id + last6
+        // 2️⃣ Second API: Get Pack_No + Pack_creation_Date
         const dupResponse = await fetch(`https://Misapp.tataautocomp.com:5555/pack-duplicates?Pack_No=${last6}&Pack_ID=${pack_id}`);
         const dupData = await dupResponse.json();
         console.log("Second API result:", dupData);
@@ -30,14 +30,14 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
         const packNumber = dupData[0].Pack_No;
         const packCreationDate = dupData[0].Pack_creation_Date;
 
-        // Convert packCreationDate to dd-mm-yy
+        // Format packCreationDate -> dd-mm-yy
         const dateObj = new Date(packCreationDate);
         const dd = String(dateObj.getDate()).padStart(2, "0");
         const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
         const yy = String(dateObj.getFullYear()).slice(-2);
-        const formattedDate = `${dd}-${mm}-${yy}`;  // dd-mm-yy
+        const formattedDate = `${dd}-${mm}-${yy}`;
 
-        // Third API call
+        // 3️⃣ Third API
         const thirdApiUrl = `https://Misapp.tataautocomp.com:5555/tray-bolting-like-table?pack_number=${packNumber}&pack_date=${formattedDate}`;
         console.log("Third API URL:", thirdApiUrl);
 
@@ -45,7 +45,36 @@ socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
         const thirdData = await thirdResponse.json();
         console.log("Third API result:", thirdData);
 
+        // 🔹 Emit to frontend
+        socket.emit("setGlobalIngersollData", thirdData, dupData, pack_no);
+
     } catch (error) {
         console.error("Error in API flow:", error);
+        socket.emit("setGlobalIngersollData", { error: true }, [], pack_no);
     }
 });
+
+
+front
+
+socket.on('setGlobalIngersollData', (ingwholeData, ingpackDAta, pack_noo) => {
+    console.log("check_iter", ingwholeData, ingpackDAta, pack_noo);
+
+    // 🔹 If third API returned no data
+    if (ingwholeData && ingwholeData.message === "No data found") {
+        Swal.fire({
+            title: `Tray Assembly Linking Pending!`,
+            text: `Pack No: ${pack_noo}`,
+            icon: "warning",
+            confirmButtonText: "OK",
+            allowOutsideClick: false,
+            allowEscapeKey: false
+        });
+        return; // stop further execution
+    }
+
+    // 🔹 Else continue with your existing torque checking logic
+    // (your full existing code goes here unchanged)
+    // ...
+});
+
