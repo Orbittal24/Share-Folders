@@ -1,53 +1,51 @@
-import fetch from "node-fetch";
+socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
+    console.log('pack_name, pack_no:::::::::::', pack_name, pack_no);
 
-socket.on("getGlobalIngersollData", async (pack_name, pack_no) => {
     try {
-        console.log("pack_name, pack_no:::::::::::", pack_name, pack_no);
+        // First API call to get Pack_ID
+        const packResponse = await fetch(`https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name)}`);
+        const packData = await packResponse.json();
+        console.log("Pack API result:", packData);
 
-        // ✅ Step 1: First API → Get Pack_ID from Pack_Name
-        const firstApiUrl = `https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name.trim())}`;
-        const firstRes = await fetch(firstApiUrl);
-        const firstData = await firstRes.json();
-        console.log("Pack API result:", JSON.stringify(firstData, null, 2));
-
-        if (!firstData.length || !firstData[0].Pack_ID) {
-            console.error("No Pack_ID found for pack_name:", pack_name);
+        if (!packData || packData.length === 0 || !packData[0].Pack_ID) {
+            console.log(`No pack_id found for pack_name: ${pack_name}`);
             return;
         }
 
-        const pack_id = firstData[0].Pack_ID;
+        const pack_id = packData[0].Pack_ID;
 
-        // ✅ Step 2: Second API → Use last 6 digits of pack_no + Pack_ID
-        const pack_number = pack_no.slice(-6); // last 6 digits
-        const secondApiUrl = `https://Misapp.tataautocomp.com:5555/pack-duplicates?Pack_No=${pack_number}&Pack_ID=${pack_id}`;
-        const secondRes = await fetch(secondApiUrl);
-        const secondData = await secondRes.json();
-        console.log("Second API raw result:", JSON.stringify(secondData, null, 2));
+        // Extract last 6 digits of pack_no
+        const last6 = pack_no.slice(-6);
 
-        if (!secondData.length) {
-            console.error("No data found in second API for:", pack_no);
+        // Second API call using pack_id + last6
+        const dupResponse = await fetch(`https://Misapp.tataautocomp.com:5555/pack-duplicates?Pack_No=${last6}&Pack_ID=${pack_id}`);
+        const dupData = await dupResponse.json();
+        console.log("Second API result:", dupData);
+
+        if (!dupData || dupData.length === 0) {
+            console.log(`No duplicate pack data found for pack_no: ${last6}`);
             return;
         }
 
-        const { Pack_No, Pack_creation_Date } = secondData[0];
+        const packNumber = dupData[0].Pack_No;
+        const packCreationDate = dupData[0].Pack_creation_Date;
 
-        // ✅ Format date to YY-MM-DD
-        function formatDateForApi(isoDateString) {
-            const [year, month, day] = isoDateString.split("T")[0].split("-");
-            return `${year.slice(2)}-${month}-${day}`; // 2025-07-05 → 25-07-05
-        }
+        // Convert packCreationDate to dd-mm-yy
+        const dateObj = new Date(packCreationDate);
+        const dd = String(dateObj.getDate()).padStart(2, "0");
+        const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
+        const yy = String(dateObj.getFullYear()).slice(-2);
+        const formattedDate = `${dd}-${mm}-${yy}`;  // dd-mm-yy
 
-        const formattedDate = formatDateForApi(Pack_creation_Date);
-
-        // ✅ Step 3: Third API call using Pack_No & formatted date
-        const thirdApiUrl = `https://Misapp.tataautocomp.com:5555/tray-bolting-like-table?pack_number=${Pack_No}&pack_date=${formattedDate}`;
+        // Third API call
+        const thirdApiUrl = `https://Misapp.tataautocomp.com:5555/tray-bolting-like-table?pack_number=${packNumber}&pack_date=${formattedDate}`;
         console.log("Third API URL:", thirdApiUrl);
 
-        const thirdRes = await fetch(thirdApiUrl);
-        const thirdData = await thirdRes.json();
-        console.log("Third API result:", JSON.stringify(thirdData, null, 2));
+        const thirdResponse = await fetch(thirdApiUrl);
+        const thirdData = await thirdResponse.json();
+        console.log("Third API result:", thirdData);
 
-    } catch (err) {
-        console.error("Error in API chain:", err.message);
+    } catch (error) {
+        console.error("Error in API flow:", error);
     }
 });
