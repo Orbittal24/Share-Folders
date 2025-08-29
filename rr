@@ -1,72 +1,49 @@
-import fetch from "node-fetch";   // if you're in Node.js <18, otherwise remove this
+import fetch from "node-fetch";
 
-// Socket event
-socket.on('getGlobalIngersollData', async (pack_name, pack_no) => {
+socket.on("getGlobalIngersollData", async (pack_name, pack_no) => {
     try {
-        console.log('pack_name, pack_no :::::::::::::', pack_name, pack_no);
+        console.log("pack_name, pack_no:::::::::::", pack_name, pack_no);
 
-        // ------------------- STEP 1: Call first API -------------------
-        const apiUrl = `https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name.trim())}`;
+        // ✅ Step 1: First API → Get Pack_ID from Pack_Name
+        const firstApiUrl = `https://Misapp.tataautocomp.com:5555/packs?Pack_Name=${encodeURIComponent(pack_name.trim())}`;
+        const firstRes = await fetch(firstApiUrl);
+        const firstData = await firstRes.json();
+        console.log("Pack API result:", JSON.stringify(firstData, null, 2));
 
-        const response = await fetch(apiUrl, {
-            method: "GET",
-            headers: { "Content-Type": "application/json" }
-        });
-
-        if (!response.ok) {
-            console.error("Pack API error:", response.status, response.statusText);
+        if (!firstData.length || !firstData[0].Pack_ID) {
+            console.error("No Pack_ID found for pack_name:", pack_name);
             return;
         }
 
-        const result = await response.json();
-        console.log("Pack API result:", JSON.stringify(result, null, 2));
+        const pack_id = firstData[0].Pack_ID;
 
-        let pack_id = null;
-        if (Array.isArray(result) && result.length > 0) {
-            // ✅ fixed key name: Pack_ID (case sensitive)
-            pack_id = result[0].Pack_ID || null;
-        }
+        // ✅ Step 2: Second API → Use last 6 digits of pack_no + Pack_ID
+        const pack_number = pack_no.slice(-6); // last 6 digits
+        const secondApiUrl = `https://Misapp.tataautocomp.com:5555/pack-duplicates?Pack_No=${pack_number}&Pack_ID=${pack_id}`;
+        const secondRes = await fetch(secondApiUrl);
+        const secondData = await secondRes.json();
+        console.log("Second API raw result:", JSON.stringify(secondData, null, 2));
 
-        if (!pack_id) {
-            console.error("No pack_id found for pack_name:", pack_name);
+        if (!secondData.length) {
+            console.error("No data found in second API for:", pack_no);
             return;
         }
 
-        console.log("Resolved pack_id:", pack_id);
+        const { Pack_No, Pack_creation_Date } = secondData[0];
 
-        // ------------------- STEP 2: Extract last 6 digits -------------------
-        const last6Digits = pack_no.slice(-6);
-        console.log("Last 6 digits of pack_no:", last6Digits);
+        // ✅ Format date to YY-MM-DD
+        const [year, month, day] = Pack_creation_Date.split("T")[0].split("-");
+        const formattedDate = `${year.slice(2)}-${month}-${day}`; // e.g. 2025-08-20 → 25-08-20
 
-        // ------------------- STEP 3: Call second API -------------------
-        const secondApiUrl = `https://Misapp.tataautocomp.com:5555/pack-duplicates?Pack_No=${last6Digits}&Pack_ID=${pack_id}`;
+        // ✅ Step 3: Third API call using Pack_No & formatted date
+        const thirdApiUrl = `https://Misapp.tataautocomp.com:5555/tray-bolting-like-table?pack_number=${Pack_No}&pack_date=${formattedDate}`;
+        console.log("Third API URL:", thirdApiUrl);
 
-        const secondResponse = await fetch(secondApiUrl, {
-            method: "GET",
-            headers: { "Content-Type": "application/json" }
-        });
+        const thirdRes = await fetch(thirdApiUrl);
+        const thirdData = await thirdRes.json();
+        console.log("Third API result:", JSON.stringify(thirdData, null, 2));
 
-        if (!secondResponse.ok) {
-            console.error("Second API error:", secondResponse.status, secondResponse.statusText);
-            return;
-        }
-
-        const secondResult = await secondResponse.json();
-        console.log("Second API raw result:", JSON.stringify(secondResult, null, 2));
-
-        // ------------------- STEP 4: Clean output -------------------
-        if (Array.isArray(secondResult) && secondResult.length > 0) {
-            console.log("Duplicates found:");
-            secondResult.forEach((dup, idx) => {
-                console.log(
-                    `#${idx + 1} → Pack_No: ${dup.Pack_No || "N/A"}, Pack_ID: ${dup.Pack_ID || "N/A"}`
-                );
-            });
-        } else {
-            console.log("✅ No duplicates found for Pack_No:", last6Digits);
-        }
-
-    } catch (error) {
-        console.error("Error in getGlobalIngersollData:", error.message);
+    } catch (err) {
+        console.error("Error in API chain:", err.message);
     }
 });
