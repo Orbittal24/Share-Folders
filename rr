@@ -32,8 +32,12 @@ socket.on("getGlobalIngersollData", async (pack_name, pack_no) => {
         const { Pack_No, Pack_creation_Date } = secondData[0];
 
         // ✅ Format date to YY-MM-DD
-        const [year, month, day] = Pack_creation_Date.split("T")[0].split("-");
-        const formattedDate = `${year.slice(2)}-${month}-${day}`; // e.g. 2025-08-20 → 25-08-20
+        function formatDateForApi(isoDateString) {
+            const [year, month, day] = isoDateString.split("T")[0].split("-");
+            return `${year.slice(2)}-${month}-${day}`; // 2025-07-05 → 25-07-05
+        }
+
+        const formattedDate = formatDateForApi(Pack_creation_Date);
 
         // ✅ Step 3: Third API call using Pack_No & formatted date
         const thirdApiUrl = `https://Misapp.tataautocomp.com:5555/tray-bolting-like-table?pack_number=${Pack_No}&pack_date=${formattedDate}`;
