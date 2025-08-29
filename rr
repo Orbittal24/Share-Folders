@@ -4,17 +4,7 @@ socket.on('setGlobalIngersollData', (ingwholeData, ingpackDAta, pack_noo) => {
     // If third API returned no data → Tray Assembly Pending
     if (ingwholeData && ingwholeData.message === "No data found") {
 
-        Swal.fire({
-            title: `Tray Assembly Linking Pending!`,
-            html: `<span style="font-size:16px;">Pack No: <b>${pack_noo}</b></span>`,
-            icon: "warning",
-            showConfirmButton: true,
-            confirmButtonText: "OK",
-            allowOutsideClick: false,
-            allowEscapeKey: false,
-            allowEnterKey: false
-        }).then(() => {
-            // Re-show the same popup so it never goes away
+        const showTrayPendingPopup = () => {
             Swal.fire({
                 title: `Tray Assembly Linking Pending!`,
                 html: `<span style="font-size:16px;">Pack No: <b>${pack_noo}</b></span>`,
@@ -24,11 +14,15 @@ socket.on('setGlobalIngersollData', (ingwholeData, ingpackDAta, pack_noo) => {
                 allowOutsideClick: false,
                 allowEscapeKey: false,
                 allowEnterKey: false
+            }).then(() => {
+                // Re-show popup indefinitely
+                showTrayPendingPopup();
             });
-        });
+        };
 
+        showTrayPendingPopup(); // initial call
         return; // stop further processing
     }
 
-    // Otherwise continue with your torque checking logic...
+    // Otherwise continue with your existing torque checking logic...
 });
