@@ -1,0 +1,380 @@
+// const express = require('express');
+// const cors = require('cors');
+// // const { SerialPort } = require('serialport');
+// const { ReadlineParser } = require('@serialport/parser-readline');
+// const fs = require('fs');
+// const axios = require('axios'); // Add axios for making HTTP requests
+// const SerialPort = require('serialport');
+
+// // Setup logging
+// const logStream = fs.createWriteStream('server.log', { flags: 'a' });
+// console.log = function(...args) {
+//   logStream.write(new Date().toISOString() + ' - ' + args.join(' ') + '\n');
+//   process.stdout.write(args.join(' ') + '\n');
+// };
+
+// // Simulate serial port with random data generation
+// class VirtualHiokiPort {
+//   constructor() {
+//     this.parser = new ReadlineParser({ delimiter: '\n' });
+//     this.interval = null;
+//     // Define the acceptable ranges
+//     this.voltageRange = { min: 3.14, max: 5.82 };
+//     this.irRange = { min: 0.7, max: 2.5 };
+//     // Set out-of-range probability to 0 to ensure all values are in range
+//     this.outOfRangeProbability = 0;
+//   }
+
+//   pipe(parser) {
+//     return this.parser;
+//   }
+
+//   write(command) {
+//     console.log('Command sent:', command.toString().trim());
+    
+//     return new Promise((resolve) => {
+//       setTimeout(() => {
+//         let response = '';
+//         if (command.includes('*IDN?')) {
+//           response = 'HIOKI,FT6381,123456,1.00\n';
+//         } 
+//         else if (command.includes(':MEASure:RESistance?')) {
+//           // Generate resistance always in range
+//           const resistance = (this.irRange.min + 
+//                             Math.random() * (this.irRange.max - this.irRange.min))
+//                             .toFixed(3);
+//           response = `${resistance} OHM\n`;
+//         }
+//         else if (command.includes(':FETch?')) {
+//           // Generate voltage and resistance always in range
+//           const voltage = (this.voltageRange.min + 
+//                          Math.random() * (this.voltageRange.max - this.voltageRange.min))
+//                          .toFixed(2);
+//           const resistance = (this.irRange.min + 
+//                             Math.random() * (this.irRange.max - this.irRange.min))
+//                             .toFixed(3);
+          
+//           response = `VOLT:${voltage}V,IR:${resistance}MΩ\n`;
+//         }
+//         else if (command.includes(':MEMory:STATe')) {
+//           response = 'MEMORY STATE: ON\n';
+//         }
+
+//         if (response) {
+//           this.parser.emit('data', response);
+//         }
+//         resolve(response);
+//       }, 100);
+//     });
+//   }
+
+//   on(event, callback) {
+//     if (event === 'error') {
+//       setInterval(() => {
+//         if (Math.random() < 0.01) {
+//           callback(new Error('Simulated serial port error'));
+//         }
+//       }, 10000);
+//     }
+//   }
+// }
+
+// // Create Express app
+// const app = express();
+// app.use(cors());
+// app.use(express.json());
+
+// app.use(cors({
+//   origin: '*',
+//   methods: ['GET', 'POST', 'OPTIONS']
+// }));
+
+// // Use virtual port
+// const port = new VirtualHiokiPort();
+// const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
+
+// let latestData = {
+//   voltage: '0.00',
+//   resistance: '0.00',
+//   timestamp: new Date().toISOString(),   
+//   Line_no:1
+// };
+
+// // Parse incoming data
+// parser.on('data', (data) => {
+//   console.log('Received Data:', data.trim());
+  
+//   // Parse the data from the format "VOLT:12.34V,IR:56.78MΩ"
+//   if (data.includes('VOLT:') && data.includes('IR:')) {
+//     const voltageMatch = data.match(/VOLT:([\d.]+)V/);
+//     const irMatch = data.match(/IR:([\d.]+)MΩ/);
+
+//     if (voltageMatch && irMatch) {
+//       latestData = {
+//         voltage: voltageMatch[1],
+//         resistance: irMatch[1],
+//         timestamp: new Date().toISOString(),
+//         Line_no:1
+//       };
+
+//        sendToFastAPI(latestData);
+//     }
+//   }
+// });
+
+// // API Endpoints
+// app.get('/api/measurements/latest', (req, res) => {
+//   res.json(latestData);
+// });
+
+ 
+// // Function to send data to FastAPI
+// async function sendToFastAPI(data) {
+//   try {
+//     const response = await fetch('http://192.168.0.172:9999/api/measurements', {
+//       method: 'POST',
+//       headers: { 'Content-Type': 'application/json' },
+//       body: JSON.stringify({
+//         voltage: data.voltage,
+//         resistance: data.resistance,
+//         timestamp: new Date().toISOString(),
+//         Line_no: data.Line_no
+//       }),
+//     });
+//     const result = await response.json();
+//     console.log('Data sent to FastAPI:', result);
+//   } catch (error) {
+//     console.error('Error sending to FastAPI:', error);
+//   }
+// }
+
+// app.post('/api/commands', async (req, res) => {
+//   const { command } = req.body;
+//   if (!command) {
+//     return res.status(400).json({ error: 'Command is required' });
+//   }
+
+//   try {
+//     const response = await port.write(command + '\n');
+//     res.json({ success: true, response });
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// });
+
+// // Initial commands
+// (async () => {
+//   await port.write("*IDN?\n");
+//   await port.write(":MEASure:RESistance?\n");
+//   await port.write(":MEMory:STATe ON\n");
+
+//   // Regular measurements
+//   setInterval(() => {
+//     port.write(":FETch?\n");
+//   }, 1000);
+// })();
+
+// // Start server
+// const PORT = 9123;
+// app.listen(PORT, '0.0.0.0', () => {
+//   console.log(`API server running on http://192.168.0.172:${PORT}`);
+// });
+
+// // Keep process alive
+// process.stdin.resume();
+// process.on('SIGINT', () => {
+//   console.log('Shutting down server...');
+//   server.close(() => process.exit());
+// });
+
+
+const express = require('express');
+const cors = require('cors');
+const { ReadlineParser } = require('@serialport/parser-readline');
+const fs = require('fs');
+const SerialPort = require('serialport');
+
+// Set static Line_no to 1
+const line_no = 1;
+console.log(`Starting server with static Line_no: ${line_no}`);
+
+// Setup logging
+const logStream = fs.createWriteStream('server.log', { flags: 'a' });
+console.log = function(...args) {
+  logStream.write(new Date().toISOString() + ' - ' + args.join(' ') + '\n');
+  process.stdout.write(args.join(' ') + '\n');
+};
+
+// Simulate serial port with random data generation
+class VirtualHiokiPort {
+  constructor() {
+    this.parser = new ReadlineParser({ delimiter: '\n' });
+    this.interval = null;
+    // Define the acceptable ranges
+    this.voltageRange = { min: 3.14, max: 5.82 };
+    this.irRange = { min: 0.7, max: 2.5 };
+    // Set out-of-range probability to 0 to ensure all values are in range
+    this.outOfRangeProbability = 0;
+  }
+
+  pipe(parser) {
+    return this.parser;
+  }
+
+  write(command) {
+    console.log('Command sent:', command.toString().trim());
+    
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        let response = '';
+        if (command.includes('*IDN?')) {
+          response = 'HIOKI,FT6381,123456,1.00\n';
+        } 
+        else if (command.includes(':MEASure:RESistance?')) {
+          // Generate resistance always in range
+          const resistance = (this.irRange.min + 
+                            Math.random() * (this.irRange.max - this.irRange.min))
+                            .toFixed(3);
+          response = `${resistance} OHM\n`;
+        }
+        else if (command.includes(':FETch?')) {
+          // Generate voltage and resistance always in range
+          const voltage = (this.voltageRange.min + 
+                         Math.random() * (this.voltageRange.max - this.voltageRange.min))
+                         .toFixed(2);
+          const resistance = (this.irRange.min + 
+                            Math.random() * (this.irRange.max - this.irRange.min))
+                            .toFixed(3);
+          
+          response = `VOLT:${voltage}V,IR:${resistance}MΩ\n`;
+        }
+        else if (command.includes(':MEMory:STATe')) {
+          response = 'MEMORY STATE: ON\n';
+        }
+
+        if (response) {
+          this.parser.emit('data', response);
+        }
+        resolve(response);
+      }, 1000);
+    });
+  }
+
+  on(event, callback) {
+    if (event === 'error') {
+      setInterval(() => {
+        if (Math.random() < 0.01) {
+          callback(new Error('Simulated serial port error'));
+        }
+      }, 1000);
+    }
+  }
+}
+
+// Create Express app
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS']
+}));
+
+// Use virtual port
+const port = new VirtualHiokiPort();
+const parser = port.pipe(new ReadlineParser({ delimiter: '\n' }));
+
+let latestData = {
+  voltage: '0.00',
+  resistance: '0.00',
+  timestamp: new Date().toISOString(),   
+  line_no: line_no // Use the static line_no
+};
+
+// Parse incoming data
+parser.on('data', (data) => {
+  console.log('Received Data:', data.trim());
+  
+  // Parse the data from the format "VOLT:12.34V,IR:56.78MΩ"
+  if (data.includes('VOLT:') && data.includes('IR:')) {
+    const voltageMatch = data.match(/VOLT:([\d.]+)V/);
+    const irMatch = data.match(/IR:([\d.]+)MΩ/);
+
+    if (voltageMatch && irMatch) {
+      latestData = {
+        voltage: voltageMatch[1],
+        resistance: irMatch[1],
+        timestamp: new Date().toISOString(),
+        line_no: line_no // Use the static line_no
+      };
+      sendToFastAPI(latestData);
+     
+    }
+  }
+});
+
+// API Endpoints
+app.get('/api/measurements/latest', (req, res) => {
+  res.json(latestData);
+});
+
+// Function to send data to FastAPI
+async function sendToFastAPI(data) {
+ 
+  try {
+    const response = await fetch('http://192.168.0.172:9999/api/measurements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        voltage: data.voltage,
+        resistance: data.resistance,
+        timestamp: data.timestamp,
+        line_no: data.line_no // Static line_no of 1
+      }),
+    });
+    const result = await response.json();
+    console.log('Data sent to FastAPI:', result);
+  } catch (error) {
+    console.error('Error sending to FastAPI:', error);
+  }
+}
+
+app.post('/api/commands', async (req, res) => {
+  const { command } = req.body;
+  if (!command) {
+    return res.status(400).json({ error: 'Command is required' });
+  }
+
+  try {
+    const response = await port.write(command + '\n');
+    res.json({ success: true, response });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Initial commands
+(async () => {
+  await port.write("*IDN?\n");
+  await port.write(":MEASure:RESistance?\n");
+  await port.write(":MEMory:STATe ON\n");
+
+  // Regular measurements
+  setInterval(() => {
+    port.write(":FETch?\n");
+  }, 1000);
+})();
+
+// Start server
+const PORT = 9123;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`API server running on http://192.168.0.172:${PORT}`);
+});
+
+// Keep process alive
+process.stdin.resume();
+process.on('SIGINT', () => {
+  console.log('Shutting down server...');
+  process.exit();
+});
