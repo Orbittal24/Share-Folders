@@ -78,3 +78,22 @@ EXEC InsertEOLUsers
 Go to the official SSMS download page: https://aka.ms/ssmsfullsetup
 
  
+441	NOVA Prismatic LR	1	Tray_Assembly	4	HV connector LR	0	4-5 Nm
+442	NOVA Prismatic LR	1	Tray_Assembly	4	Coolant connector inlet LR	0	2-3 Nm
+443	NOVA Prismatic LR	1	Tray_Assembly	4	Coolant connector outlet LR	0	2-3 Nm
+444	NOVA Prismatic LR	1	Tray_Assembly	4	BDU mounting LR	0	4-5 Nm
+445	NOVA Prismatic LR	1	Tray_Assembly	2	Fuse mounting LR	0	6-8 Nm
+446	NOVA Prismatic LR	1	Tray_Assembly	2	Pyro switching mounting LR	0	4-5 Nm
+447	NOVA Prismatic LR	1	Tray_Assembly	2	Smoke sensor LR	0	4-5 Nm
+448	NOVA Prismatic LR	1	Tray_Assembly	2	Relay mounting LR	0	6-8 Nm
+449	NOVA Prismatic LR	1	Tray_Assembly	2	Shunt mounting LR	0	6-8 Nm
+450	NOVA Prismatic LR	1	Tray_Assembly	1	HV +ve to pyro switch busbar LR	0	6-8 Nm
+451	NOVA Prismatic LR	1	Tray_Assembly	1	Pyro switch to HV +ve busbar LR	0	14-16 Nm
+452	NOVA Prismatic LR	1	Tray_Assembly	2	HV -ve to relay busbar LR	0	6-8 Nm
+453	NOVA Prismatic LR	1	Tray_Assembly	2	Relay to shunt +ve busbar LR	0	6-8 Nm
+454	NOVA Prismatic LR	1	Tray_Assembly	1	Shunt -ve to module A1 busbar LR	0	6-8 Nm
+455	NOVA Prismatic LR	1	Tray_Assembly	1	Pyro switch to fuse busbar LR	0	14-16 Nm
+457	NOVA Prismatic LR	1	Tray_Assembly	2	Fuse busbar LR	0	14-16 Nm
+458	NOVA Prismatic LR	1	Tray_Assembly	2	BDU to fuse busbar	0	6-8 Nm
+459	NOVA Prismatic LR	1	Tray_Assembly	2	BDU to module A7 busbar LR	0	6-8 Nm
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL
