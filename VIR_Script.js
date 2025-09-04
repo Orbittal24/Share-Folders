@@ -321,3 +321,6 @@ async function main() {
 
 main();
 
+
+C:\Users\C01063714\Desktop\VIR_OldToNew_Script>node VIR_OldToNewScript.js
+❌ Main error: Server requires encryption, set 'encrypt' config option to true.
