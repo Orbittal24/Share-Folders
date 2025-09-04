@@ -70,6 +70,67 @@ BEGIN
     FROM inserted;
 END
 
+
+
+USE [taco_treceability]
+GO
+
+INSERT INTO [taco_treceability].[test_cell_table_completed_dummy_anil]
+           ([point_1]
+           ,[point_2]
+           ,[voltage]
+           ,[IR]
+           ,[status]
+           ,[bms_no]
+           ,[battery_id]
+           ,[final_qrcode]
+           ,[module_barcode]
+           ,[actual_no]
+           ,[remark_by]
+           ,[checked_by]
+           ,[made_by]
+           ,[module_group]
+           ,[test_date]
+           ,[shift]
+           ,[min_voltage]
+           ,[max_voltage]
+           ,[diff_min_max]
+           ,[total_v]
+           ,[total_IR]
+           ,[bypass_operator]
+           ,[bypass_reason]
+           ,[bypass_date]
+           ,[ibb_barcode])
+     VALUES
+           ('8403182'  -- point_1 (varchar)
+           ,'A'        -- point_2 (varchar)
+           ,'B'        -- voltage (varchar) - Note: This seems unusual (typically numeric)
+           ,'3.22'     -- IR (varchar) - Note: This seems swapped with voltage
+           ,'0.279'    -- status (varchar) - Note: Check if this is correct
+           ,'NULL'     -- bms_no (varchar)
+           ,'-'        -- battery_id (varchar)
+           ,'DJ2028-F930002420'  -- final_qrcode (varchar)
+           ,'01TMB04T100024E930200013'  -- module_barcode (varchar)
+           ,'49'       -- actual_no (varchar)
+           ,'Voltage:48.256 | IR:4.181'  -- remark_by (varchar)
+           ,'line-4'   -- checked_by (varchar)
+           ,'dhananjay'-- made_by (varchar)
+           ,'C4'       -- module_group (varchar)
+           ,'2024-9-03 9:32:10'  -- test_date (varchar)
+           ,'1'        -- shift (varchar)
+           ,'3.213'    -- min_voltage (varchar)
+           ,'3.22'     -- max_voltage (varchar)
+           ,'0.007000000000000117'  -- diff_min_max (varchar)
+           ,NULL       -- total_v (varchar) - null
+           ,NULL       -- total_IR (varchar) - null
+           ,NULL       -- bypass_operator (varchar) - null
+           ,NULL       -- bypass_reason (varchar) - null
+           ,NULL       -- bypass_date (datetime) - null
+           ,NULL)      -- ibb_barcode (varchar) - null
+GO
+
+
+
 const sql = require("mssql");
 const axios = require("axios");
 
