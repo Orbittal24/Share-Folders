@@ -1,33 +1,246 @@
-const net = require('net');
+const SerialPort = require('serialport');
+const Readline = SerialPort.parsers.Readline;
+const port = new SerialPort('COM4'); //// counter 45 idFF
+var W3CWebSocket = require('websocket').w3cwebsocket;
+var dataString='';
+// Websocket Client - Send data to Cockpit server
+        var connectionValid = false;
+        var healthParaInterval;
+        loop();
 
-// TCP/IP server details
-const HOST = '10.9.4.28';  // Replace with server IP
-const PORT = 6276;         // Replace with server port
+        function loop() {
+            // var ws = new W3CWebSocket('ws://10.9.1.115:9001', 'echo-protocol');
+			//var ws = new W3CWebSocket('ws://localhost:9001' ' 'echo-protocol');
+            var ws = new W3CWebSocket('ws://10.9.4.28:6276', 'echo-protocol');
+            ws.open = function() {
+                console.log('Connected to server');
+            }
+            ws.onconnect = function() {
+                console.log('Onconnect to server');
+            }
 
-// Create a socket and connect
-const client = new net.Socket();
+            ws.onclose = function(e) {
+                console.log('Socket is closed.');
+                connectionValid = false;
+            }
 
-client.connect(PORT, HOST, () => {
-  console.log('Connected to TCP server');
+            ws.onmessage = function(e) {
+                console.log('Message:', e.data);
+                connectionValid = true;
+            }
 
-  // Send some data
-  client.write('Hello from Node TCP client!\n');
+            ws.error = function(err) {
+                console.log('Socket encountered error:', err.message);
+            }
+            healthParaInterval = setTimeout(function() {
+                if (connectionValid == true) {
+                    // check 
+                    var getLimitsQry = `SELECT * FROM all_real_time_parameter_list`;
+                    var obj;
+                    var limitsArray = [];
+
+                    // connection.query(getLimitsQry, function(err, result) {
+                    //     if (err) throw err;
+                    //     var compareStr;
+                    //     var currentStr = ``;
+                    //     var objIndex;
+                    //     for (var i in result) {
+                    //         compareStr = `${result[i].channel}|${result[i].machine}|${result[i].parameter_name}`;
+                    //         obj = {
+                    //             channel: result[i].channel,
+                    //             machine: result[i].machine,
+                    //             parameter: result[i].parameter_name,
+                    //             low_low_red: result[i].low_low_red,
+                    //             low_high_red: result[i].low_high_red,
+                    //             low_low_yellow: result[i].low_low_yellow,
+                    //             low_high_yellow: result[i].low_high_yellow,
+                    //             low_green: result[i].low_green,
+                    //             high_green: result[i].high_green,
+                    //             high_low_yellow: result[i].high_low_yellow,
+                    //             high_high_yellow: result[i].high_high_yellow,
+                    //             high_low_red: result[i].high_low_red,
+                    //             high_high_red: result[i].high_high_red,
+                    //         }
+                    //         limitsArray.push(obj);
+                    //     }
+
+                    //     // process limits array
+
+                    //     if (globalDgbbCh4List[29].value == "1") {
+                    //         if (parseInt(sgb1003AutoRunning) == 1) {
+                    //             globalDgbbCh4List[29].status = "red";
+                    //         } else {
+                    //             globalDgbbCh4List[29].status = "green";
+                    //         }
+                    //     } else {
+                    //         globalDgbbCh4List[29].status = "green";
+                    //     }
+                    //     var autoRunning;
+                    //     var machineArray = ["SHG-1001", "SHG-845", "SSB-1080", "SSB-1011", "SGB-1003"];
+                    //     for (var i = 0; i < limitsArray.length; i++) {
+                    //         objIndex = findWithAttr(globalDgbbCh4List, 'channel', 'machine', 'parameter', limitsArray[i].channel, limitsArray[i].machine, limitsArray[i].parameter);
+
+                    //         if (objIndex > -1) {
+                    //             switch (globalDgbbCh4List[objIndex].machine) {
+                    //                 case "SHG-1001":
+                    //                     autoRunning = shg1001AutoRunning;
+                    //                     break;
+                    //                 case "SHG-845":
+                    //                     autoRunning = shg845AutoRunning;
+                    //                     break;
+                    //                 case "SSB-1080":
+                    //                     autoRunning = ssb1080AutoRunning;
+                    //                     break;
+                    //                 case "SSB-1011":
+                    //                     autoRunning = ssb1011AutoRunning;
+                    //                     break;
+                    //                 case "SGB-1003":
+                    //                     autoRunning = sgb1003AutoRunning;
+                    //                     break;
+                    //             }
+                    //             if (globalDgbbCh4List[objIndex].value == "NA" || globalDgbbCh4List[objIndex].value == "" || globalDgbbCh4List[objIndex].value == null || globalDgbbCh4List[objIndex].value == "null") {
+                    //                 globalDgbbCh4List[objIndex].status = "green";
+                    //             } else {
+                    //                 if (parseFloat(globalDgbbCh4List[objIndex].value) >= parseFloat(limitsArray[i].low_low_red) && parseFloat(globalDgbbCh4List[objIndex].value) < parseFloat(limitsArray[i].low_high_red)) {
+                    //                     if (objIndex == 0) {
+                    //                         if (parseFloat(globalDgbbCh4List[3].value) > 5) {
+                    //                             if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                                 if (parseInt(autoRunning) == 1) {
+                    //                                     globalDgbbCh4List[objIndex].status = "red";
+                    //                                 }
+                    //                             } else {
+                    //                                 globalDgbbCh4List[objIndex].status = "red";
+                    //                             }
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "green";
+                    //                         }
+                    //                     } else {
+                    //                         // globalDgbbCh4List[objIndex].status = "red";
+                    //                         if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                             if (parseInt(autoRunning) == 1) {
+                    //                                 globalDgbbCh4List[objIndex].status = "red";
+                    //                             }
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "red";
+                    //                         }
+                    //                     }
+
+                    //                 } else if (parseFloat(globalDgbbCh4List[objIndex].value) > parseFloat(limitsArray[i].low_low_yellow) && parseFloat(globalDgbbCh4List[objIndex].value) < parseFloat(limitsArray[i].low_high_yellow)) {
+                    //                     if (objIndex == 0) {
+                    //                         if (parseFloat(globalDgbbCh4List[3].value) > 5) {
+                    //                             if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                                 if (parseInt(autoRunning) == 1) {
+                    //                                     globalDgbbCh4List[objIndex].status = "yellow";
+                    //                                 }
+                    //                             } else {
+                    //                                 globalDgbbCh4List[objIndex].status = "yellow";
+                    //                             }
+                    //                             // globalDgbbCh4List[objIndex].status = "yellow";
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "green";
+                    //                         }
+                    //                     } else {
+                    //                         // globalDgbbCh4List[objIndex].status = "yellow";
+                    //                         if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                             if (parseInt(autoRunning) == 1) {
+                    //                                 globalDgbbCh4List[objIndex].status = "yellow";
+                    //                             }
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "yellow";
+                    //                         }
+                    //                     }
+                    //                 } else if (parseFloat(globalDgbbCh4List[objIndex].value) > parseFloat(limitsArray[i].low_green) && parseFloat(globalDgbbCh4List[objIndex].value) <= parseFloat(limitsArray[i].high_green)) {
+                    //                     globalDgbbCh4List[objIndex].status = "green";
+                    //                 } else if (parseFloat(globalDgbbCh4List[objIndex].value) > parseFloat(limitsArray[i].high_low_yellow) && parseFloat(globalDgbbCh4List[objIndex].value) <= parseFloat(limitsArray[i].high_high_yellow)) {
+                    //                     // globalDgbbCh4List[objIndex].status = "yellow";
+                    //                     if (objIndex == 0) {
+                    //                         if (parseFloat(globalDgbbCh4List[3].value) > 5) {
+                    //                             // globalDgbbCh4List[objIndex].status = "yellow";
+                    //                             if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                                 if (parseInt(autoRunning) == 1) {
+                    //                                     globalDgbbCh4List[objIndex].status = "yellow";
+                    //                                 }
+                    //                             } else {
+                    //                                 globalDgbbCh4List[objIndex].status = "yellow";
+                    //                             }
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "green";
+                    //                         }
+                    //                     } else {
+                    //                         // globalDgbbCh4List[objIndex].status = "yellow";
+                    //                         if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                             if (parseInt(autoRunning) == 1) {
+                    //                                 globalDgbbCh4List[objIndex].status = "yellow";
+                    //                             }
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "yellow";
+                    //                         }
+                    //                     }
+                    //                 } else if (parseFloat(globalDgbbCh4List[objIndex].value) > parseFloat(limitsArray[i].high_low_red) && parseFloat(globalDgbbCh4List[objIndex].value) <= parseFloat(limitsArray[i].high_high_red)) {
+                    //                     // globalDgbbCh4List[objIndex].status = "red";
+                    //                     if (objIndex == 0) {
+                    //                         if (parseFloat(globalDgbbCh4List[3].value) > 5) {
+                    //                             // globalDgbbCh4List[objIndex].status = "red";
+                    //                             if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                                 if (parseInt(autoRunning) == 1) {
+                    //                                     globalDgbbCh4List[objIndex].status = "red";
+                    //                                 }
+                    //                             } else {
+                    //                                 globalDgbbCh4List[objIndex].status = "red";
+                    //                             }
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "green";
+                    //                         }
+                    //                     } else {
+                    //                         // globalDgbbCh4List[objIndex].status = "red";
+                    //                         if (machineArray.includes(globalDgbbCh4List[objIndex].machine)) {
+                    //                             if (parseInt(autoRunning) == 1) {
+                    //                                 globalDgbbCh4List[objIndex].status = "red";
+                    //                             }
+                    //                         } else {
+                    //                             globalDgbbCh4List[objIndex].status = "red";
+                    //                         }
+                    //                     }
+                    //                 }
+                    //             }
+
+                    //             // else {
+                    //             //     globalDgbbCh4List[objIndex].status = "green";
+                    //             // }
+                    //         }
+                    //     }
+                    //     // Send data to cockpit
+                        
+                    // });
+ //ws.send("SSSSSSSSSSSSSSSSSSSSSSSsssss");
+                  ws.send(dataString);
+                    ws.close();
+
+
+                }
+                loop();
+            }, 100);
+        }
+
+const parser = new Readline();
+port.pipe(parser);
+
+//var DISPLAY = new SerialPort("COM135", global.serialOptions); //// LED  id 46 display port
+var globArr = 0;
+parser.on('data', function myfunction(mydata) {
+    globArr = mydata;
+    console.log('replyfromtester', mydata)
+dataString = mydata;
+
 });
 
-// When data is received from server
-client.on('data', (data) => {
-  console.log('Received:', data.toString());
-
-  // Example: close after first response
-  // client.destroy();
+port.on('data', function (chunk) {
+    //console.log(chunk)
 });
-
-// Handle connection close
-client.on('close', () => {
-  console.log('Connection closed');
-});
-
-// Handle errors
-client.on('error', (err) => {
-  console.error('Socket error:', err.message);
-});
+port.write("*IDN?\n");
+//port.write(":READ?\n");
+port.write(":MEASure:RESistance?\n");
+port.write(":MEMory:STATe ON\n");
+setInterval(() => {
+    port.write(":FETch?\n");
+}, 1000)
