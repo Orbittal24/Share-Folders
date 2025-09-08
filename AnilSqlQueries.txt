@@ -77,4 +77,9 @@ EXEC InsertEOLUsers
  
 Go to the official SSMS download page: https://aka.ms/ssmsfullsetup
 
+
+Timestamp: firstRow.test_date 
+  ? new Date(firstRow.test_date) 
+  : new Date(Date.now() - new Date().getTimezoneOffset() * 60000),
+
  
