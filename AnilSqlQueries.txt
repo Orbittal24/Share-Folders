@@ -77,9 +77,66 @@ EXEC InsertEOLUsers
  
 Go to the official SSMS download page: https://aka.ms/ssmsfullsetup
 
+  USE [taco_treceability_master]
+GO
 
-Timestamp: firstRow.test_date 
-  ? new Date(firstRow.test_date) 
-  : new Date(Date.now() - new Date().getTimezoneOffset() * 60000),
+CREATE OR ALTER PROCEDURE InsertEOLUsers
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    -- Create temporary table with static username/password values
+    CREATE TABLE #UserCredentials (
+        User_Num INT IDENTITY(1,1),
+        User_Name VARCHAR(55),
+        Password VARCHAR(255)
+    );
+    
+    -- Insert static username/password values
+    INSERT INTO #UserCredentials (User_Name, Password)
+    VALUES 
+('PDI_1', '$2a$12$1xC/moPHu3mnhoRVsotcMezW8L3uWeQTgtodSYxhSZw6VdoUcBDrK'),
+('PDI_2', '$2a$12$/Hr4eAXBXQeVIjicoSt6ceKi8U8juPhtbqEkXbmUp77cYerBgMyW6'),
+('PDI_3', '$2a$12$grSznc6sdcD3f8zjoEwfr.bZbccnHNgW2mrxNWqNh5Oc0sZxz9keu'),
+('PDI_4', '$2a$12$Wg9FLUG4CHmeo1rQmkhSVekNH4YLloCqTOcKu5KWsBXkQ4fQVf8Tu'),
+('PDI_5', '$2a$12$TRT6fYtDq/4c4MRGeaU4AO2RA.5tU8W.9t8UQPq4yVSWUtlRZkQfS'),
+('PDI_6', '$2a$12$VmydwpaGzgcZx/HIuLlQq.M/0f6dhta6gaauAy4iU/.cLULevP.Bm'),
+('PDI_7', '$2a$12$IjHI5MZry8n8Q50kyHiGyuLdBdMlPuWayKn9h6qZXKmUgZn3wsHQ.'),
+('PDI_8', '$2a$12$Ve7SkLFjA6vwVfkGZNNTgOYoOGxkD8Vg2UATAnPEXQe.uIfnVn6QO'),
+('PDI_9', '$2a$12$cc51Ep.A4pBL6LIgITq0c.1cy1r7zvndeudgxdQF9r2masTZQ2pue'),
+('PDI_10', '$2a$12$7EfP6z1oKqEd/bZi8uoDXebgeN4yYtsLmjwgrsYdi/CwaCAb5njjq') 
+        
+    -- Insert records for all combinations
+    INSERT INTO [taco_treceability].[User_Master] (
+        [Station_ID],
+        [Line_ID],
+        [User_Name],
+        [Password],
+        [route],
+        [login_status],
+        [Shift]
+    )
+    SELECT 
+        '3014',  -- Fixed Station_ID
+        L.Line_ID,  -- Line_ID as VARCHAR
+        C.User_Name,
+        C.Password,
+        '/auth/auth1/operator_login',  -- Fixed route
+        'inactive',  -- Default status
+        S.Shift
+    FROM 
+        (VALUES ('A'), ('B'), ('C')) AS S(Shift)  -- 3 Shifts
+    CROSS JOIN 
+        -- 12 Line IDs: 1-8 (numeric) and A-D (alpha)
+        (VALUES ('1'),('2'),('3'),('4'),('5'),('6'),('7'),('8'),('A'),('B'),('C'),('D')) AS L(Line_ID)
+    CROSS JOIN 
+        #UserCredentials C;  -- Static credentials
+    
+    DROP TABLE #UserCredentials;
+    
+    PRINT 'Successfully inserted ' + CAST(@@ROWCOUNT AS VARCHAR) + ' user records.';
+END;
+GO
 
+EXEC InsertEOLUsers
  
