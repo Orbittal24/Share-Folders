@@ -241,6 +241,33 @@ async function insertIntoVIR(pool, tableName, body) {
     `);
 }
 
+
+// ===== Update Voltage IR Station Status =====
+async function UpdateVolageIRStationStatus(body) {
+  try {
+    // Build the payload for API
+    const payload = {
+      station_id: 30, // fixed or can be body.StationID
+      line_id: body.line_id || "",     // update if dynamic
+      customer_qrcode: body.customer_qrcode || "", // assuming Pack_number holds QR
+      station_status: "OK",
+      checklist_name: "NA",
+      substation_id: "NA"
+    };
+
+    const response = await axios.post(
+      "http://localhost:9999/station_status/filter",
+      payload,
+      { headers: { "Content-Type": "application/json" } }
+    );
+
+    console.log(`📡 Station status updated for QR: ${payload.customer_qrcode}`, response.data);
+  } catch (err) {
+    console.error("❌ Error updating station status:", err.message);
+  }
+}
+
+
 // ===== Main Processing =====
 async function main() {
   try {
@@ -290,12 +317,17 @@ async function main() {
           Pack_number: PackNumber || "",
         };
 
+           const Iterlockbody = {
+          line_id: Line_ID,
+          customer_qrcode: module_barcode,
+        };
+
         const monthyear = formatDateForTable(firstRow.test_date);
         const tableName = `VIR_Register_${monthyear}`;
 
         await insertIntoVIR(pool, tableName, body);
 
-
+        await UpdateVolageIRStationStatus(Iterlockbody);
 
         console.log(`✅ Inserted ${module_barcode} into ${tableName}`,body);
 
