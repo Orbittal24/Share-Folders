@@ -139,4 +139,12 @@ END;
 GO
 
 EXEC InsertEOLUsers
+
+
+Timestamp: (() => {
+  let ts = new Date(firstRow.test_date || Date.now());
+  ts.setMinutes(ts.getMinutes() - ts.getTimezoneOffset());
+  return ts;
+})(),
+
  
