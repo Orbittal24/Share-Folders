@@ -1,14 +1,19 @@
+back
+
 socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
   console.log('linking', newscanbarcode, moduleQR);
 
-  var dbQuery5 = `SELECT FinalQRCode FROM taco_treceability.station_status WHERE ModuleBarcode='${moduleQR}'`;
+  var dbQuery5 = `SELECT FinalQRCode 
+                  FROM taco_treceability.station_status 
+                  WHERE ModuleBarcode='${moduleQR}'`;
+
   var pack_notray;
 
   sql.connect(sqlConfig, function (err) {
     if (err) console.log(err);
     var request = new sql.Request();
 
-    // --- Step 1: Check if smoke sensor already linked in table1 ---
+    // --- Step 1: Check table1 ---
     var checkQuery1 = `SELECT TOP (1) pack_no 
                        FROM taco_treceability.torque_details_EIP 
                        WHERE module_barcode = '${newscanbarcode}'`;
@@ -16,13 +21,16 @@ socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
     request.query(checkQuery1, function (err, recordset1) {
       if (err) console.log(err);
 
-      if (recordset1 && recordset1.recordset.length > 0 && recordset1.recordset[0].pack_no) {
-        // Already linked in table 1
-        socket.emit('already_linked', newscanbarcode, recordset1.recordset[0].pack_no);
-        return;
+      if (recordset1 && recordset1.recordset.length > 0) {
+        let packNo = recordset1.recordset[0].pack_no;
+        if (packNo && packNo !== 'not_linked') {
+          // Already linked in table1
+          socket.emit('already_linked', newscanbarcode, packNo);
+          return;
+        }
       }
 
-      // --- Step 2: If not found in table1, check table2 ---
+      // --- Step 2: Check table2 if not linked in table1 ---
       var checkQuery2 = `SELECT TOP (1) pack_no 
                          FROM taco_treceability.torque_details_EIP_import2 
                          WHERE module_barcode = '${newscanbarcode}'`;
@@ -30,13 +38,16 @@ socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
       request.query(checkQuery2, function (err, recordset2) {
         if (err) console.log(err);
 
-        if (recordset2 && recordset2.recordset.length > 0 && recordset2.recordset[0].pack_no) {
-          // Already linked in table 2
-          socket.emit('already_linked', newscanbarcode, recordset2.recordset[0].pack_no);
-          return;
+        if (recordset2 && recordset2.recordset.length > 0) {
+          let packNo2 = recordset2.recordset[0].pack_no;
+          if (packNo2 && packNo2 !== 'not_linked') {
+            // Already linked in table2
+            socket.emit('already_linked', newscanbarcode, packNo2);
+            return;
+          }
         }
 
-        // --- Step 3: Not linked in either table → proceed with your existing logic ---
+        // --- Step 3: Not linked → continue with your existing logic ---
         request.query(dbQuery5, function (err, recordset3) {
           if (err) console.log(err);
           if (recordset3) {
@@ -46,7 +57,8 @@ socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
                 pack_notray = res[i].FinalQRCode;
               }
 
-              var dqQuery = `SELECT * FROM taco_treceability.torque_details_EIP 
+              var dqQuery = `SELECT * 
+                             FROM taco_treceability.torque_details_EIP 
                              WHERE smoke_sensor_linked_pack_no = '${newscanbarcode}'`;
               var dqQuery2 = `UPDATE taco_treceability.torque_details_EIP 
                               SET pack_no = '${pack_notray}' 
@@ -70,4 +82,12 @@ socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
       });
     });
   });
+});
+
+
+
+
+front
+socket.on("already_linked", function (newscanbarcode, packNo) {
+  swal('Already Linked!', `Smoke Sensor ${newscanbarcode} is already linked with Pack-${packNo}.`, 'error');
 });
