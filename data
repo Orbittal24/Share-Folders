@@ -63,3 +63,11 @@ socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
                 }
               });
             } else {
+              socket.emit('not_found_pack', newscanbarcode, moduleQR);
+            }
+          }
+        });
+      });
+    });
+  });
+});
