@@ -1,42 +1,82 @@
-SELECT 
-    sr_no, 
-    pack_name, 
-    module_name, 
-    torque, 
-    angle, 
-    torque_status, 
-    date_dd, 
-    shift, 
-    module_barcode, 
-    process_status, 
-    pack_no, 
-    rework_status, 
-    bypass_operator, 
-    bypass_reason, 
-    process_name, 
-    station_name, 
-    smoke_sensor_linked_pack_no
-FROM taco_treceability.torque_details_EIP
-WHERE pack_no IN (
-    'DJ2028-G99009917', 'DJ2043-G9C0003379', 'DJ2028-G9B009949',
-    'DJ2042-G9C0041399', 'DJ2042-G9C0041373', 'DJ2025-G9B0006141',
-    'DJ1927-G930014795', 'DJ2030-G9B0025558', 'DJ2042-G9C0041359',
-    'DJ2043-G9C0003384', 'DJ2025-G9B0006159', 'DJ1916-G9C0003147',
-    'DJ2043-G9C0003385', 'DJ2042-G9C0041374', 'DJ2025-G9C0006177',
-    'DJ2025-G910005947', 'DJ2025-G9B0006136', 'DJ2042-G9C0041355',
-    'DJ2038-G4F0000046', 'DJ2042-G980020136', 'DJ2043-G9C0003380',
-    'DJ2042-G9C0041379', 'DJ1927-G9A0017588', 'DJ2030-G9B0027419',
-    'DJ2043-G9B0003351', 'DJ1828-G9B0049204', 'DJ2030-G9B0025549',
-    'DJ2025-G9B0006151', 'DJ2030-G5T0009311', 'DJ2029-G9B0000992',
-    'DJ1927-G9B0017599', 'DJ2030-G8M0021997', 'DJ2042-G970040990',
-    'DJ2029-G9C0000997', 'DJ2042-G9B0041307', 'DJ1828-G9A0049174',
-    'DJ2042-G9B0020184', 'DJ2025-G9B0006163', 'DJ2042-G9C0041376',
-    'DJ2029-G9C0000994', 'DJ2042-G9C0041351', 'DJ2029-G9A0000984',
-    'DJ1927-G9A0017557', 'DJ2042-G9B0020203', 'DJ2025-G9A0006101',
-    'DJ1927-G9A0017499', 'DJ2025-G9B0006135', 'DJ2042-G9C0041360',
-    'DJ2042-G9C0020231', 'DJ2043-G9B0003349', 'DJ1927-G990017335',
-    'DJ2043-G9B0003347', 'DJ2030-G9B0025559', 'DJ2025-G9B0006158',
-    'DJ2043-G9C0003381', 'DJ2030-G9B0027380', 'DJ2043-G990003316',
-    'DJ2030-G920022165', 'DJ1927-G9C0017688', 'DJ1828-G9B0049206',
-    'DJ2043-G9C0003382', 'DJ2042-G9C0041380', 'DJ2043-G9C0003363'
-);
+Back end
+socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
+  console.log('linking', newscanbarcode, moduleQR);
+
+  var dbQuery5 = `SELECT FinalQRCode FROM taco_treceability.station_status WHERE ModuleBarcode='${moduleQR}'`;
+
+  var pack_notray;
+
+  sql.connect(sqlConfig, function (err) {
+    if (err) console.log(err);
+    var request = new sql.Request();
+
+    // First check if smoke detector already linked in table1
+    var checkQuery1 = `SELECT TOP (1) pack_no 
+                       FROM taco_treceability.torque_details_EIP 
+                       WHERE module_barcode = '${newscanbarcode}'`;
+
+    request.query(checkQuery1, function (err, recordset) {
+      if (err) console.log(err);
+
+      if (recordset && recordset.recordset.length > 0 && recordset.recordset[0].pack_no) {
+        // Already linked in table 1
+        socket.emit('already_linked', newscanbarcode, recordset.recordset[0].pack_no);
+        return;
+      }
+
+      // If not found in table1, check table2
+      var checkQuery2 = `SELECT TOP (1) pack_no 
+                         FROM taco_treceability.torque_details_EIP_import2 
+                         WHERE module_barcode = '${newscanbarcode}'`;
+
+      request.query(checkQuery2, function (err, recordset2) {
+        if (err) console.log(err);
+
+        if (recordset2 && recordset2.recordset.length > 0 && recordset2.recordset[0].pack_no) {
+          // Already linked in table 2
+          socket.emit('already_linked', newscanbarcode, recordset2.recordset[0].pack_no);
+          return;
+        }
+
+        // Not linked in either table → continue with your existing logic
+        request.query(dbQuery5, function (err, recordset3) {
+          if (err) console.log(err);
+          if (recordset3) {
+            var res = recordset3.recordset;
+            if (res.length > 0) {
+              for (var i in res) {
+                pack_notray = res[i].FinalQRCode;
+              }
+
+              var dqQuery = `SELECT * FROM taco_treceability.torque_details_EIP WHERE smoke_sensor_linked_pack_no = '${newscanbarcode}'`;
+              var dqQuery2 = `UPDATE taco_treceability.torque_details_EIP 
+                              SET pack_no = '${pack_notray}' 
+                              WHERE smoke_sensor_linked_pack_no = '${newscanbarcode}'`;
+
+              request.query(dqQuery, function (err, recordset4) {
+                var result = recordset4.recordset;
+                if (result.length > 0) {
+                  request.query(dqQuery2, function (err, recordset5) {
+                    if (err) console.log(err);
+                    console.log('linked');
+                    socket.emit('linked_pack', newscanbarcode, pack_notray);
+                  });
+                }
+              });
+            } else {
+              socket.emit('not_found_pack', newscanbarcode, moduleQR);
+            }
+          }
+        });
+      });
+    });
+  });
+});
+
+
+
+/////////////////////////////////////////////////////
+frontend
+socket.on("already_linked", function (newscanbarcode, packNo) {
+  swal('Already Linked!', `Smoke Sensor ${newscanbarcode} is already linked with Pack-${packNo}.`, 'error');
+});
