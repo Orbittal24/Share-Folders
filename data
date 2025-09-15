@@ -52,20 +52,20 @@ dbConn2.connect().then(() => console.log("Connected to DB2:", sqlConfig2.databas
 
 // --------------------------------------------------------------------
 // Test variables (replace with real values as needed)
-var New_final_qr_code = 'DJ2038-G2K0000037';
+var New_final_qr_code = 'DJ2038-G2K0000036';
 var Old_final_qr_code = 'DJ2028-FCM0006893';
 
-var new_smoke1 = 'BAS6CE-B24N2404030067SV2.00';
-var old_smoke1 = '1';
-var new_smoke2 = 'BAS6CE-B24N2404030067SV2.00';
-var old_smoke2 = '1';
-var new_smoke3 = 'BAS6CE-B24N2404030067SV2.00';
-var old_smoke3 = '1';
-var new_smoke4 = 'BAS6CE-B24N2404030067SV2.00';
-var old_smoke4 = '1';
-var new_smoke5 = 'BAS6CE-B24N2404030067SV2.00';
+var new_smoke1 = 'BAS6CE-A22P2408295006SV1.05';
+var old_smoke1 = 'BAS6CE-A22P2406285038SV1.05';
+var new_smoke2 = 'BAS6CE-B22P2410125014SV1.05';
+var old_smoke2 = 'BAS6CE-A22P2408295009SV1.05';
+var new_smoke3 = 'BAS6CE-B22P2410125036SV1.05';
+var old_smoke3 = 'BAS6CE-B22P2410125004SV1.05';
+var new_smoke4 = 'BAS6CE-B22P2410125048SV1.05';
+var old_smoke4 = 'BAS6CE-B22P2410125013SV1.05';
+var new_smoke5 = '1';
 var old_smoke5 = '1';
-var new_smoke6 = 'BAS6CE-B24N2404030067SV2.00';
+var new_smoke6 = '1';
 var old_smoke6 = '1';
 
 var array_counter = 0;
@@ -115,7 +115,7 @@ function updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter) {
     console.log(' updating counter 1', checking_counter);
 
     var processqueryimport = `
-        UPDATE taco_treceability.torque_details_EIP_traial2 
+        UPDATE taco_treceability.torque_details_EIP_mirror_import2 
         SET pack_no= '${New_final_qr_code}', module_barcode='${temp_mBarcode}' 
         WHERE module_name ='${temp_mNo}' 
     `;
@@ -148,7 +148,7 @@ function updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter) {
     console.log(' updating counter 2', checking_counter);
 
     var processqueryimport = `
-        UPDATE taco_treceability.torque_details_EIP_traial2 
+        UPDATE taco_treceability.torque_details_EIP_mirror_import2 
         SET pack_no= '${New_final_qr_code}', module_barcode='${temp_mBarcode}' 
         WHERE module_name ='${temp_mNo}' 
     `;
@@ -176,7 +176,7 @@ function updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter) {
 }
 
 // --------------------------------------------------------------------
-// Step 3: Update smoke sensors (common function)
+// Step 3: Update smoke sensors (only smoke_sensor_linked_pack_no)
 function updateSmokeSensors() {
     console.log("Starting smoke sensor updates...");
 
@@ -190,11 +190,11 @@ function updateSmokeSensors() {
     ];
 
     smokeUpdates.forEach((smoke, idx) => {
-        if (smoke.oldVal && smoke.newVal) {
+        if (smoke.oldVal && smoke.newVal && smoke.oldVal !== "1" && smoke.newVal !== "1") {
             var query = `
-                UPDATE taco_treceability.torque_details_EIP_traial2 
-                SET module_barcode = '${smoke.newVal}', smoke_sensor_linked_pack_no='${smoke.newVal}' 
-                WHERE smoke_sensor_linked_pack_no ='${smoke.oldVal}'
+                UPDATE taco_treceability.torque_details_EIP_mirror_import2 
+                SET smoke_sensor_linked_pack_no = '${smoke.newVal}'
+                WHERE smoke_sensor_linked_pack_no = '${smoke.oldVal}'
             `;
             var request = new sql.Request(dbConn);
             request.query(query, function (err, recordset) {
