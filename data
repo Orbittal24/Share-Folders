@@ -1,3 +1,4 @@
+aa
 UPDATE taco_treceability.torque_details_EIP_kr_tray
 SET module_barcode = CASE module_barcode
     WHEN 'BAS6CE-A22P2405215001SV1.05' THEN 'BAS6CE-A22P2405215001SV1.05'  -- a -> 1
