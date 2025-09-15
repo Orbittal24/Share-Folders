@@ -1,93 +1,37 @@
-back
-
-socket.on('linking_smokeSensor_with_pack', async (newscanbarcode, moduleQR) => {
-  console.log('linking', newscanbarcode, moduleQR);
-
-  var dbQuery5 = `SELECT FinalQRCode 
-                  FROM taco_treceability.station_status 
-                  WHERE ModuleBarcode='${moduleQR}'`;
-
-  var pack_notray;
-
-  sql.connect(sqlConfig, function (err) {
-    if (err) console.log(err);
-    var request = new sql.Request();
-
-    // --- Step 1: Check table1 ---
-    var checkQuery1 = `SELECT TOP (1) pack_no 
-                       FROM taco_treceability.torque_details_EIP 
-                       WHERE module_barcode = '${newscanbarcode}'`;
-
-    request.query(checkQuery1, function (err, recordset1) {
-      if (err) console.log(err);
-
-      if (recordset1 && recordset1.recordset.length > 0) {
-        let packNo = recordset1.recordset[0].pack_no;
-        if (packNo && packNo !== 'not_linked') {
-          // Already linked in table1
-          socket.emit('already_linked', newscanbarcode, packNo);
-          return;
-        }
-      }
-
-      // --- Step 2: Check table2 if not linked in table1 ---
-      var checkQuery2 = `SELECT TOP (1) pack_no 
-                         FROM taco_treceability.torque_details_EIP_import2 
-                         WHERE module_barcode = '${newscanbarcode}'`;
-
-      request.query(checkQuery2, function (err, recordset2) {
-        if (err) console.log(err);
-
-        if (recordset2 && recordset2.recordset.length > 0) {
-          let packNo2 = recordset2.recordset[0].pack_no;
-          if (packNo2 && packNo2 !== 'not_linked') {
-            // Already linked in table2
-            socket.emit('already_linked', newscanbarcode, packNo2);
-            return;
-          }
-        }
-
-        // --- Step 3: Not linked → continue with your existing logic ---
-        request.query(dbQuery5, function (err, recordset3) {
-          if (err) console.log(err);
-          if (recordset3) {
-            var res = recordset3.recordset;
-            if (res.length > 0) {
-              for (var i in res) {
-                pack_notray = res[i].FinalQRCode;
-              }
-
-              var dqQuery = `SELECT * 
-                             FROM taco_treceability.torque_details_EIP 
-                             WHERE smoke_sensor_linked_pack_no = '${newscanbarcode}'`;
-              var dqQuery2 = `UPDATE taco_treceability.torque_details_EIP 
-                              SET pack_no = '${pack_notray}' 
-                              WHERE smoke_sensor_linked_pack_no = '${newscanbarcode}'`;
-
-              request.query(dqQuery, function (err, recordset4) {
-                var result = recordset4.recordset;
-                if (result.length > 0) {
-                  request.query(dqQuery2, function (err, recordset5) {
-                    if (err) console.log(err);
-                    console.log('linked');
-                    socket.emit('linked_pack', newscanbarcode, pack_notray);
-                  });
-                }
-              });
-            } else {
-              socket.emit('not_found_pack', newscanbarcode, moduleQR);
-            }
-          }
-        });
-      });
-    });
-  });
-});
-
-
-
-
-front
-socket.on("already_linked", function (newscanbarcode, packNo) {
-  swal('Already Linked!', `Smoke Sensor ${newscanbarcode} is already linked with Pack-${packNo}.`, 'error');
-});
+SELECT 
+    sr_no, 
+    pack_name, 
+    module_name, 
+    torque, 
+    angle, 
+    torque_status, 
+    date_dd, 
+    shift, 
+    module_barcode, 
+    process_status, 
+    pack_no, 
+    rework_status, 
+    bypass_operator, 
+    bypass_reason, 
+    process_name, 
+    station_name, 
+    smoke_sensor_linked_pack_no
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+    'abc',
+    'DJ2043-G7C0001256', 'DJ1916-G9E0003164', 'DJ2042-G9D0041507',
+    'DJ1828-G9D0049238', 'DJ2030-G9D0027735', 'DJ1828-G9D0049224',
+    'DJ2030-G8G0021174', 'DJ2028-G9D009981',  'DJ2025-G9D0006208',
+    'DJ1828-G9D0049247', 'DJ1828-G9E0049257', 'DJ1927-G9C0017766',
+    'DJ2029-G9B0000990', 'DJ2030-G9E0025681', 'DJ1828-G9D0049228',
+    'DJ2029-G9E0001005', 'DJ1927-G9D0017965', 'DJ2025-G9C0006197',
+    'DJ2029-G9E0001008', 'DJ1828-G9E0049261', 'DJ2043-G9C0003361',
+    'DJ2029-G9D0001002', 'DJ2028-G9D009979',  'DJ1927-G9D0017860',
+    'DJ1828-G9D0049234', 'DJ2025-G9D0006216', 'DJ1828-G9E0049255',
+    'DJ2029-G9E0001006', 'DJ1927-G9D0017961', 'DJ2030-G9D0027682',
+    'DJ2025-G9D0006220', 'DJ2025-G9D0006214', 'DJ1828-G9E0049260',
+    'DJ2030-G8X0023242', 'DJ2030-G9D0027683', 'DJ2029-G9E0001012',
+    'DJ2029-G9D0001003', 'DJ2025-G9D0006217', 'DJ2029-G9E0001009',
+    'DJ1927-G9C0017710', 'DJ1927-G9C0016401', 'DJ2042-G9D0041523',
+    'DJ2043-G9C0003367', 'DJ2029-G9D0001004'
+);
