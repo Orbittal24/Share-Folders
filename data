@@ -52,19 +52,25 @@ async function updateModuleBarcodes() {
       throw new Error(`Array length mismatch: Table1=${table1.length}, Table2=${table2.length}`);
     }
 
-    // 3. Perform updates index-wise
+    // 3. Perform updates index-wise (update module_barcode + smoke_sensor_linked_pack_no)
     for (let i = 0; i < table1.length; i++) {
       let oldValue = table2[i];
       let newValue = table1[i];
 
-      console.log(`Updating module_barcode: ${oldValue} -> ${newValue}`);
+      if (oldValue === newValue) {
+        console.log(`Skipping update (same value): ${oldValue}`);
+        continue;
+      }
+
+      console.log(`Updating module_barcode + smoke_sensor_linked_pack_no: ${oldValue} -> ${newValue}`);
 
       await pool.request()
         .input("newValue", sql.VarChar, newValue)
         .input("oldValue", sql.VarChar, oldValue)
         .query(`
           UPDATE taco_treceability.torque_details_EIP_kr_tray
-          SET module_barcode = @newValue
+          SET module_barcode = @newValue,
+              smoke_sensor_linked_pack_no = @newValue
           WHERE module_barcode = @oldValue
         `);
     }
