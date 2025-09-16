@@ -1,9 +1,185 @@
+var sql = require('mssql');
+var async = require("async");
+var moment = require('moment');
+var express = require("express"),
+    app = require("express")(),
+    http = require("http").Server(app),
+    io = require("socket.io")(http),
+    util = require("util"),
+    fs = require("fs");
+const { resolve } = require('path');
+const nrc = require('node-run-cmd');
+var path = require("path");
+
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin",
+    database: "taco_treceability",
+    server: 'localhost\\MSSQLSERVER',
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    },
+    options: {
+        encrypt: true,
+        trustServerCertificate: true
+    }
+};
+
+const sqlConfig2 = {
+    user: "user_admin",
+    password: "admin",
+    database: "taco_traceability_admin",
+    server: "localhost\\MSSQLSERVER",
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    },
+    options: {
+        encrypt: true,
+        trustServerCertificate: true
+    }
+};
+
+// Initialize connection pools
+var dbConn = new sql.ConnectionPool(sqlConfig);
+var dbConn2 = new sql.ConnectionPool(sqlConfig2);
+
+dbConn.connect().then(() => console.log("Connected to DB1:", sqlConfig.database));
+dbConn2.connect().then(() => console.log("Connected to DB2:", sqlConfig2.database));
+
+// --------------------------------------------------------------------
+// Test variables (replace with real values as needed)
+var New_final_qr_code = 'DJ2038-G2K0000037';   // <-- your new pack_no
+var Old_final_qr_code = 'DJ2028-FCM0006893';
+
+var new_smoke1 = 'BAS6CE-A22P2408295006SV1.05';
+var old_smoke1 = 'BAS6CE-A22P2406285038SV1.05';
+var new_smoke2 = 'BAS6CE-B22P2410125014SV1.05';
+var old_smoke2 = 'BAS6CE-A22P2408295009SV1.05';
+var new_smoke3 = 'BAS6CE-B22P2410125036SV1.05';
+var old_smoke3 = 'BAS6CE-B22P2410125004SV1.05';
+var new_smoke4 = 'BAS6CE-B22P2410125048SV1.05';
+var old_smoke4 = 'BAS6CE-B22P2410125013SV1.05';
+var new_smoke5 = '1'; // dummy skip
+var old_smoke5 = '1'; // dummy skip
+var new_smoke6 = '1'; // dummy skip
+var old_smoke6 = '1'; // dummy skip
+
+var array_counter = 0;
+var get_data_arr_status = [];
+var checking_counter = 1;
+
+// --------------------------------------------------------------------
+// Step 1: Get module barcodes and numbers
+var processquery = `SELECT ModuleBarcode, moduleNumber 
+                    FROM taco_treceability.station_status 
+                    WHERE FinalQRCode='${New_final_qr_code}'`;
+
+dbConn.connect().then(() => {
+    var request = new sql.Request(dbConn);
+    request.query(processquery, function (err, recordset) {
+        if (err) {
+            console.log("Error fetching station_status:", err);
+            return;
+        }
+
+        var result1 = recordset.recordset;
+        get_data_arr_status = [];
+
+        if (result1.length > 0) {
+            for (var i = 0; i < result1.length; i++) {
+                var details_ModuleBarcode = result1[i].ModuleBarcode;
+                var details_moduleNumber = result1[i].moduleNumber;
+                get_data_arr_status.push(details_ModuleBarcode);
+                get_data_arr_status.push(details_moduleNumber);
+            }
+
+            var temp_mBarcode = get_data_arr_status[array_counter];
+            var temp_mNo = get_data_arr_status[array_counter + 1];
+            console.log("array:", get_data_arr_status);
+
+            console.log("Updating values:", array_counter);
+            setTimeout(() => {
+                updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter);
+            }, 500);
+        }
+    });
+});
+
+// --------------------------------------------------------------------
+// Step 2: Update module barcodes sequentially
+function updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter) {
+    console.log(' updating counter 1', checking_counter);
+
+    var processqueryimport = `
+        UPDATE taco_treceability.torque_details_EIP_mirror_import2 
+        SET pack_no= '${New_final_qr_code}', module_barcode='${temp_mBarcode}' 
+        WHERE module_name ='${temp_mNo}' 
+    `;
+
+    var request = new sql.Request(dbConn);
+    request.query(processqueryimport, function (err, recordset) {
+        if (err) {
+            console.log("Error updating module:", err);
+        } else {
+            checking_counter++;
+            console.log(' updated array_counter', array_counter);
+
+            if (array_counter < 26) {
+                array_counter += 2;
+                var temp_mBarcode = get_data_arr_status[array_counter];
+                var temp_mNo = get_data_arr_status[array_counter + 1];
+
+                console.log("Updating values:", array_counter);
+                setTimeout(() => {
+                    updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter);
+                }, 500);
+            } else {
+                updateSmokeSensors();
+            }
+        }
+    });
+}
+
+function updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter) {
+    console.log(' updating counter 2', checking_counter);
+
+    var processqueryimport = `
+        UPDATE taco_treceability.torque_details_EIP_mirror_import2 
+        SET pack_no= '${New_final_qr_code}', module_barcode='${temp_mBarcode}' 
+        WHERE module_name ='${temp_mNo}' 
+    `;
+
+    var request = new sql.Request(dbConn);
+    request.query(processqueryimport, function (err, recordset) {
+        if (err) {
+            console.log("Error updating module:", err);
+        } else {
+            checking_counter++;
+            if (array_counter < 26) {
+                array_counter += 2;
+                var temp_mBarcode = get_data_arr_status[array_counter];
+                var temp_mNo = get_data_arr_status[array_counter + 1];
+
+                setTimeout(() => {
+                    console.log(' updating temp_mBarcode', temp_mNo);
+                    updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter);
+                }, 500);
+            } else {
+                updateSmokeSensors();
+            }
+        }
+    });
+}
+
 // --------------------------------------------------------------------
 // Step 3: Update smoke sensors (module_barcode, smoke_sensor_linked_pack_no, pack_no)
 function updateSmokeSensors() {
     console.log("Starting smoke sensor updates...");
 
-    // Build queries dynamically for smoke sensors
     const smokePairs = [
         { newVal: new_smoke1, oldVal: old_smoke1 },
         { newVal: new_smoke2, oldVal: old_smoke2 },
@@ -21,7 +197,7 @@ function updateSmokeSensors() {
 
         const { newVal, oldVal } = smokePairs[index];
 
-        // Skip dummy values (like '1')
+        // Skip dummy values
         if (newVal === '1' || oldVal === '1') {
             console.log(`Skipping smoke sensor ${index + 1} (dummy value).`);
             runUpdate(index + 1);
@@ -47,13 +223,12 @@ function updateSmokeSensors() {
                 console.log(`✅ Smoke sensor ${index + 1} updated successfully.`);
             }
 
-            // Move to next smoke sensor after small delay
+            // Next update
             setTimeout(() => {
                 runUpdate(index + 1);
             }, 500);
         });
     }
 
-    // Start sequential update
     runUpdate(0);
 }
