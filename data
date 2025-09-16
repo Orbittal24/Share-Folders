@@ -1,14 +1,94 @@
- socket.on('transfer_complete', function(data) {
-        const statusMsg = document.getElementById('statusMessage');
-        if (data.status === 'success') {
-            // Display success message
-            console.log("Success:", data.message);
-            statusMsg.innerText = data.message;
-            statusMsg.style.color = 'green';
-        } else if (data.status === 'error') {
-            // Display error message
-            console.error("Error:", data.message);
-            statusMsg.innerText = data.message;
-            statusMsg.style.color = 'red';
+socket.on('date_selected_OK_station_status', async (date) => {
+    console.log("Received date from client Station_status shift:", date);
+
+    try {
+        let pool = await sql.connect(sqlConfig);  // ✅ use sqlConfig instead of config
+
+        // 1. Select data before the given date
+        const selectQuery = `
+            SELECT 
+                PackName, FinalQRCode, ModuleName, ModuleBarcode, ModulePrintStatus, ModuleOCV_status, Welding_status, 
+                IR_V_status, FinalQRCodePrint_status, AirLeakage_status, ChargingDischarging_status, PDI_status, 
+                EntryDateTime, moduleNumber, line, shift
+            FROM taco_treceability.station_status_dummy1
+            WHERE EntryDateTime < @selectedDate
+        `;
+        const result = await pool.request()
+            .input('selectedDate', sql.Date, date)
+            .query(selectQuery);
+
+        const rows = result.recordset;
+        if (rows.length === 0) {
+            console.log('No records found before this date.');
+            socket.emit('transfer_complete', { status: 'error', message: 'No records found before this date.' });
+            return;
         }
-    });
+
+        // 2. Insert into station_status_dummy2
+        const table = new sql.Table('station_status_dummy2');
+        table.create = false; // table already exists
+
+        // Define columns (except srno)
+        table.columns.add('PackName', sql.NVarChar(255), { nullable: true });
+        table.columns.add('FinalQRCode', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModuleName', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModuleBarcode', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModulePrintStatus', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModuleOCV_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('Welding_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('IR_V_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('FinalQRCodePrint_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('AirLeakage_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ChargingDischarging_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('PDI_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('EntryDateTime', sql.DateTime, { nullable: true });
+        table.columns.add('moduleNumber', sql.NVarChar(255), { nullable: true });
+        table.columns.add('line', sql.NVarChar(255), { nullable: true });
+        table.columns.add('shift', sql.NVarChar(255), { nullable: true });
+
+        // Add rows
+        rows.forEach(row => {
+            table.rows.add(
+                row.PackName,
+                row.FinalQRCode,
+                row.ModuleName,
+                row.ModuleBarcode,
+                row.ModulePrintStatus,
+                row.ModuleOCV_status,
+                row.Welding_status,
+                row.IR_V_status,
+                row.FinalQRCodePrint_status,
+                row.AirLeakage_status,
+                row.ChargingDischarging_status,
+                row.PDI_status,
+                row.EntryDateTime,
+                row.moduleNumber,
+                row.line,
+                row.shift
+            );
+        });
+
+        // Bulk insert
+        const request = pool.request();
+        await request.bulk(table);
+        console.log('Data inserted into station_status_dummy2 successfully.');
+
+        // 3. Delete from original table after successful insertion
+        const deleteQuery = `
+            DELETE FROM taco_treceability.station_status_dummy1
+            WHERE EntryDateTime < @selectedDate
+        `;
+        await pool.request()
+            .input('selectedDate', sql.Date, date)
+            .query(deleteQuery);
+
+        console.log('Data deleted from station_status_dummy1 successfully.');
+        socket.emit('transfer_complete', { status: 'success', message: 'Data transferred and deleted successfully.' });
+
+    } catch (err) {
+        console.error('Error transferring data:', err);
+        socket.emit('transfer_complete', { status: 'error', message: err.message });
+    } finally {
+        sql.close();
+    }
+});
