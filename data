@@ -1,116 +1,221 @@
-const sql = require("mssql");
+var sql = require('mssql');
+var async = require("async");
+var moment = require('moment');
+var express = require("express"),
+    app = require("express")(),
+    http = require("http").Server(app),
+    io = require("socket.io")(http),
+    util = require("util"),
+    fs = require("fs");
+// app.use(cors());
+const { resolve } = require('path');
+const nrc = require('node-run-cmd');
+var path = require("path");
 
-const config = {
-  user: "user_mis",
-  password: "admin",
-  database: "taco_treceability",
-  server: "localhost\\MSSQLSERVER",
-  pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000
-  },
-  options: {
-    encrypt: true, // for azure
-    trustServerCertificate: true // local dev / self-signed certs
-  }
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin",
+    database: "taco_treceability",
+    server: 'localhost\\MSSQLSERVER',
+    pool: {
+      max: 10,
+      min: 0,
+      idleTimeoutMillis: 30000
+    },
+    options: {
+      encrypt: true, // for azure
+      trustServerCertificate: true // change to true for local dev / self-signed certs
+    }
 };
 
-async function updateModuleBarcodes() {
-  var New_final_qr_code = "DJ2038-G2H0000033";
+// Initialize connection pool
+var dbConn = new sql.ConnectionPool(sqlConfig);
+dbConn.connect().then(function () {
+    console.log("Connected to taco_treceability....");
+});
 
-  try {
-    let pool = await sql.connect(config);
-
-    // 1. Fetch module_barcodes from battery_details
-    let result1 = await pool.request()
-      .input("final_qrcode", sql.VarChar, New_final_qr_code)
-      .query(`
-        SELECT DISTINCT module_barcode_string
-        FROM taco_treceability.battery_details
-        WHERE final_qrcode = @final_qrcode
-          AND module_barcode_string LIKE 'BA%'
-          AND module_name = 'Smoke Sensor'
-      `);
-
-    let table1 = result1.recordset.map(r => r.module_barcode_string);
-
-    // 2. Fetch module_barcodes from torque_details_EIP_kr_tray
-    let result2 = await pool.request()
-      .query(`
-        SELECT DISTINCT module_barcode
-        FROM taco_treceability.torque_details_EIP_kr_tray
-        WHERE module_barcode LIKE 'BA%'
-      `);
-
-    let table2 = result2.recordset.map(r => r.module_barcode);
-
-    console.log("Table 1:", table1);
-    console.log("Table 2:", table2);
-
-    if (table1.length !== table2.length) {
-      throw new Error(`Array length mismatch: Table1=${table1.length}, Table2=${table2.length}`);
+// Your secondary DB (not used in this script, but kept)
+const sqlConfig2 = {
+    user: "user_admin",
+    password: "admin",
+    database: "taco_traceability_admin",
+    server: "localhost\\MSSQLSERVER",
+    pool: {
+      max: 10,
+      min: 0,
+      idleTimeoutMillis: 30000
+    },
+    options: {
+      encrypt: true,
+      trustServerCertificate: true
     }
+};
+var dbConn2 = new sql.ConnectionPool(sqlConfig2);
+dbConn2.connect().then(function () {
+    console.log("Connected to taco_traceability_admin....");
+});
 
-    // 3. Update module_barcode + smoke_sensor_linked_pack_no
-    for (let i = 0; i < table1.length; i++) {
-      let oldValue = table2[i];
-      let newValue = table1[i];
+// Data variables
+var New_final_qr_code ='DJ2038-G2G0000031';
+var Old_final_qr_code ='DJ2028-FCM0006893';
+var new_smoke = 'BAS6CE-B24N2404030067SV2.00';
+var old_smoke = '1';
 
-      console.log(`Updating module_barcode: ${oldValue} -> ${newValue}`);
+var array_counter = 0;
+var get_data_arr_status=[];
+var checking_counter = 1;
 
-      await pool.request()
-        .input("newValue", sql.VarChar, newValue)
-        .input("oldValue", sql.VarChar, oldValue)
-        .input("final_qrcode", sql.VarChar, New_final_qr_code)
-        .query(`
-          UPDATE taco_treceability.torque_details_EIP_kr_tray
-          SET module_barcode = @newValue,
-              smoke_sensor_linked_pack_no = @final_qrcode
-          WHERE module_barcode = @oldValue
-        `);
-    }
+// Step 1: Get ModuleBarcode and moduleNumber for New_final_qr_code
+var processquery = `SELECT ModuleBarcode, moduleNumber FROM taco_treceability.station_status_Aug25 WHERE FinalQRCode='${New_final_qr_code}'`;
+sql.connect(sqlConfig, function (err) {  
+    if(err) return console.log(err);
+    var request = new sql.Request();
+    request.query(processquery, function (err, recordset) {
+        if(err) return console.log(err);
+        var result1 = recordset.recordset;
+        get_data_arr_status=[];
+        if (result1.length > 0) {
+            for (var i = 0; i < result1.length; i++) {
+               get_data_arr_status.push(result1[i].ModuleBarcode);
+               get_data_arr_status.push(result1[i].moduleNumber);
+            }   
 
-    // 4. Update pack_no for all BA% module_barcodes
-    console.log(`Updating pack_no for all module_barcodes LIKE 'BA%' -> ${New_final_qr_code}`);
-    await pool.request()
-      .input("final_qrcode", sql.VarChar, New_final_qr_code)
-      .query(`
-        UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qrcode
-        WHERE module_barcode LIKE 'BA%'
-      `);
+            // Start the update chain
+            updateModuleBarcodes(get_data_arr_status[array_counter], get_data_arr_status[array_counter+1], array_counter);
+        }  
+    });
+});
 
-    // 5. Update pack_no AND module_barcode for module_name M1–M6
-    console.log(`Updating pack_no and module_barcode for module_name IN (M1–M6) -> ${New_final_qr_code}`);
-    await pool.request()
-      .input("final_qrcode", sql.VarChar, New_final_qr_code)
-      .query(`
-        UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qrcode,
-            module_barcode = @final_qrcode
-        WHERE module_name IN ('M1','M2','M3','M4','M5','M6')
-      `);
-
-    // 6. Insert updated rows into import2 table (exclude sr_no)
-    console.log(`Inserting updated rows into torque_details_EIP_import2`);
-    await pool.request()
-      .query(`
-        INSERT INTO taco_treceability.torque_details_EIP_import2
-        (pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode,
-         process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
-        SELECT pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode,
-               process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
-        FROM taco_treceability.torque_details_EIP_kr_tray
-      `);
-
-    console.log("All updates + insert completed successfully.");
-    sql.close();
-
-  } catch (err) {
-    console.error("Error:", err);
-    sql.close();
-  }
+// Recursive update functions
+function updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter) {
+    return new Promise(async(resolve, reject) => {
+        console.log('Updating counter 1:', checking_counter);
+        var updateQuery = `UPDATE taco_treceability.torque_details_EIP_traial2 SET pack_no= '${New_final_qr_code}', module_barcode='${temp_mBarcode}' WHERE module_name ='${temp_mNo}' `;
+        sql.connect(sqlConfig, function (err) {  
+            if(err) return console.log(err);
+            var request = new sql.Request();
+            request.query(updateQuery, function (err, recordset) {
+                if(err){
+                    console.log(err);
+                } else {
+                    checking_counter++;
+                    proceedNext(array_counter);
+                }
+            });
+        });
+    });
 }
 
-updateModuleBarcodes();
+function updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter) {
+    return new Promise(async(resolve, reject) => {
+        console.log('Updating counter 2:', checking_counter);
+        var updateQuery = `UPDATE taco_treceability.torque_details_EIP_traial2 SET pack_no= '${New_final_qr_code}', module_barcode='${temp_mBarcode}' WHERE module_name ='${temp_mNo}' `;
+        sql.connect(sqlConfig, function (err) {  
+            if(err) return console.log(err);
+            var request = new sql.Request();
+            request.query(updateQuery, function (err, recordset) {
+                if(err){
+                    console.log(err);
+                } else {
+                    checking_counter++;
+                    proceedNext(array_counter);
+                }
+            });
+        });
+    });
+}
+
+// Decide next step or finish
+function proceedNext(array_counter) {
+    if(array_counter + 2 < get_data_arr_status.length){
+        array_counter = array_counter + 2;
+        var temp_mBarcode = get_data_arr_status[array_counter];
+        var temp_mNo = get_data_arr_status[array_counter+1];
+
+        setTimeout(() => {
+            if(checking_counter % 2 === 0){
+                updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter);
+            } else {
+                updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter);
+            }
+        }, 500);
+    } else {
+        // All module updates done, update smoke sensor
+        var smokeQuery = `UPDATE taco_treceability.torque_details_EIP_traial2 SET module_barcode = '${new_smoke}', smoke_sensor_linked_pack_no='${new_smoke}' WHERE smoke_sensor_linked_pack_no ='${old_smoke}' `;
+        sql.connect(sqlConfig, function (err) {  
+            if(err) return console.log(err);
+            var request = new sql.Request();
+            request.query(smokeQuery, function (err, recordset) {
+                if(err) console.log(err);
+                else {
+                    console.log("All updates done. Now copying data to import2 table.");
+                    copyDataToImportTable(); // call final copy
+                }
+            });
+        });
+    }
+}
+
+// Step 3: Copy data from traial2 to import2
+function copyDataToImportTable() {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const selectQuery = `
+                SELECT 
+                    pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
+                    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
+                    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+                FROM taco_treceability.torque_details_EIP_traial2
+            `;
+
+            const insertQueryBase = `
+                INSERT INTO taco_treceability.torque_details_EIP_import2 
+                (pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
+                module_barcode, process_status, pack_no, rework_status, bypass_operator, 
+                bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
+                VALUES 
+            `;
+
+            let pool = await sql.connect(sqlConfig);
+            const result = await pool.request().query(selectQuery);
+            const rows = result.recordset;
+
+            if (rows.length === 0) {
+                console.log("No data to insert.");
+                resolve();
+                return;
+            }
+
+            // Prepare values for bulk insert
+            const values = rows.map(r => {
+                return `(
+                    '${r.pack_name}', 
+                    '${r.module_name}', 
+                    ${r.torque !== null ? r.torque : 'NULL'}, 
+                    ${r.angle !== null ? r.angle : 'NULL'}, 
+                    '${r.torque_status}', 
+                    '${moment(r.date_dd).format('YYYY-MM-DD HH:mm:ss')}', 
+                    '${r.shift}', 
+                    '${r.module_barcode}', 
+                    '${r.process_status}', 
+                    '${r.pack_no}', 
+                    '${r.rework_status}', 
+                    '${r.bypass_operator}', 
+                    '${r.bypass_reason}', 
+                    '${r.process_name}', 
+                    '${r.station_name}', 
+                    '${r.smoke_sensor_linked_pack_no}'
+                )`;
+            }).join(",");
+
+            const insertQuery = insertQueryBase + values;
+
+            await pool.request().query(insertQuery);
+            console.log("Data copied successfully from traial2 to import2.");
+            resolve();
+        } catch (err) {
+            console.error("Error copying data:", err);
+            reject(err);
+        }
+    });
+}
