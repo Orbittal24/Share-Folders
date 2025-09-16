@@ -51,7 +51,7 @@ async function updateModuleBarcodes() {
       let oldValue = table2[i];
       let newValue = table1[i];
 
-      console.log(`Updating row: ${oldValue} -> ${newValue}`);
+      console.log(`Updating module_barcode: ${oldValue} -> ${newValue}`);
 
       await pool.request()
         .input("newValue", sql.VarChar, newValue)
@@ -62,6 +62,16 @@ async function updateModuleBarcodes() {
           WHERE module_barcode = @oldValue
         `);
     }
+
+    // 4. Update pack_no for all BA% module_barcodes
+    console.log(`Updating pack_no for all module_barcodes LIKE 'BA%' -> ${New_final_qr_code}`);
+    await pool.request()
+      .input("final_qrcode", sql.VarChar, New_final_qr_code)
+      .query(`
+        UPDATE taco_treceability.torque_details_EIP_kr_tray
+        SET pack_no = @final_qrcode
+        WHERE module_barcode LIKE 'BA%'
+      `);
 
     console.log("All updates completed successfully.");
     sql.close();
