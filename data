@@ -17,7 +17,7 @@ const config = {
 };
 
 async function updateModuleBarcodes() {
-  var New_final_qr_code = "DJ2038-G2K0000036";
+  var New_final_qr_code = "DJ2038-G2J0000035";
 
   try {
     let pool = await sql.connect(config);
@@ -52,17 +52,12 @@ async function updateModuleBarcodes() {
       throw new Error(`Array length mismatch: Table1=${table1.length}, Table2=${table2.length}`);
     }
 
-    // 3. Perform updates index-wise (update module_barcode + smoke_sensor_linked_pack_no)
+    // 3. Perform updates index-wise
     for (let i = 0; i < table1.length; i++) {
       let oldValue = table2[i];
       let newValue = table1[i];
 
-      if (oldValue === newValue) {
-        console.log(`Skipping update (same value): ${oldValue}`);
-        continue;
-      }
-
-      console.log(`Updating module_barcode + smoke_sensor_linked_pack_no: ${oldValue} -> ${newValue}`);
+      console.log(`Updating module_barcode: ${oldValue} -> ${newValue}`);
 
       await pool.request()
         .input("newValue", sql.VarChar, newValue)
@@ -81,7 +76,7 @@ async function updateModuleBarcodes() {
       .input("final_qrcode", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qrcode
+        SET pack_no = @final_qr_code
         WHERE module_barcode LIKE 'BA%'
       `);
 
@@ -91,12 +86,21 @@ async function updateModuleBarcodes() {
       .input("final_qrcode", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qrcode,
-            module_barcode = @final_qrcode
+        SET pack_no = @final_qr_code,
+            module_barcode = @final_qr_code
         WHERE module_name IN ('M1','M2','M3','M4','M5','M6')
       `);
 
-    console.log("All updates completed successfully.");
+    // 6. Insert all updated rows into import2 table
+    console.log("Inserting updated rows into torque_details_EIP_import2...");
+    await pool.request().query(`
+      INSERT INTO taco_treceability.torque_details_EIP_import2
+      (sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
+      SELECT sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+      FROM taco_treceability.torque_details_EIP_kr_tray
+    `);
+
+    console.log("All updates and insert completed successfully.");
     sql.close();
   } catch (err) {
     console.error("Error:", err);
