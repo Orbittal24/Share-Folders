@@ -40,6 +40,7 @@ async function updateModuleBarcodes() {
       .query(`
         SELECT DISTINCT module_barcode
         FROM taco_treceability.torque_details_EIP_kr_tray
+        WHERE module_barcode LIKE 'BA%'
       `);
 
     let table2 = result2.recordset.map(r => r.module_barcode);
@@ -74,7 +75,7 @@ async function updateModuleBarcodes() {
       .input("final_qrcode", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qr_code
+        SET pack_no = @final_qrcode
         WHERE module_barcode LIKE 'BA%'
       `);
 
@@ -84,7 +85,7 @@ async function updateModuleBarcodes() {
       .input("final_qrcode", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qr_code
+        SET pack_no = @final_qrcode
         WHERE module_name IN ('M1','M2','M3','M4','M5','M6')
       `);
 
