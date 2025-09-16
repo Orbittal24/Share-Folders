@@ -1,8 +1,17 @@
 socket.on('date_selected_OK_station_status', async (date) => {
     console.log("Received date from client Station_status shift:", date);
 
+    // Convert string date ("2025-04-04") to JS Date object
+    const jsDate = new Date(date);
+
+    let pool;
+    const transaction = new sql.Transaction();
+
     try {
-        let pool = await sql.connect(sqlConfig);  // ✅ use sqlConfig instead of config
+        pool = await sql.connect(sqlConfig);
+        await transaction.begin();
+
+        const request = new sql.Request(transaction);
 
         // 1. Select data before the given date
         const selectQuery = `
@@ -10,22 +19,23 @@ socket.on('date_selected_OK_station_status', async (date) => {
                 PackName, FinalQRCode, ModuleName, ModuleBarcode, ModulePrintStatus, ModuleOCV_status, Welding_status, 
                 IR_V_status, FinalQRCodePrint_status, AirLeakage_status, ChargingDischarging_status, PDI_status, 
                 EntryDateTime, moduleNumber, line, shift
-            FROM taco_treceability.station_status_dummy1
+            FROM taco_treceability.station_status
             WHERE EntryDateTime < @selectedDate
         `;
-        const result = await pool.request()
-            .input('selectedDate', sql.Date, date)
+        const result = await request
+            .input('selectedDate', sql.DateTime, jsDate)
             .query(selectQuery);
 
         const rows = result.recordset;
         if (rows.length === 0) {
             console.log('No records found before this date.');
+            await transaction.rollback();
             socket.emit('transfer_complete', { status: 'error', message: 'No records found before this date.' });
             return;
         }
 
-        // 2. Insert into station_status_dummy2
-        const table = new sql.Table('station_status_dummy2');
+        // 2. Insert into station_status_Aug25
+        const table = new sql.Table('taco_treceability.station_status_Aug25');
         table.create = false; // table already exists
 
         // Define columns (except srno)
@@ -68,27 +78,39 @@ socket.on('date_selected_OK_station_status', async (date) => {
             );
         });
 
-        // Bulk insert
-        const request = pool.request();
-        await request.bulk(table);
-        console.log('Data inserted into station_status_dummy2 successfully.');
+        const bulkRequest = new sql.Request(transaction);
+        await bulkRequest.bulk(table);
+        console.log('Data inserted into station_status_Aug25 successfully.');
 
         // 3. Delete from original table after successful insertion
         const deleteQuery = `
-            DELETE FROM taco_treceability.station_status_dummy1
+            DELETE FROM taco_treceability.station_status
             WHERE EntryDateTime < @selectedDate
         `;
-        await pool.request()
-            .input('selectedDate', sql.Date, date)
+        await request
+            .input('selectedDate', sql.DateTime, jsDate)
             .query(deleteQuery);
 
-        console.log('Data deleted from station_status_dummy1 successfully.');
+        console.log('Data deleted from station_status successfully.');
+
+        // Commit transaction
+        await transaction.commit();
         socket.emit('transfer_complete', { status: 'success', message: 'Data transferred and deleted successfully.' });
 
     } catch (err) {
         console.error('Error transferring data:', err);
+
+        // Rollback transaction if error
+        try {
+            await transaction.rollback();
+        } catch (rollbackErr) {
+            console.error('Rollback failed:', rollbackErr);
+        }
+
         socket.emit('transfer_complete', { status: 'error', message: err.message });
     } finally {
-        sql.close();
+        if (pool) {
+            pool.close();
+        }
     }
 });
