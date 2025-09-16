@@ -75,18 +75,18 @@ async function updateModuleBarcodes() {
       .input("final_qrcode", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qr_code
+        SET pack_no = @final_qrcode
         WHERE module_barcode LIKE 'BA%'
       `);
 
     // 5. Update pack_no AND module_barcode for module_name M1–M6
     console.log(`Updating pack_no and module_barcode for module_name IN (M1–M6) -> ${New_final_qr_code}`);
     await pool.request()
-      .input("final_qr_code", sql.VarChar, New_final_qr_code)
+      .input("final_qrcode", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qr_code,
-            module_barcode = @final_qr_code
+        SET pack_no = @final_qrcode,
+            module_barcode = @final_qrcode
         WHERE module_name IN ('M1','M2','M3','M4','M5','M6')
       `);
 
