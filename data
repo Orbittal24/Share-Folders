@@ -1,19 +1,19 @@
 const sql = require("mssql");
 
 const config = {
-   user: "user_mis",
-    password: "admin",
-    database: "taco_treceability",
-    server: 'localhost\\MSSQLSERVER',
-    pool: {
-      max: 10,
-      min: 0,
-      idleTimeoutMillis: 30000
-    },
-    options: {
-      encrypt: true, // for azure
-      trustServerCertificate: true // change to true for local dev / self-signed certs
-    }
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability",
+  server: "localhost\\MSSQLSERVER",
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000
+  },
+  options: {
+    encrypt: true, // for azure
+    trustServerCertificate: true // change to true for local dev / self-signed certs
+  }
 };
 
 async function updateModuleBarcodes() {
@@ -75,17 +75,18 @@ async function updateModuleBarcodes() {
       .input("final_qrcode", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qrcode
+        SET pack_no = @final_qr_code
         WHERE module_barcode LIKE 'BA%'
       `);
 
-    // 5. Update pack_no for module_name M1–M6
-    console.log(`Updating pack_no for module_name IN (M1–M6) -> ${New_final_qr_code}`);
+    // 5. Update pack_no AND module_barcode for module_name M1–M6
+    console.log(`Updating pack_no and module_barcode for module_name IN (M1–M6) -> ${New_final_qr_code}`);
     await pool.request()
-      .input("final_qrcode", sql.VarChar, New_final_qr_code)
+      .input("final_qr_code", sql.VarChar, New_final_qr_code)
       .query(`
         UPDATE taco_treceability.torque_details_EIP_kr_tray
-        SET pack_no = @final_qrcode
+        SET pack_no = @final_qr_code,
+            module_barcode = @final_qr_code
         WHERE module_name IN ('M1','M2','M3','M4','M5','M6')
       `);
 
