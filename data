@@ -1,52 +1,111 @@
-SELECT 
-    sr_no, 
-    pack_name, 
-    module_name, 
-    torque, 
-    angle, 
-    torque_status, 
-    date_dd, 
-    shift, 
-    module_barcode, 
-    process_status, 
-    pack_no, 
-    rework_status, 
-    bypass_operator, 
-    bypass_reason, 
-    process_name, 
-    station_name, 
-    smoke_sensor_linked_pack_no
-FROM taco_treceability.torque_details_EIP
-WHERE pack_no IN (
-    'abc',
-    'DJ1927-G980017268', 'DJ1927-G9F0018117', 'DJ2025-G9G0006251',
-    'DJ2025-G9G0006253', 'DJ2030-G9E0025675', 'DJ2030-G9G0028097',
-    'DJ1918-G9G0001271', 'DJ2025-G9G0006248', 'DJ1927-G9F0018038',
-    'DJ1927-G9G0018203', 'DJ2048-G950000011', 'DJ1927-G9F0018037',
-    'DJ2018-G9G0045368', 'DJ2022-G9E0001799', 'DJ1927-G9G0018188',
-    'DJ2029-G9E0001011', 'DJ1918-G9G0001272', 'DJ2025-G9E0006240',
-    'DJ2030-G920022165', 'DJ2042-G9G0041642', 'DJ2022-G9E0001798',
-    'DJ2043-G9C0003387', 'DJ1927-G4W0006129', 'DJ2022-G950001559',
-    'DJ2025-G9D0006211', 'DJ2028-G94009821',  'DJ2030-G9F0027980',
-    'DJ1828-G9D0049239', 'DJ2029-G9F0001014', 'DJ1927-G920016147',
-    'DJ2022-G9G0001843', 'DJ2030-G980025438', 'DJ2028-G9F010239',
-    'DJ2025-G9G0006255', 'DJ2042-G9G0041679', 'DJ2022-G9E0001774',
-    'DJ2042-G9D0041413', 'DJ2018-G9G0045361', 'DJ2022-G9G0001845',
-    'DJ2028-G9F010235',  'DJ2025-G9B0006136', 'DJ2042-G940040711',
-    'DJ1927-G9G0018141', 'DJ2048-G9C0000012', 'DJ2025-G9G0006244',
-    'DJ2022-G950001557', 'DJ2018-G9F0045360', 'DJ2030-G9G0028030',
-    'DJ1828-G9D0049234', 'DJ2042-G920020050', 'DJ2025-G9G0006249',
-    'DJ1927-G9D0017908', 'DJ1927-G9C0017707', 'DJ2022-G9F0001828',
-    'DJ2022-G9F0001826', 'DJ1927-G9F0018124', 'DJ1916-G9F0003199',
-    'DJ1927-G9G0018183', 'DJ2043-G9E0003427', 'DJ2018-G9G0045362',
-    'DJ1927-G4A0010511', 'DJ2042-G950040764', 'DJ2029-G9G0001015',
-    'DJ1927-G9G0018222', 'DJ2038-G930000050', 'DJ1927-G9F0018031',
-    'DJ2018-G9G0045363', 'DJ2022-G9F0001805', 'DJ1927-G9E0017982',
-    'DJ2025-G9E0006239', 'DJ2022-G950001558', 'DJ1916-G9F0003186',
-    'DJ2022-G9F0001819', 'DJ2025-G9G0006250', 'DJ2042-G9G0041699',
-    'DJ2025-G9G0006269', 'DJ2048-G950000010', 'DJ2042-G9C0041369',
-    'DJ2042-G9G0041646', 'DJ1927-G9B0017608', 'DJ2025-G9G0006252',
-    'DJ2022-G9F0001831', 'DJ1828-G9A0049175', 'DJ2025-G9G0006264',
-    'DJ2022-G9F0001836', 'DJ2025-G9G0006246', 'DJ2025-G9G0006247',
-    'DJ2022-G9E0001791', 'DJ2030-G9E0025691'
-);
+socket.on('date_selected_OK_station_status', async (date) => {
+    console.log("Received date from client Station_status shift:", date);
+
+    // Use only the date (no time)
+    const jsDate = new Date(date);
+
+    let pool;
+    const transaction = new sql.Transaction();
+
+    try {
+        pool = await sql.connect(sqlConfig);
+        await transaction.begin();
+
+        const request = new sql.Request(transaction);
+
+        // 1. Select data before the given date (ignoring time)
+        const selectQuery = `
+            SELECT 
+                PackName, FinalQRCode, ModuleName, ModuleBarcode, ModulePrintStatus, ModuleOCV_status, Welding_status, 
+                IR_V_status, FinalQRCodePrint_status, AirLeakage_status, ChargingDischarging_status, PDI_status, 
+                EntryDateTime, moduleNumber, line, shift
+            FROM taco_treceability.station_status
+            WHERE CONVERT(date, EntryDateTime) < @selectedDate
+        `;
+
+        const result = await request
+            .input('selectedDate', sql.Date, jsDate)   // ✅ binding only date
+            .query(selectQuery);
+
+        const rows = result.recordset;
+        if (rows.length === 0) {
+            console.log('No records found before this date.');
+            await transaction.rollback();
+            socket.emit('transfer_complete', { status: 'error', message: 'No records found before this date.' });
+            return;
+        }
+
+        // 2. Bulk insert into station_status_Aug25 (same as your original)
+        const table = new sql.Table('taco_treceability.station_status_Aug25');
+        table.create = false;
+
+        table.columns.add('PackName', sql.NVarChar(255), { nullable: true });
+        table.columns.add('FinalQRCode', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModuleName', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModuleBarcode', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModulePrintStatus', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ModuleOCV_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('Welding_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('IR_V_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('FinalQRCodePrint_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('AirLeakage_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('ChargingDischarging_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('PDI_status', sql.NVarChar(255), { nullable: true });
+        table.columns.add('EntryDateTime', sql.DateTime, { nullable: true });
+        table.columns.add('moduleNumber', sql.NVarChar(255), { nullable: true });
+        table.columns.add('line', sql.NVarChar(255), { nullable: true });
+        table.columns.add('shift', sql.NVarChar(255), { nullable: true });
+
+        rows.forEach(row => {
+            table.rows.add(
+                row.PackName,
+                row.FinalQRCode,
+                row.ModuleName,
+                row.ModuleBarcode,
+                row.ModulePrintStatus,
+                row.ModuleOCV_status,
+                row.Welding_status,
+                row.IR_V_status,
+                row.FinalQRCodePrint_status,
+                row.AirLeakage_status,
+                row.ChargingDischarging_status,
+                row.PDI_status,
+                row.EntryDateTime,
+                row.moduleNumber,
+                row.line,
+                row.shift
+            );
+        });
+
+        const bulkRequest = new sql.Request(transaction);
+        await bulkRequest.bulk(table);
+        console.log('Data inserted into station_status_Aug25 successfully.');
+
+        // 3. Delete from original table (same filter)
+        const deleteQuery = `
+            DELETE FROM taco_treceability.station_status
+            WHERE CONVERT(date, EntryDateTime) < @selectedDate
+        `;
+        await request
+            .input('selectedDate', sql.Date, jsDate)
+            .query(deleteQuery);
+
+        console.log('Data deleted from station_status successfully.');
+
+        await transaction.commit();
+        socket.emit('transfer_complete', { status: 'success', message: 'Data transferred and deleted successfully.' });
+
+    } catch (err) {
+        console.error('Error transferring data:', err);
+        try {
+            await transaction.rollback();
+        } catch (rollbackErr) {
+            console.error('Rollback failed:', rollbackErr);
+        }
+        socket.emit('transfer_complete', { status: 'error', message: err.message });
+    } finally {
+        if (pool) {
+            pool.close();
+        }
+    }
+});
