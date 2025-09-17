@@ -1,9 +1,6 @@
 socket.on('date_selected_OK_station_status', async (date) => {
     console.log("Received date from client Station_status shift:", date);
 
-    // Use only the date (no time)
-    const jsDate = new Date(date);
-
     let pool;
     const transaction = new sql.Transaction();
 
@@ -20,11 +17,11 @@ socket.on('date_selected_OK_station_status', async (date) => {
                 IR_V_status, FinalQRCodePrint_status, AirLeakage_status, ChargingDischarging_status, PDI_status, 
                 EntryDateTime, moduleNumber, line, shift
             FROM taco_treceability.station_status
-            WHERE CONVERT(date, EntryDateTime) < @selectedDate
+            WHERE CONVERT(date, EntryDateTime) < CONVERT(date, @selectedDate)
         `;
 
         const result = await request
-            .input('selectedDate', sql.Date, jsDate)   // ✅ binding only date
+            .input('selectedDate', sql.NVarChar, date)   // ✅ bind as string
             .query(selectQuery);
 
         const rows = result.recordset;
@@ -35,7 +32,7 @@ socket.on('date_selected_OK_station_status', async (date) => {
             return;
         }
 
-        // 2. Bulk insert into station_status_Aug25 (same as your original)
+        // 2. Bulk insert into station_status_Aug25
         const table = new sql.Table('taco_treceability.station_status_Aug25');
         table.create = false;
 
@@ -84,10 +81,10 @@ socket.on('date_selected_OK_station_status', async (date) => {
         // 3. Delete from original table (same filter)
         const deleteQuery = `
             DELETE FROM taco_treceability.station_status
-            WHERE CONVERT(date, EntryDateTime) < @selectedDate
+            WHERE CONVERT(date, EntryDateTime) < CONVERT(date, @selectedDate)
         `;
         await request
-            .input('selectedDate', sql.Date, jsDate)
+            .input('selectedDate', sql.NVarChar, date)   // ✅ again bind as string
             .query(deleteQuery);
 
         console.log('Data deleted from station_status successfully.');
