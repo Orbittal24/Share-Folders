@@ -449,7 +449,7 @@ let latestData = { // Stores the most recent measurements
   resistance: '0.00',
   timestamp: new Date().toISOString()
 };
-
+let lastWasDefault = true;
 console.log('[SYSTEM] Global variables initialized');
 
 /**
@@ -602,6 +602,58 @@ function processSerialData(data) {
     }
   }
   
+  console.log('[DATA PROCESS] Data format not recognized');
+}
+
+function processSerialData(data) {
+  console.log('[DATA PROCESS] Starting data processing');
+  const cleanData = data.trim();
+  console.log('[DATA PROCESS] Cleaned data:', cleanData);
+
+  if (cleanData.includes('E') && cleanData.includes(',')) {
+    console.log('[DATA PROCESS] Found scientific notation data');
+
+    const values = cleanData.split(',').map(val => val.trim());
+
+    if (values.length >= 2) {
+      const irValue = parseFloat(values[0]);
+      const formattedIR = Math.abs(irValue * 1000).toFixed(2);
+      
+      const voltageValue = parseFloat(values[1].replace(/[^\d.E+-]/g, ''));
+      const formattedVoltage = Math.abs(voltageValue).toFixed(3);
+
+      const MAX_VALID_VALUE = 1000;
+
+      // Case 1: Default values received
+      if (Math.abs(irValue) >= MAX_VALID_VALUE || Math.abs(voltageValue) >= MAX_VALID_VALUE) {
+        console.log('[DATA PROCESS] Default values detected, waiting for operator...');
+        lastWasDefault = true;
+        return; // Skip
+      }
+
+      // Case 2: Valid values received
+      if (lastWasDefault) {
+        // Accept only if last reading was default
+        latestData = {
+          voltage: formattedVoltage,
+          resistance: formattedIR,
+          timestamp: new Date().toISOString(),
+          line_no: lineId
+        };
+        
+        console.log('[DATA PROCESS] New valid measurement after default:', latestData);
+        sendToFastAPI(latestData);
+
+        lastWasDefault = false; // Reset flag
+      } else {
+        // Ignore continuous valid values
+        console.log('[DATA PROCESS] Ignoring continuous valid measurement');
+      }
+
+      return;
+    }
+  }
+
   console.log('[DATA PROCESS] Data format not recognized');
 }
 
