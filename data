@@ -1,116 +1,17 @@
-const sql = require("mssql");
-const io = require("socket.io")(3000, {
-  cors: { origin: "*" }
-});
+socket.on("insert_status", (data) => {
+      console.log("📥 Response from server:", data);
+      const statusBox = document.getElementById("statusBox");
+      statusBox.style.display = "block";
 
-// SQL config
-const sqlConfig = {
-  user: "user_mis",
-  password: "admin",
-  database: "taco_treceability",
-  server: "localhost\\MSSQLSERVER",
-  pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000,
-  },
-  options: {
-    encrypt: true,
-    trustServerCertificate: true,
-  },
-};
-
-// Socket listener
-io.on("connection", (socket) => {
-  console.log("Client connected");
-
-  socket.on("date_selected_OK_station_status", async (date) => {
-    console.log("📅 Received date from client:", date);
-
-    let pool;
-    const transaction = new sql.Transaction();
-
-    try {
-      pool = await sql.connect(sqlConfig);
-      await transaction.begin();
-
-      const request = new sql.Request(transaction);
-
-      // 1. Select data before given date
-      const selectQuery = `
-        SELECT PackName, FinalQRCode, ModuleName, ModuleBarcode, 
-               ModulePrintStatus, ModuleOCV_status, Welding_status, IR_V_status, 
-               FinalQRCodePrint_status, AirLeakage_status, ChargingDischarging_status, 
-               PDI_status, EntryDateTime, moduleNumber, line, shift
-        FROM taco_treceability.station_status
-        WHERE TRY_CAST(EntryDateTime AS DATETIME) < @date
-      `;
-
-      request.input("date", sql.DateTime, new Date(date));
-
-      const result = await request.query(selectQuery);
-
-      if (result.recordset.length === 0) {
-        await transaction.rollback();
-        socket.emit("insert_status", { success: false, message: "No records found before given date" });
-        return;
+      if (data.success) {
+        statusBox.className = "success";
+        statusBox.innerText = data.message;
+      } else {
+        if (data.message.includes("No records")) {
+          statusBox.className = "warning";
+        } else {
+          statusBox.className = "error";
+        }
+        statusBox.innerText = data.message + (data.error ? " (" + data.error + ")" : "");
       }
-
-      console.log("✅ Records to insert:", result.recordset.length);
-
-      // 2. Insert into station_status_Aug25
-      for (const row of result.recordset) {
-        const insertQuery = `
-          INSERT INTO taco_treceability.station_status_Aug25
-            (PackName, FinalQRCode, ModuleName, ModuleBarcode, ModulePrintStatus,
-             ModuleOCV_status, Welding_status, IR_V_status, FinalQRCodePrint_status,
-             AirLeakage_status, ChargingDischarging_status, PDI_status,
-             EntryDateTime, moduleNumber, line, shift)
-          VALUES
-            (@PackName, @FinalQRCode, @ModuleName, @ModuleBarcode, @ModulePrintStatus,
-             @ModuleOCV_status, @Welding_status, @IR_V_status, @FinalQRCodePrint_status,
-             @AirLeakage_status, @ChargingDischarging_status, @PDI_status,
-             @EntryDateTime, @moduleNumber, @line, @shift)
-        `;
-
-        const insertReq = new sql.Request(transaction);
-        insertReq.input("PackName", sql.VarChar, row.PackName);
-        insertReq.input("FinalQRCode", sql.VarChar, row.FinalQRCode);
-        insertReq.input("ModuleName", sql.VarChar, row.ModuleName);
-        insertReq.input("ModuleBarcode", sql.VarChar, row.ModuleBarcode);
-        insertReq.input("ModulePrintStatus", sql.VarChar, row.ModulePrintStatus);
-        insertReq.input("ModuleOCV_status", sql.VarChar, row.ModuleOCV_status);
-        insertReq.input("Welding_status", sql.VarChar, row.Welding_status);
-        insertReq.input("IR_V_status", sql.VarChar, row.IR_V_status);
-        insertReq.input("FinalQRCodePrint_status", sql.VarChar, row.FinalQRCodePrint_status);
-        insertReq.input("AirLeakage_status", sql.VarChar, row.AirLeakage_status);
-        insertReq.input("ChargingDischarging_status", sql.VarChar, row.ChargingDischarging_status);
-        insertReq.input("PDI_status", sql.VarChar, row.PDI_status);
-        insertReq.input("EntryDateTime", sql.VarChar, row.EntryDateTime);
-        insertReq.input("moduleNumber", sql.VarChar, row.moduleNumber);
-        insertReq.input("line", sql.VarChar, row.line);
-        insertReq.input("shift", sql.VarChar, row.shift);
-
-        await insertReq.query(insertQuery);
-      }
-
-      // 3. Delete after successful insert
-      const deleteReq = new sql.Request(transaction);
-      await deleteReq.input("date", sql.DateTime, new Date(date)).query(`
-        DELETE FROM taco_treceability.station_status
-        WHERE TRY_CAST(EntryDateTime AS DATETIME) < @date
-      `);
-
-      await transaction.commit();
-      console.log("🎯 Data moved successfully");
-      socket.emit("insert_status", { success: true, message: "Data inserted into Aug25 and deleted from source" });
-
-    } catch (err) {
-      console.error("❌ Error:", err);
-      try {
-        await transaction.rollback();
-      } catch {}
-      socket.emit("insert_status", { success: false, message: "Error while moving data", error: err.message });
-    }
-  });
-});
+    });
