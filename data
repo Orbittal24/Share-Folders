@@ -1,31 +1,53 @@
-socket.on("insert_status", (data) => {
-  console.log("📥 Response from server:", data);
-
-  if (data.success) {
-    Swal.fire({
-      icon: 'success',
-      title: 'Success',
-      text: data.message
-    }).then(() => {
-      location.reload(); // reload page after OK
-    });
-  } else {
-    if (data.message.includes("No records")) {
-      Swal.fire({
-        icon: 'info',
-        title: 'No Records',
-        text: data.message
-      }).then(() => {
-        location.reload();
-      });
-    } else {
-      Swal.fire({
-        icon: 'error',
-        title: 'Error',
-        text: data.message + (data.error ? " (" + data.error + ")" : "")
-      }).then(() => {
-        location.reload();
-      });
-    }
-  }
-});
+SELECT 
+    sr_no, 
+    pack_name, 
+    module_name, 
+    torque, 
+    angle, 
+    torque_status, 
+    date_dd, 
+    shift, 
+    module_barcode, 
+    process_status, 
+    pack_no, 
+    rework_status, 
+    bypass_operator, 
+    bypass_reason, 
+    process_name, 
+    station_name, 
+    smoke_sensor_linked_pack_no
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+    'abc',
+    'DJ1927-G9H0018319', 'DJ2028-G9G010245',  'DJ2029-G9H0001020',
+    'DJ2025-G9G0006258', 'DJ2042-G9G0041662', 'DJ2025-G9G0006264',
+    'DJ1927-G9G0018204', 'DJ2028-G9B009944',  'DJ1927-G9G0018240',
+    'DJ2025-G9H0006293', 'DJ2018-G9G0045383', 'DJ2018-G9H0045393',
+    'DJ2018-G9H0045406', 'DJ2025-G9G0006263', 'DJ2042-G9H0041833',
+    'DJ2025-G9H0006275', 'DJ2018-G9H0045396', 'DJ2028-G9H010269',
+    'DJ2043-G9G0003486', 'DJ2025-G9G0006256', 'DJ2028-G9G010252',
+    'DJ2025-G9G0006268', 'DJ2029-G9H0001023', 'DJ2042-G9G0041779',
+    'DJ1828-G9B0049204', 'DJ2018-G9F0045359', 'DJ2028-G9G010259',
+    'DJ2018-G9G0045367', 'DJ2025-G9G0006259', 'DJ2018-G9H0045387',
+    'DJ2038-G930000050', 'DJ2029-G9H0001021', 'DJ2018-G9G0045384',
+    'DJ2018-G9H0045398', 'DJ2025-G9G0006266', 'DJ2028-G9G010266',
+    'DJ1828-G9E0049265', 'DJ2022-G9F0001834', 'DJ2028-G9G010260',
+    'DJ2042-G9G0020243', 'DJ1919-G9G0000987', 'DJ2030-G9F0027931',
+    'DJ2030-G9G0028066', 'DJ2025-G9G0006267', 'DJ2018-G9G0045366',
+    'DJ1918-G9G0001278', 'DJ2030-G9G0027996', 'DJ2025-G9F0006243',
+    'DJ2018-G9H0045397', 'DJ1916-G9G0003210', 'DJ1927-G9C0017725',
+    'DJ2028-G9G010261',  'DJ2025-G9E0006241', 'DJ1828-G920049010',
+    'DJ2025-G9H0006274', 'DJ2018-G9H0045415', 'DJ2043-G9E0003412',
+    'DJ1916-G9H0003221', 'DJ2028-G9G010256',  'DJ2018-G9G0045382',
+    'DJ2018-G9H0045392', 'DJ1919-G9G0000985', 'DJ2043-G9G0003490',
+    'DJ2018-G9G0045376', 'DJ2018-G9G0045375', 'DJ2025-G9G0006245',
+    'DJ2018-G9H0045391', 'DJ2018-G9G0045370', 'DJ2043-G9D0002191',
+    'DJ2018-G9G0045369', 'DJ2018-G9G0045380', 'DJ2028-G9H010270',
+    'DJ2042-G9H0041839', 'DJ2028-G9G010257',  'DJ2025-G9G0006271',
+    'DJ1927-G9G0018169', 'DJ2028-G9H010267',  'DJ2025-G9G0006260',
+    'DJ2025-G9G0006254', 'DJ2025-G9G0006261', 'DJ1927-G9G0018271',
+    'DJ2028-G9G010264',  'DJ2043-G9E0003424', 'DJ1927-G9H0018314',
+    'DJ1927-G9G0018262', 'DJ2025-G9G0006272', 'DJ2025-G9B0006137',
+    'DJ2018-G9G0045371', 'DJ2025-G9H0006276', 'DJ2025-G9G0006257',
+    'DJ2018-G9G0045373', 'DJ2030-G9G0028091'
+);
