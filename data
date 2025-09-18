@@ -1,25 +1,31 @@
-    socket.on("insert_status", (data) => {
-      console.log("📥 Response from server:", data);
+socket.on("insert_status", (data) => {
+  console.log("📥 Response from server:", data);
 
-      if (data.success) {
-        Swal.fire({
-          icon: 'success',
-          title: 'Success',
-          text: data.message
-        });
-      } else {
-        if (data.message.includes("No records")) {
-          Swal.fire({
-            icon: 'info',
-            title: 'No Records',
-            text: data.message
-          });
-        } else {
-          Swal.fire({
-            icon: 'error',
-            title: 'Error',
-            text: data.message + (data.error ? " (" + data.error + ")" : "")
-          });
-        }
-      }
+  if (data.success) {
+    Swal.fire({
+      icon: 'success',
+      title: 'Success',
+      text: data.message
+    }).then(() => {
+      location.reload(); // reload page after OK
     });
+  } else {
+    if (data.message.includes("No records")) {
+      Swal.fire({
+        icon: 'info',
+        title: 'No Records',
+        text: data.message
+      }).then(() => {
+        location.reload();
+      });
+    } else {
+      Swal.fire({
+        icon: 'error',
+        title: 'Error',
+        text: data.message + (data.error ? " (" + data.error + ")" : "")
+      }).then(() => {
+        location.reload();
+      });
+    }
+  }
+});
