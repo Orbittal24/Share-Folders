@@ -7,3 +7,6 @@ WHERE sr_no IN (
 
 
 TRUNCATE TABLE taco_treceability.torque_details_EIP_mirror;
+
+SELECT COUNT(*) AS total_records
+FROM taco_treceability.torque_details_EIP_mirror;
