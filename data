@@ -4,3 +4,6 @@ WHERE sr_no IN (
     FROM taco_treceability.torque_details_EIP_mirror
     ORDER BY sr_no ASC
 );
+
+
+TRUNCATE TABLE taco_treceability.torque_details_EIP_mirror;
