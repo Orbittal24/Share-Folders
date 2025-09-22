@@ -1,48 +1,8 @@
-server side
-
 const net = require("net");
 
-const CLIENT_IP = "10.9.4.110";   // Replace with client PC IP
-const CLIENT_PORT = 7000;         // Custom port for communication
-
-const prnData = `
-{D0180,0601,0150|}
-{AY;+06,0|}
-{C|}
-{PC000;0238,0050,05,05,I,00,B=0003155|}
-{PC001;0198,0116,05,05,I,00,B=Module-M8 (-)|}
-{XS;I,0001,0002C3200|}
-`;
-
-function sendToClient(data) {
-  const client = new net.Socket();
-
-  client.connect(CLIENT_PORT, CLIENT_IP, () => {
-    console.log("📡 Connected to client:", CLIENT_IP);
-    client.write(data, "utf8", () => {
-      console.log("✅ Print data sent to client.");
-      client.end();
-    });
-  });
-
-  client.on("error", (err) => {
-    console.error("❌ Error sending to client:", err.message);
-  });
-
-  client.on("close", () => {
-    console.log("🔌 Connection closed.");
-  });
-}
-
-sendToClient(prnData);
-
-
-Client side
-
-const net = require("net");
-const fs = require("fs");
-
-const CLIENT_PORT = 7000; // Must match server port
+const CLIENT_PORT = 7090; // Must match server port
+const PRINTER_IP = "10.9.4.76";
+const PRINTER_PORT = 9100; // RAW printing port
 
 // Create TCP server to receive PRN data
 const server = net.createServer((socket) => {
@@ -55,26 +15,24 @@ const server = net.createServer((socket) => {
   });
 
   socket.on("end", () => {
-    console.log("✅ Data received. Sending to printer...");
+    console.log("✅ Data received. Forwarding to printer...");
 
-    // Option 1: Write to LPT1 directly (works if LPT1 is mapped to USB printer)
-    try {
-      fs.writeFileSync("LPT1", prnData, "utf8");
-      console.log("🖨️ Sent to LPT1 successfully.");
-    } catch (err) {
-      console.error("❌ Failed to write to LPT1:", err.message);
-    }
+    // Connect to printer directly
+    const printer = new net.Socket();
+    printer.connect(PRINTER_PORT, PRINTER_IP, () => {
+      console.log(`🖨️ Connected to printer at ${PRINTER_IP}:${PRINTER_PORT}`);
+      printer.write(prnData, "utf8", () => {
+        console.log("✅ Print data sent successfully!");
+        printer.end();
+      });
+    });
 
-    // Option 2 (fallback): Use Windows print command
-    // Save PRN to a file and send via print command
-    fs.writeFileSync("printjob.prn", prnData, "utf8");
-    const { exec } = require("child_process");
-    exec('print /D:LPT1 printjob.prn', (err, stdout, stderr) => {
-      if (err) {
-        console.error("❌ Print command error:", err.message);
-      } else {
-        console.log("✅ Print command executed.");
-      }
+    printer.on("error", (err) => {
+      console.error("❌ Printer connection error:", err.message);
+    });
+
+    printer.on("close", () => {
+      console.log("🔌 Printer connection closed.");
     });
   });
 });
