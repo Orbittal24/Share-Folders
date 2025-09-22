@@ -1,8 +1,8 @@
 const net = require("net");
+const fs = require("fs");
+const { exec } = require("child_process");
 
 const CLIENT_PORT = 7090; // Must match server port
-const PRINTER_IP = "10.9.4.76";
-const PRINTER_PORT = 9100; // RAW printing port
 
 // Create TCP server to receive PRN data
 const server = net.createServer((socket) => {
@@ -15,24 +15,21 @@ const server = net.createServer((socket) => {
   });
 
   socket.on("end", () => {
-    console.log("✅ Data received. Forwarding to printer...");
+    console.log("✅ Data received. Sending to USB printer...");
 
-    // Connect to printer directly
-    const printer = new net.Socket();
-    printer.connect(PRINTER_PORT, PRINTER_IP, () => {
-      console.log(`🖨️ Connected to printer at ${PRINTER_IP}:${PRINTER_PORT}`);
-      printer.write(prnData, "utf8", () => {
-        console.log("✅ Print data sent successfully!");
-        printer.end();
-      });
-    });
+    // Save PRN data to a temporary file
+    const filePath = "printjob.prn";
+    fs.writeFileSync(filePath, prnData, "utf8");
 
-    printer.on("error", (err) => {
-      console.error("❌ Printer connection error:", err.message);
-    });
-
-    printer.on("close", () => {
-      console.log("🔌 Printer connection closed.");
+    // Send the file to printer (USB001 or LPT1)
+    // Change "USB001" to your printer’s port name or use the printer name directly
+    exec(`print /D:USB001 ${filePath}`, (err, stdout, stderr) => {
+      if (err) {
+        console.error("❌ Print command error:", err.message);
+        return;
+      }
+      console.log("✅ Print command executed.");
+      console.log(stdout);
     });
   });
 });
