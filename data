@@ -1,8 +1,8 @@
 const net = require("net");
-const fs = require("fs");
-const { exec } = require("child_process");
+const { spawn } = require("child_process");
 
 const CLIENT_PORT = 7090; // Must match server port
+const PRINTER_NAME = "TOSHIBA"; // Change to your USB printer’s installed name
 
 // Create TCP server to receive PRN data
 const server = net.createServer((socket) => {
@@ -17,19 +17,26 @@ const server = net.createServer((socket) => {
   socket.on("end", () => {
     console.log("✅ Data received. Sending to USB printer...");
 
-    // Save PRN data to a temporary file
-    const filePath = "printjob.prn";
-    fs.writeFileSync(filePath, prnData, "utf8");
+    // Spawn Windows print command and send PRN data via stdin
+    const printProcess = spawn("PRINT", [`/D:${PRINTER_NAME}`], {
+      shell: true,
+      windowsHide: true,
+    });
 
-    // Send the file to printer (USB001 or LPT1)
-    // Change "USB001" to your printer’s port name or use the printer name directly
-    exec(`print /D:USB001 ${filePath}`, (err, stdout, stderr) => {
-      if (err) {
-        console.error("❌ Print command error:", err.message);
-        return;
-      }
-      console.log("✅ Print command executed.");
-      console.log(stdout);
+    // Write data directly without saving file
+    printProcess.stdin.write(prnData, "utf8");
+    printProcess.stdin.end();
+
+    printProcess.stdout.on("data", (data) => {
+      console.log("🖨️ Printer response:", data.toString());
+    });
+
+    printProcess.stderr.on("data", (data) => {
+      console.error("❌ Print error:", data.toString());
+    });
+
+    printProcess.on("close", (code) => {
+      console.log(`🔌 Print job finished with code ${code}`);
     });
   });
 });
