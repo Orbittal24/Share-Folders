@@ -1,46 +1,40 @@
-const net = require("net");
-const { spawn } = require("child_process");
-
-const CLIENT_PORT = 7090; // Must match server port
-const PRINTER_NAME = "TOSHIBA"; // Change to your USB printer’s installed name
-
-// Create TCP server to receive PRN data
-const server = net.createServer((socket) => {
-  console.log("📥 Connection received from server.");
-
-  let prnData = "";
-
-  socket.on("data", (chunk) => {
-    prnData += chunk.toString();
-  });
-
-  socket.on("end", () => {
-    console.log("✅ Data received. Sending to USB printer...");
-
-    // Spawn Windows print command and send PRN data via stdin
-    const printProcess = spawn("PRINT", [`/D:${PRINTER_NAME}`], {
-      shell: true,
-      windowsHide: true,
-    });
-
-    // Write data directly without saving file
-    printProcess.stdin.write(prnData, "utf8");
-    printProcess.stdin.end();
-
-    printProcess.stdout.on("data", (data) => {
-      console.log("🖨️ Printer response:", data.toString());
-    });
-
-    printProcess.stderr.on("data", (data) => {
-      console.error("❌ Print error:", data.toString());
-    });
-
-    printProcess.on("close", (code) => {
-      console.log(`🔌 Print job finished with code ${code}`);
-    });
-  });
-});
-
-server.listen(CLIENT_PORT, () => {
-  console.log(`🚀 Client listening on port ${CLIENT_PORT} for print jobs...`);
-});
+SELECT 
+    sr_no, 
+    pack_name, 
+    module_name, 
+    torque, 
+    angle, 
+    torque_status, 
+    date_dd, 
+    shift, 
+    module_barcode, 
+    process_status, 
+    pack_no, 
+    rework_status, 
+    bypass_operator, 
+    bypass_reason, 
+    process_name, 
+    station_name, 
+    smoke_sensor_linked_pack_no 
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+    'abc',
+    'DJ2030-G9N0028785', 'DJ2036-G590000001', 'DJ2042-G9K0042019',
+    'DJ2043-G9N0003703', 'DJ2029-G9N0001047', 'DJ1916-G9L0003283',
+    'DJ1927-G9L0018774', 'DJ1927-G9H0018472', 'DJ2037-G810000026',
+    'DJ2030-G9N0028843', 'DJ2042-G9K0020314', 'DJ2025-G9M0006426',
+    'DJ2030-G8G0021174', 'DJ1927-G9H0000410', 'DJ2043-G9K0003572',
+    'DJ2025-G9K0006349', 'DJ2030-G9N0028754', 'DJ2043-G9L0003661',
+    'DJ2045-G9N0000042', 'DJ2043-G9L0003645', 'DJ2030-G9M0029113',
+    'DJ2043-G9M0003679', 'DJ2025-G9L0006408', 'DJ1927-G9N0018954',
+    'DJ1927-G9M0018863', 'DJ1916-G9J0003261', 'DJ1927-G9H0018321',
+    'DJ1828-G9N0049409', 'DJ1927-G9K0018705', 'DJ1828-G9N0049396',
+    'DJ2025-G9L0006385', 'DJ2030-G9L0028568', 'DJ2025-G9H0006298',
+    'DJ1828-G810048617', 'DJ1916-G9L0003297', 'DJ2029-G9N0001046',
+    'DJ2042-G9J0041996', 'DJ2018-G9J0045438', 'DJ2042-G9N0042209',
+    'DJ2025-G9H0006295', 'DJ2025-G9L0006401', 'DJ1916-G9L0003298',
+    'DJ2022-G9D0001747', 'DJ2042-G9N0042213', 'DJ2025-G9K0006369',
+    'DJ2043-G9L0003632', 'DJ1828-G9N0049419', 'DJ2025-G9L0006414',
+    'DJ2025-G9L0006423', 'DJ1927-G9K0018708', 'DJ2029-G9L0001037',
+    'DJ2025-G9K0006364'
+);
