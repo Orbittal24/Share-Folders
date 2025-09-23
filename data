@@ -1,1 +1,8 @@
 netsh advfirewall firewall add rule name="Open Port 8080" dir=in action=allow protocol=TCP localport=8080
+
+netsh advfirewall firewall add rule name="Open Port 9090" dir=in action=allow protocol=UDP localport=9090
+
+netsh advfirewall firewall delete rule name="Open Port 8080"
+
+netstat -an | findstr :9090
+
