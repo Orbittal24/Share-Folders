@@ -1,8 +1,39 @@
-netsh advfirewall firewall add rule name="Open Port 8080" dir=in action=allow protocol=TCP localport=8080
-
-netsh advfirewall firewall add rule name="Open Port 9090" dir=in action=allow protocol=UDP localport=9090
-
-netsh advfirewall firewall delete rule name="Open Port 8080"
-
-netstat -an | findstr :9090
-
+SELECT 
+    sr_no, 
+    pack_name, 
+    module_name, 
+    torque, 
+    angle, 
+    torque_status, 
+    date_dd, 
+    shift, 
+    module_barcode, 
+    process_status, 
+    pack_no, 
+    rework_status, 
+    bypass_operator, 
+    bypass_reason, 
+    process_name, 
+    station_name, 
+    smoke_sensor_linked_pack_no 
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+    'abc',
+    'DJ1927-G9A0016378', 'DJ2043-G9L0003635', 'DJ1828-G9P0049423',
+    'DJ1828-G9P0049430', 'DJ1927-G9N0018982', 'DJ2030-G9P0030016',
+    'DJ2042-G9J0041880', 'DJ1927-G9H0018364', 'DJ2030-G9N0028779',
+    'DJ2022-G9E0001774', 'DJ1927-G9H0018414', 'DJ1828-G9P0049426',
+    'DJ2037-G810000026', 'DJ2042-G9N0042248', 'DJ1828-G9P0049431',
+    'DJ1828-G9M0049358', 'DJ2025-G9P0006441', 'DJ1916-G9P0003323',
+    'DJ1927-G8X0015883', 'DJ2025-G9L0006416', 'DJ2042-G9G0041717',
+    'DJ1916-G9J0003254', 'DJ2042-G9J0020258', 'DJ1927-G9N0018960',
+    'DJ2043-G9P0003743', 'DJ2030-G9N0028828', 'DJ2030-G9P0030001',
+    'DJ1927-G9P0018988', 'DJ2029-G9P0001050', 'DJ2029-G9M0001041',
+    'DJ1828-G9N0049412', 'DJ2030-G9N0028879', 'DJ1828-G9N0049414',
+    'DJ2043-G9P0003742', 'DJ2025-G9H0006295', 'DJ2025-G9G0006269',
+    'DJ2030-G9P0028998', 'DJ2036-G590000001', 'DJ1916-G9H0003224',
+    'DJ2025-G9P0006439', 'DJ1927-G9N0018985', 'DJ1828-G9P0049433',
+    'DJ2043-G9F0003472', 'DJ1927-G6J0002375', 'DJ2042-G9P0042266',
+    'DJ2030-G9P0028914', 'DJ2043-G9N0003701', 'DJ2043-G9M0003689',
+    'DJ2025-G9K0006377'
+);
