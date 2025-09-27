@@ -1,40 +1,55 @@
-SELECT 
-    sr_no, 
-    pack_name, 
-    module_name, 
-    torque, 
-    angle, 
-    torque_status, 
-    date_dd, 
-    shift, 
-    module_barcode, 
-    process_status, 
-    pack_no, 
-    rework_status, 
-    bypass_operator, 
-    bypass_reason, 
-    process_name, 
-    station_name, 
-    smoke_sensor_linked_pack_no
-FROM taco_treceability.torque_details_EIP
-WHERE pack_no IN (
-    'abc',
-    'DJ1828-G9S0049501', 'DJ2036-G590000001', 'DJ1927-G9J0018560',
-    'DJ2043-G9N0003702', 'DJ1828-G9L0049325', 'DJ1919-G9R0001058',
-    'DJ2030-G9S0030258', 'DJ1927-G9S0019198', 'DJ2029-G9T0001068',
-    'DJ1927-G9S0019189', 'DJ2029-G9T0001066', 'DJ2037-G810000026',
-    'DJ2025-G9S0006509', 'DJ1916-G9R0003351', 'DJ1828-G9T0049517',
-    'DJ2045-G9T0000043', 'DJ2043-G9N0003695', 'DJ1927-G9L0018740',
-    'DJ1828-G9M0049367', 'DJ2022-G9G0001857', 'DJ2042-G9S0020528',
-    'DJ2025-G9J0006317', 'DJ2030-G9S0029289', 'DJ1828-G9T0049519',
-    'DJ2043-G990003299', 'DJ1927-G9S0019205', 'DJ2029-G9T0001067',
-    'DJ2043-G9L0003624', 'DJ1927-G9S0016458', 'DJ2030-G9T0030282',
-    'DJ2030-G9T0030370', 'DJ2030-G9S0030249', 'DJ2038-G990000052',
-    'DJ1828-G9L0049317', 'DJ1927-G8K0014138', 'DJ1828-G9R0049472',
-    'DJ1927-G9S0019220', 'DJ2025-G9S0006485', 'DJ2042-G9S0020532',
-    'DJ2043-G9P0003725', 'DJ2030-G9T0029293', 'DJ2018-G9S0045457',
-    'DJ1828-G9T0049518', 'DJ1927-G9T0016462', 'DJ2022-G9D0001747',
-    'DJ2025-G8G0005527', 'DJ1828-G9T0049546', 'DJ2025-G9S0006507',
-    'DJ2029-G9S0001064', 'DJ1927-G9S0019179', 'DJ1927-G9S0019184',
-    'DJ1927-G910014683'
-);
+else if (message === "Process register updated successfully" && Process_Status === "Completed") {
+  try {
+    // 1. Extract Process_ID from putUrl
+    const processIdMatch = putUrl.match(/Process_ID=(\d+)/);
+    const processId = processIdMatch ? processIdMatch[1] : null;
+
+    if (!processId) {
+      console.error("Process_ID not found in PUT_url:", putUrl);
+    } else {
+      console.log("Extracted Process_ID:", processId);
+
+      // 2. Fetch Station_ID from DB
+      const stationResult = await pool1
+        .request()
+        .query(`SELECT Station_ID FROM taco_treceability.Process_Master WHERE Process_ID = '${processId}'`);
+
+      if (stationResult.recordset.length === 0) {
+        console.error("No Station_ID found for Process_ID:", processId);
+      } else {
+        const stationId = stationResult.recordset[0].Station_ID;
+        console.log("Fetched Station_ID:", stationId);
+
+        // 3. Build payload for API
+        const stationPayload = {
+          station_id: stationId,
+          line_id: "1",
+          customer_qrcode: module_barcode,
+          station_status: "OK",
+          checklist_name: "NA",
+          substation_id: processId
+        };
+
+        // Send POST request to station_status/filter API
+        try {
+          const stationResponse = await axios.post(
+            "https://Misapp.tataautocomp.com:5555/station_status/filter",
+            stationPayload
+          );
+          console.log("Station Status API Response:", JSON.stringify(stationResponse.data, null, 2));
+        } catch (stationErr) {
+          console.error("Error sending Station Status API:", stationErr.message);
+          if (stationErr.response) console.error("Station API Error Response:", JSON.stringify(stationErr.response.data, null, 2));
+        }
+      }
+    }
+
+    // 4. Delete record from DB after successful process update
+    await pool1.request().query(`DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no = ${row.sr_no}`);
+    console.log(`Deleted sr_no ${row.sr_no} after successful update.`);
+    console.log("Pack sr_no complete***:::::::", message, Process_Status);
+    return startFetchLoop();
+  } catch (innerErr) {
+    console.error("Error in Process Completed flow:", innerErr.message);
+  }
+}
