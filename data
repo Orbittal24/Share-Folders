@@ -1,55 +1,56 @@
-else if (message === "Process register updated successfully" && Process_Status === "Completed") {
-  try {
-    // 1. Extract Process_ID from putUrl
-    const processIdMatch = putUrl.match(/Process_ID=(\d+)/);
-    const processId = processIdMatch ? processIdMatch[1] : null;
-
-    if (!processId) {
-      console.error("Process_ID not found in PUT_url:", putUrl);
-    } else {
-      console.log("Extracted Process_ID:", processId);
-
-      // 2. Fetch Station_ID from DB
-      const stationResult = await pool1
-        .request()
-        .query(`SELECT Station_ID FROM taco_treceability.Process_Master WHERE Process_ID = '${processId}'`);
-
-      if (stationResult.recordset.length === 0) {
-        console.error("No Station_ID found for Process_ID:", processId);
-      } else {
-        const stationId = stationResult.recordset[0].Station_ID;
-        console.log("Fetched Station_ID:", stationId);
-
-        // 3. Build payload for API
-        const stationPayload = {
-          station_id: stationId,
-          line_id: "1",
-          customer_qrcode: module_barcode,
-          station_status: "OK",
-          checklist_name: "NA",
-          substation_id: processId
-        };
-
-        // Send POST request to station_status/filter API
-        try {
-          const stationResponse = await axios.post(
-            "https://Misapp.tataautocomp.com:5555/station_status/filter",
-            stationPayload
-          );
-          console.log("Station Status API Response:", JSON.stringify(stationResponse.data, null, 2));
-        } catch (stationErr) {
-          console.error("Error sending Station Status API:", stationErr.message);
-          if (stationErr.response) console.error("Station API Error Response:", JSON.stringify(stationErr.response.data, null, 2));
-        }
-      }
-    }
-
-    // 4. Delete record from DB after successful process update
-    await pool1.request().query(`DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no = ${row.sr_no}`);
-    console.log(`Deleted sr_no ${row.sr_no} after successful update.`);
-    console.log("Pack sr_no complete***:::::::", message, Process_Status);
-    return startFetchLoop();
-  } catch (innerErr) {
-    console.error("Error in Process Completed flow:", innerErr.message);
-  }
-}
+SELECT 
+    sr_no, 
+    pack_name, 
+    module_name, 
+    torque, 
+    angle, 
+    torque_status, 
+    date_dd, 
+    shift, 
+    module_barcode, 
+    process_status, 
+    pack_no, 
+    rework_status, 
+    bypass_operator, 
+    bypass_reason, 
+    process_name, 
+    station_name, 
+    smoke_sensor_linked_pack_no
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+    'abc',
+    'DJ2025-G9V0006524', 'DJ2042-G9W0042570', 'DJ2025-G9T0006514',
+    'DJ2036-G590000001', 'DJ2030-G9T0029314', 'DJ2029-G9V0001074',
+    'DJ2025-G9V0006546', 'DJ2030-G9V0029336', 'DJ1828-G9T0049550',
+    'DJ2042-G9V0042557', 'DJ2025-G9V0006544', 'DJ2025-G9S0006497',
+    'DJ2025-G9W0006547', 'DJ2025-G9V0006534', 'DJ2029-G9T0001068',
+    'DJ1828-G9T0049521', 'DJ2025-G9V0006527', 'DJ2042-G650006895',
+    'DJ2043-G9T0003778', 'DJ2037-G810000026', 'DJ2025-G9V0006543',
+    'DJ2043-G9V0003817', 'DJ1927-G9T0019341', 'DJ2025-G9V0006521',
+    'DJ2018-G9W0045504', 'DJ1916-G9T0003375', 'DJ2018-G9V0045493',
+    'DJ2030-G9V0030510', 'DJ2042-G9V0020564', 'DJ2029-G6B0000761',
+    'DJ2022-G9V0002019', 'DJ2043-G9V0003789', 'DJ1828-G9P0049454',
+    'DJ2030-G9V0030541', 'DJ2030-G920022165', 'DJ2030-G9T0030402',
+    'DJ2025-G9V0006542', 'DJ2043-G9L0002774', 'DJ2029-G9V0001070',
+    'DJ1927-G800014648', 'DJ2030-G9V0026083', 'DJ2029-G9V0001073',
+    'DJ1927-G9W0019446', 'DJ2030-G9T0030395', 'DJ2025-G9S0006505',
+    'DJ2025-G9V0006529', 'DJ2025-G9V0006541', 'DJ1828-G9V0049551',
+    'DJ1927-G8K0015543', 'DJ1828-G9S0049497', 'DJ1927-G9S0019231',
+    'DJ1927-G9V0019426', 'DJ2025-G9V0006535', 'DJ2025-G9V0006539',
+    'DJ2025-G9V0006540', 'DJ2025-G9V0006528', 'DJ2018-G9V0045497',
+    'DJ1927-G9R0019130', 'DJ2018-G9V0045492', 'DJ2043-G9V0003796',
+    'DJ2042-G8P0016567', 'DJ2043-G9V0003788', 'DJ1828-G9T0049542',
+    'DJ2042-G9V0020581', 'DJ1828-G9V0049569', 'DJ2025-G9W0006552',
+    'DJ2030-G9T0030403', 'DJ1828-G9T0049537', 'DJ2025-G9T0006517',
+    'DJ1828-G810048617', 'DJ2025-G9K0006380', 'DJ2025-G9W0006548',
+    'DJ2029-G9N0001046', 'DJ1919-G9R0001057', 'DJ2030-G9T0030378',
+    'DJ2025-G960005971', 'DJ2042-G9R0042318', 'DJ2018-G9W0045500',
+    'DJ2022-G9K0001989', 'DJ2022-G9V0002026', 'DJ2042-G9S0042405',
+    'DJ1828-G9V0049564', 'DJ1927-G9V0019409', 'DJ1828-G9V0049566',
+    'DJ1828-G9T0049530', 'DJ2043-G9V0003816', 'DJ2042-G9V0020567',
+    'DJ2030-G9V0030492', 'DJ1828-G9V0049558', 'DJ2042-G930020066',
+    'DJ1828-G9V0049556', 'DJ2042-G9W0042586', 'DJ2043-G9V0003803',
+    'DJ2043-G9K0003593', 'DJ2025-G9V0006525', 'DJ2042-G9R0020517',
+    'DJ2025-G9K0006377', 'DJ1927-G9T0019305', 'DJ2018-G9V0045488',
+    'DJ2042-G9S0042422'
+);
