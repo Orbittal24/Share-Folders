@@ -1,28 +1,68 @@
-<!-- Include SweetAlert2 -->
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+socket.on('get_export_all_battery_torque_arrDetails_editQRCode', function (final_qrcode_ID, final_qrcode_batteryName) {
+    console.log('IR:::::::::::::::::::', final_qrcode_ID, final_qrcode_batteryName)
+    var torque_arr = [];
+    sql.connect(sqlConfig, function (err) {
+        request = new sql.Request();
 
-<script>
-socket.on("foam_interlock_status", function (foam_numb) {
-    console.log("foam_numb length:", foam_numb.length);
+        // First query: torque_details_EIP_import2
+        request.query("SELECT * FROM taco_treceability.torque_details_EIP_import2 WHERE pack_no like '%" + final_qrcode_ID + "%' and pack_name like '%" + final_qrcode_batteryName + "%'", function (err, recordset1) {
+            if (err) console.log(err);
+            var result1 = recordset1.recordset;
 
-    if (foam_numb.length === 0) {
-        // Show SweetAlert popup and refresh page on OK
-        Swal.fire({
-            icon: 'error',
-            title: 'Foam Missing',
-            text: 'Foam is not linked with the Pack',
-            confirmButtonText: 'OK',
-            allowOutsideClick: false,
-            allowEscapeKey: false,
-            position: 'center'
-        }).then(() => {
-            // Refresh page regardless of result
-            location.reload();
+            if (result1.length > 0) {
+                for (var i in result1) {
+                    var module_barcode = result1[i].module_barcode;
+                    var torque = result1[i].torque;
+                    var angle = result1[i].angle;
+                    var date_dd = result1[i].torque_status;
+                    var rework_status = result1[i].rework_status;
+                    var bypass_operator = result1[i].bypass_operator;
+                    var bypass_reason = result1[i].bypass_reason;
+                    var process_name = result1[i].process_name;
+
+                    torque_arr.push(module_barcode);
+                    torque_arr.push(torque);
+                    torque_arr.push(angle);
+                    torque_arr.push(date_dd);
+                    torque_arr.push(rework_status);
+                    torque_arr.push(bypass_operator);
+                    torque_arr.push(bypass_reason);
+                    torque_arr.push(process_name);
+                }
+            }
+
+            // Second query: torque_details_EIP
+            request.query("SELECT * FROM taco_treceability.torque_details_EIP WHERE pack_no like '%" + final_qrcode_ID + "%' and pack_name like '%" + final_qrcode_batteryName + "%'", function (err, recordset2) {
+                if (err) console.log(err);
+                var result2 = recordset2.recordset;
+
+                if (result2.length > 0) {
+                    for (var i in result2) {
+                        var module_barcode = result2[i].module_barcode;
+                        var torque = result2[i].torque;
+                        var angle = result2[i].angle;
+                        var date_dd = result2[i].torque_status;
+                        var rework_status = result2[i].rework_status;
+                        var bypass_operator = result2[i].bypass_operator;
+                        var bypass_reason = result2[i].bypass_reason;
+                        var process_name = result2[i].process_name;
+
+                        torque_arr.push(module_barcode);
+                        torque_arr.push(torque);
+                        torque_arr.push(angle);
+                        torque_arr.push(date_dd);
+                        torque_arr.push(rework_status);
+                        torque_arr.push(bypass_operator);
+                        torque_arr.push(bypass_reason);
+                        torque_arr.push(process_name);
+                    }
+                }
+
+                // Emit final combined result
+                setTimeout(function () {
+                    socket.emit("set_export_all_battery_torque_arrDetails_editQRCode", torque_arr);
+                }, 100);
+            });
         });
-    } else {
-        // Proceed if foam is linked
-        console.log("Foam linked, proceeding...", glob_pack, glob_packName);
-        socket.emit("getGlobalIngersollData", glob_packName, glob_pack);
-    }
+    });
 });
-</script>
