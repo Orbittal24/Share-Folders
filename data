@@ -1,79 +1,24 @@
+<!-- Include SweetAlert2 -->
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
+<script>
 socket.on("foam_interlock_status", function (foam_numb) {
     console.log("foam_numb length:", foam_numb.length);
 
-    // Function to create and show a custom alert div
-    function showCustomAlert(message, callback) {
-        // Create overlay
-        const overlay = document.createElement("div");
-        overlay.style.position = "fixed";
-        overlay.style.top = "0";
-        overlay.style.left = "0";
-        overlay.style.width = "100%";
-        overlay.style.height = "100%";
-        overlay.style.background = "rgba(0,0,0,0.5)";
-        overlay.style.display = "flex";
-        overlay.style.justifyContent = "center";
-        overlay.style.alignItems = "center";
-        overlay.style.zIndex = "9999";
-
-        // Create alert box
-        const box = document.createElement("div");
-        box.style.background = "#fff";
-        box.style.padding = "25px 30px";
-        box.style.borderRadius = "10px";
-        box.style.textAlign = "center";
-        box.style.boxShadow = "0 8px 25px rgba(0,0,0,0.3)";
-        box.style.maxWidth = "400px";
-        box.style.fontFamily = "Arial, sans-serif";
-        box.style.display = "flex";
-        box.style.flexDirection = "column";
-        box.style.justifyContent = "center";
-
-        // Title
-        const title = document.createElement("h2");
-        title.textContent = "Foam Status";
-        title.style.color = "#e74c3c";
-        title.style.marginBottom = "15px";
-
-        // Message
-        const msg = document.createElement("p");
-        msg.textContent = message;
-        msg.style.color = "#333";
-        msg.style.marginBottom = "20px";
-
-        // OK Button
-        const btn = document.createElement("button");
-        btn.textContent = "OK";
-        btn.style.padding = "8px 20px";
-        btn.style.border = "none";
-        btn.style.background = "#3498db";
-        btn.style.color = "#fff";
-        btn.style.borderRadius = "5px";
-        btn.style.cursor = "pointer";
-        btn.style.fontSize = "14px";
-        btn.onmouseover = () => btn.style.background = "#2980b9";
-        btn.onmouseout = () => btn.style.background = "#3498db";
-
-        btn.onclick = () => {
-            document.body.removeChild(overlay);
-            if (callback) callback();
-        };
-
-        // Assemble alert box
-        box.appendChild(title);
-        box.appendChild(msg);
-        box.appendChild(btn);
-        overlay.appendChild(box);
-
-        // Add to body
-        document.body.appendChild(overlay);
-    }
-
     if (foam_numb.length === 0) {
-        // Show beautiful alert popup and refresh page on OK
-        showCustomAlert("Foam is not linked with the Pack", () => {
-            location.reload();
+        // Show beautiful SweetAlert popup and refresh page on OK
+        Swal.fire({
+            icon: 'error',
+            title: 'Foam Missing',
+            text: 'Foam is not linked with the Pack',
+            confirmButtonText: 'OK',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            position: 'center'
+        }).then((result) => {
+            if (result.isConfirmed) {
+                location.reload(); // Refresh page
+            }
         });
     } else {
         // Proceed if foam is linked
@@ -81,4 +26,4 @@ socket.on("foam_interlock_status", function (foam_numb) {
         socket.emit("getGlobalIngersollData", glob_packName, glob_pack);
     }
 });
-
+</script>
