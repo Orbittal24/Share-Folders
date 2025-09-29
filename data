@@ -1,15 +1,25 @@
+<!-- Include SweetAlert2 -->
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <script>
   socket.on("foam_interlock_status", function (foam_numb) {
     console.log("foam_numb length:", foam_numb.length);
 
     if (foam_numb.length === 0) {
-      // Show popup with SweetAlert2 if no foam linked
+      // SweetAlert2 popup in center
       Swal.fire({
         icon: "error",
         title: "Foam Missing",
         text: "Foam is not linked with the Pack",
-        confirmButtonText: "OK"
+        confirmButtonText: "OK",
+        allowOutsideClick: false, // disable click outside to close
+        allowEscapeKey: false,    // disable escape key
+        position: 'center'
+      }).then((result) => {
+        if (result.isConfirmed) {
+          // Refresh page on clicking OK
+          location.reload();
+        }
       });
     } else {
       // Call another socket when foam is linked
