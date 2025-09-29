@@ -1,12 +1,20 @@
-socket.on("foam_interlock_status", function (foam_numb) {
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+  socket.on("foam_interlock_status", function (foam_numb) {
     console.log("foam_numb length:", foam_numb.length);
 
     if (foam_numb.length === 0) {
-      // Show popup if no foam linked
-      alert("❌ Foam is not linked with the Pack");
+      // Show popup with SweetAlert2 if no foam linked
+      Swal.fire({
+        icon: "error",
+        title: "Foam Missing",
+        text: "Foam is not linked with the Pack",
+        confirmButtonText: "OK"
+      });
     } else {
       // Call another socket when foam is linked
-      console.log("✅ Foam linked, proceeding...");
+      console.log("Foam linked, proceeding...", pack, Module_count[3]);
       socket.emit("getGlobalIngersollData", pack, Module_count[3]);
     }
   });
+</script>
