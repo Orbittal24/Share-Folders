@@ -1,12 +1,8 @@
-<!-- Include SweetAlert2 -->
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
-<script>
 socket.on("foam_interlock_status", function (foam_numb) {
     console.log("foam_numb length:", foam_numb.length);
 
     if (foam_numb.length === 0) {
-        // Show beautiful SweetAlert popup and refresh page on OK
+        // Show SweetAlert popup
         Swal.fire({
             icon: 'error',
             title: 'Foam Missing',
@@ -17,7 +13,7 @@ socket.on("foam_interlock_status", function (foam_numb) {
             position: 'center'
         }).then((result) => {
             if (result.isConfirmed) {
-                location.reload(); // Refresh page
+                location.reload(); // Refresh page after clicking OK
             }
         });
     } else {
@@ -26,4 +22,3 @@ socket.on("foam_interlock_status", function (foam_numb) {
         socket.emit("getGlobalIngersollData", glob_packName, glob_pack);
     }
 });
-</script>
