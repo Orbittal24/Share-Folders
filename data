@@ -16,8 +16,12 @@ socket.on("get_foam_interlock", (packName, pack_numb) => {
         if (err) {
           console.error("Query Error:", err);
         } else {
-          console.log("Foam Interlock Result:", result.recordset);
-          socket.emit("foam_interlock_status", result.recordset);
+          // Convert recordset to array of foam_no strings
+          const foamNos = result.recordset.map(row => row.foam_no);
+
+          console.log("Foam Interlock Result:", foamNos);
+
+          socket.emit("foam_interlock_status", foamNos);
         }
       }
     );
