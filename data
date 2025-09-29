@@ -4,6 +4,7 @@ socket.on("get_foam_interlock", (packName, pack_numb) => {
   sql.connect(sqlConfig, (err) => {
     if (err) {
       console.error("SQL Connection Error:", err);
+      socket.emit("foam_interlock_status", []); // send empty array on error
       return;
     }
 
@@ -15,13 +16,18 @@ socket.on("get_foam_interlock", (packName, pack_numb) => {
       (err, result) => {
         if (err) {
           console.error("Query Error:", err);
+          socket.emit("foam_interlock_status", []); // send empty array on error
         } else {
           // Convert recordset to array of foam_no strings
           const foamNos = result.recordset.map(row => row.foam_no);
 
-          console.log("Foam Interlock Result:", foamNos);
-
-          socket.emit("foam_interlock_status", foamNos);
+          if (foamNos.length > 0) {
+            console.log("✅ Foam Interlock Found:", foamNos);
+            socket.emit("foam_interlock_status", foamNos);
+          } else {
+            console.log("❌ No foam linked with this pack.");
+            socket.emit("foam_interlock_status", []); // empty array if not found
+          }
         }
       }
     );
