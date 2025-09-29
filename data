@@ -1,104 +1,89 @@
-<script>
+
 socket.on("foam_interlock_status", function (foam_numb) {
     console.log("foam_numb length:", foam_numb.length);
 
-    // Inject modal CSS & HTML once if not already present
-    if (!document.getElementById('foamModal')) {
-        const style = document.createElement('style');
-        style.innerHTML = `
-            .modal {
-                display: none;
-                position: fixed;
-                z-index: 9999;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                overflow: auto;
-                background-color: rgba(0,0,0,0.5);
-                justify-content: center;
-                align-items: center;
-            }
-            .modal-content {
-                background-color: #fff;
-                margin: auto;
-                padding: 25px 30px;
-                border-radius: 10px;
-                text-align: center;
-                box-shadow: 0 8px 25px rgba(0,0,0,0.3);
-                max-width: 400px;
-                font-family: Arial, sans-serif;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-            }
-            .modal-content h2 {
-                color: #e74c3c;
-                margin-bottom: 15px;
-            }
-            .modal-content p {
-                margin-bottom: 20px;
-                color: #333;
-            }
-            .modal-content button {
-                padding: 8px 20px;
-                border: none;
-                background: #3498db;
-                color: #fff;
-                border-radius: 5px;
-                cursor: pointer;
-                font-size: 14px;
-            }
-            .modal-content button:hover {
-                background: #2980b9;
-            }
-        `;
-        document.head.appendChild(style);
+    // Function to show beautiful modal
+    function showModal(message, callback) {
+        // Check if modal already exists
+        let modal = document.getElementById("foamModal");
+        if (!modal) {
+            // Create overlay
+            modal = document.createElement("div");
+            modal.id = "foamModal";
+            modal.style.position = "fixed";
+            modal.style.top = "0";
+            modal.style.left = "0";
+            modal.style.width = "100%";
+            modal.style.height = "100%";
+            modal.style.background = "rgba(0,0,0,0.5)";
+            modal.style.display = "flex";
+            modal.style.justifyContent = "center";
+            modal.style.alignItems = "center";
+            modal.style.zIndex = "9999";
 
-        const modalHTML = `
-            <div id="foamModal" class="modal">
-              <div class="modal-content">
-                <h2 id="foamModalTitle">Foam Status</h2>
-                <p id="foamModalMessage"></p>
-                <button id="foamModalOkBtn">OK</button>
-              </div>
-            </div>
-        `;
-        const div = document.createElement('div');
-        div.innerHTML = modalHTML;
-        document.body.appendChild(div);
-    }
+            // Create content box
+            const box = document.createElement("div");
+            box.style.background = "#fff";
+            box.style.padding = "25px 30px";
+            box.style.borderRadius = "10px";
+            box.style.textAlign = "center";
+            box.style.boxShadow = "0 8px 25px rgba(0,0,0,0.3)";
+            box.style.maxWidth = "400px";
+            box.style.fontFamily = "Arial, sans-serif";
+            box.style.display = "flex";
+            box.style.flexDirection = "column";
+            box.style.justifyContent = "center";
 
-    function showFoamModal(message, callback) {
-        const modal = document.getElementById("foamModal");
-        const msgElem = document.getElementById("foamModalMessage");
-        const okBtn = document.getElementById("foamModalOkBtn");
+            // Title
+            const title = document.createElement("h2");
+            title.textContent = "Foam Missing";
+            title.style.color = "#e74c3c";
+            title.style.marginBottom = "15px";
 
-        msgElem.textContent = message;
-        modal.style.display = "flex";
+            // Message
+            const msg = document.createElement("p");
+            msg.id = "foamModalMessage";
+            msg.style.color = "#333";
+            msg.style.marginBottom = "20px";
 
-        okBtn.onclick = () => {
-            modal.style.display = "none";
-            if (callback) callback();
-        };
+            // OK button
+            const btn = document.createElement("button");
+            btn.textContent = "OK";
+            btn.style.padding = "8px 20px";
+            btn.style.border = "none";
+            btn.style.background = "#3498db";
+            btn.style.color = "#fff";
+            btn.style.borderRadius = "5px";
+            btn.style.cursor = "pointer";
+            btn.style.fontSize = "14px";
+            btn.onmouseover = () => btn.style.background = "#2980b9";
+            btn.onmouseout = () => btn.style.background = "#3498db";
 
-        window.onclick = function(event) {
-            if (event.target == modal) {
+            btn.onclick = () => {
                 modal.style.display = "none";
                 if (callback) callback();
-            }
-        };
+            };
+
+            box.appendChild(title);
+            box.appendChild(msg);
+            box.appendChild(btn);
+            modal.appendChild(box);
+            document.body.appendChild(modal);
+        }
+
+        document.getElementById("foamModalMessage").textContent = message;
+        modal.style.display = "flex";
     }
 
     if (foam_numb.length === 0) {
-        // Show modal if no foam linked and refresh page on OK
-        showFoamModal("Foam is not linked with the Pack", () => {
+        // Show beautiful modal and refresh page on OK
+        showModal("Foam is not linked with the Pack", () => {
             location.reload();
         });
     } else {
         // Proceed if foam is linked
-        console.log("Foam linked, proceeding...", pack, Module_count[3]);
-        socket.emit("getGlobalIngersollData", pack, Module_count[3]);
+        console.log("Foam linked, proceeding...", glob_pack, glob_packName);
+        socket.emit("getGlobalIngersollData", glob_packName, glob_pack);
     }
 });
-</script>
+
