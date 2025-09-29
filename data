@@ -1,30 +1,72 @@
-<!-- Include SweetAlert2 -->
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-
 <script>
-  socket.on("foam_interlock_status", function (foam_numb) {
+socket.on("foam_interlock_status", function (foam_numb) {
     console.log("foam_numb length:", foam_numb.length);
 
     if (foam_numb.length === 0) {
-      // SweetAlert2 popup in center
-      Swal.fire({
-        icon: "error",
-        title: "Foam Missing",
-        text: "Foam is not linked with the Pack",
-        confirmButtonText: "OK",
-        allowOutsideClick: false, // disable click outside to close
-        allowEscapeKey: false,    // disable escape key
-        position: 'center'
-      }).then((result) => {
-        if (result.isConfirmed) {
-          // Refresh page on clicking OK
-          location.reload();
-        }
-      });
+        // Create overlay
+        const overlay = document.createElement("div");
+        overlay.style.position = "fixed";
+        overlay.style.top = "0";
+        overlay.style.left = "0";
+        overlay.style.width = "100%";
+        overlay.style.height = "100%";
+        overlay.style.background = "rgba(0,0,0,0.5)";
+        overlay.style.display = "flex";
+        overlay.style.justifyContent = "center";
+        overlay.style.alignItems = "center";
+        overlay.style.zIndex = "9999";
+
+        // Create alert box
+        const alertBox = document.createElement("div");
+        alertBox.style.background = "#fff";
+        alertBox.style.padding = "25px 30px";
+        alertBox.style.borderRadius = "10px";
+        alertBox.style.textAlign = "center";
+        alertBox.style.boxShadow = "0 8px 25px rgba(0,0,0,0.3)";
+        alertBox.style.maxWidth = "400px";
+        alertBox.style.fontFamily = "Arial, sans-serif";
+
+        // Title
+        const title = document.createElement("h2");
+        title.textContent = "Foam Missing";
+        title.style.color = "#e74c3c";
+        title.style.marginBottom = "15px";
+
+        // Message
+        const msg = document.createElement("p");
+        msg.textContent = "Foam is not linked with the Pack";
+        msg.style.color = "#333";
+        msg.style.marginBottom = "20px";
+
+        // OK button
+        const btn = document.createElement("button");
+        btn.textContent = "OK";
+        btn.style.padding = "8px 20px";
+        btn.style.border = "none";
+        btn.style.background = "#3498db";
+        btn.style.color = "#fff";
+        btn.style.borderRadius = "5px";
+        btn.style.cursor = "pointer";
+        btn.style.fontSize = "14px";
+        btn.onmouseover = () => btn.style.background = "#2980b9";
+        btn.onmouseout = () => btn.style.background = "#3498db";
+
+        // Button click -> remove popup and refresh
+        btn.onclick = () => {
+            document.body.removeChild(overlay);
+            location.reload();
+        };
+
+        // Assemble
+        alertBox.appendChild(title);
+        alertBox.appendChild(msg);
+        alertBox.appendChild(btn);
+        overlay.appendChild(alertBox);
+        document.body.appendChild(overlay);
+
     } else {
-      // Call another socket when foam is linked
-      console.log("Foam linked, proceeding...", pack, Module_count[3]);
-      socket.emit("getGlobalIngersollData", pack, Module_count[3]);
+        console.log("Foam linked, proceeding...", pack, Module_count[3]);
+        socket.emit("getGlobalIngersollData", pack, Module_count[3]);
     }
-  });
+});
 </script>
