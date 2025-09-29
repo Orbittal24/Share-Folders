@@ -1,35 +1,12 @@
-socket.on("get_foam_interlock", (packName, pack_numb) => {
-  console.log("get_foam_interlock:::::::", packName, pack_numb);
+socket.on("foam_interlock_status", function (foam_numb) {
+    console.log("foam_numb length:", foam_numb.length);
 
-  sql.connect(sqlConfig, (err) => {
-    if (err) {
-      console.error("SQL Connection Error:", err);
-      socket.emit("foam_interlock_status", []); // send empty array on error
-      return;
+    if (foam_numb.length === 0) {
+      // Show popup if no foam linked
+      alert("❌ Foam is not linked with the Pack");
+    } else {
+      // Call another socket when foam is linked
+      console.log("✅ Foam linked, proceeding...");
+      socket.emit("getGlobalIngersollData", pack, Module_count[3]);
     }
-
-    const request = new sql.Request();
-    request.input("pack_numb", sql.VarChar, pack_numb);
-
-    request.query(
-      "SELECT foam_no FROM taco_treceability.coral_fom_link_with_pack WHERE pack_no = @pack_numb",
-      (err, result) => {
-        if (err) {
-          console.error("Query Error:", err);
-          socket.emit("foam_interlock_status", []); // send empty array on error
-        } else {
-          // Convert recordset to array of foam_no strings
-          const foamNos = result.recordset.map(row => row.foam_no);
-
-          if (foamNos.length > 0) {
-            console.log("✅ Foam Interlock Found:", foamNos);
-            socket.emit("foam_interlock_status", foamNos);
-          } else {
-            console.log("❌ No foam linked with this pack.");
-            socket.emit("foam_interlock_status", []); // empty array if not found
-          }
-        }
-      }
-    );
   });
-});
