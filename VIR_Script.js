@@ -356,3 +356,197 @@ main();
 
 C:\Users\C01063714\Desktop\VIR_OldToNew_Script>node VIR_OldToNewScript.js
 ❌ Main error: Server requires encryption, set 'encrypt' config option to true.
+
+
+    ------------------------------------------------------------------------------------------------------------------------
+
+    python clinet side service VIR 
+
+
+
+import os
+import time
+import threading
+import serial
+import pandas as pd
+import requests
+from datetime import datetime
+
+# -----------------------------
+# Globals
+# -----------------------------
+serial_port = None
+line_id = None
+latest_data = {"voltage": "0.00", "resistance": "0.00", "timestamp": datetime.utcnow().isoformat()}
+last_was_default = True
+stop_event = threading.Event()
+
+# -----------------------------
+# Excel Config Reader
+# -----------------------------
+def read_com_port():
+    """Reads COM port + Line from Excel file"""
+    global line_id
+    try:
+        excel_path = os.path.join(os.path.dirname(__file__), "config", "com_port_config.xlsx")
+        print(f"[CONFIG] Reading Excel: {excel_path}")
+        df = pd.read_excel(excel_path)
+        line_id = df.loc[0, "Line"]  # Expect column "Line"
+        print(f"[CONFIG] Line ID = {line_id}")
+
+        # COM port can also be read from Excel, here hardcoded to COM3
+        com_port = "COM3"
+        print(f"[CONFIG] Using COM port: {com_port}")
+        return com_port
+    except Exception as e:
+        print(f"[CONFIG ERROR] {e}, falling back to COM3")
+        return "COM3"
+
+# -----------------------------
+# Serial Port Init
+# -----------------------------
+def initialize_serial_port():
+    """Initializes or reinitializes the serial port connection"""
+    global serial_port, stop_event
+    com_port = read_com_port()
+
+    try:
+        if serial_port and serial_port.is_open:
+            print("[SERIAL] Closing previous port...")
+            serial_port.close()
+
+        serial_port = serial.Serial(
+            port=com_port,
+            baudrate=9600,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
+            timeout=1
+        )
+        print(f"[SERIAL] Port {com_port} opened successfully")
+
+        # Start background reader
+        stop_event.clear()
+        threading.Thread(target=serial_reader, daemon=True).start()
+
+        # Send initial commands
+        send_initial_commands()
+
+    except Exception as e:
+        print(f"[SERIAL ERROR] Failed to open port {com_port}: {e}")
+
+# -----------------------------
+# Serial Reader
+# -----------------------------
+def serial_reader():
+    """Continuously reads from the serial port"""
+    global latest_data, last_was_default
+    print("[SERIAL] Reader thread started")
+    while not stop_event.is_set():
+        try:
+            if serial_port and serial_port.in_waiting:
+                raw = serial_port.readline().decode(errors="ignore").strip()
+                if raw:
+                    print(f"[DATA RAW] {raw}")
+                    process_serial_data(raw)
+        except Exception as e:
+            print(f"[SERIAL ERROR] Reader exception: {e}")
+        time.sleep(0.1)
+
+# -----------------------------
+# Data Processor
+# -----------------------------
+def process_serial_data(data):
+    """Parses and processes incoming serial data"""
+    global latest_data, last_was_default
+    clean_data = data.strip()
+    print(f"[DATA PROCESS] {clean_data}")
+
+    if "E" in clean_data and "," in clean_data:
+        values = [v.strip() for v in clean_data.split(",")]
+        if len(values) >= 2:
+            try:
+                ir_value = float(values[0])
+                formatted_ir = f"{abs(ir_value * 1000):.2f}"
+
+                voltage_value = float(values[1].replace("V", "").replace(" ", ""))
+                formatted_voltage = f"{abs(voltage_value):.3f}"
+
+                MAX_VALID = 1000
+                if abs(ir_value) >= MAX_VALID or abs(voltage_value) >= MAX_VALID:
+                    print("[DATA PROCESS] Default values detected, ignoring...")
+                    last_was_default = True
+                    return
+
+                if last_was_default:
+                    latest_data = {
+                        "voltage": formatted_voltage,
+                        "resistance": formatted_ir,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "line_no": line_id
+                    }
+                    print(f"[DATA PROCESS] Valid measurement: {latest_data}")
+                    send_to_fastapi(latest_data)
+                    last_was_default = False
+                else:
+                    print("[DATA PROCESS] Skipping continuous valid value")
+            except Exception as e:
+                print(f"[DATA ERROR] Failed parsing values: {e}")
+
+# -----------------------------
+# Command Sender
+# -----------------------------
+def send_initial_commands():
+    """Sends initial setup commands and starts periodic fetch"""
+    if not serial_port:
+        return
+    cmds = ["*IDN?", ":MEASure:RESistance?", ":MEMory:STATe ON"]
+    for cmd in cmds:
+        print(f"[COMMAND] {cmd}")
+        serial_port.write((cmd + "\n").encode())
+
+    def periodic_fetch():
+        while not stop_event.is_set():
+            try:
+                if serial_port:
+                    print("[COMMAND PERIODIC] :FETch?")
+                    serial_port.write(b":FETch?\n")
+            except Exception as e:
+                print(f"[COMMAND ERROR] {e}")
+            time.sleep(1)
+
+    threading.Thread(target=periodic_fetch, daemon=True).start()
+
+# -----------------------------
+# Send to FastAPI
+# -----------------------------
+def send_to_fastapi(data):
+    """Sends processed data to external FastAPI server"""
+    try:
+        url = "https://misapp.tataautocomp.com:5555/api/measurements"
+        payload = {
+            "voltage": data["voltage"],
+            "resistance": data["resistance"],
+            "timestamp": datetime.utcnow().isoformat(),
+            "line_no": data.get("line_no", line_id)
+        }
+        r = requests.post(url, json=payload, verify=False, timeout=5)
+        print("[FASTAPI] Response:", r.text)
+    except Exception as e:
+        print(f"[FASTAPI ERROR] {e}")
+
+# -----------------------------
+# Main
+# -----------------------------
+if __name__ == "__main__":
+    initialize_serial_port()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        stop_event.set()
+        if serial_port and serial_port.is_open:
+            serial_port.close()
+        print("Script stopped")
+
+
