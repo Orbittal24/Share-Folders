@@ -1,68 +1,29 @@
-socket.on('get_export_all_battery_torque_arrDetails_editQRCode', function (final_qrcode_ID, final_qrcode_batteryName) {
-    console.log('IR:::::::::::::::::::', final_qrcode_ID, final_qrcode_batteryName)
-    var torque_arr = [];
-    sql.connect(sqlConfig, function (err) {
-        request = new sql.Request();
-
-        // First query: torque_details_EIP_import2
-        request.query("SELECT * FROM taco_treceability.torque_details_EIP_import2 WHERE pack_no like '%" + final_qrcode_ID + "%' and pack_name like '%" + final_qrcode_batteryName + "%'", function (err, recordset1) {
-            if (err) console.log(err);
-            var result1 = recordset1.recordset;
-
-            if (result1.length > 0) {
-                for (var i in result1) {
-                    var module_barcode = result1[i].module_barcode;
-                    var torque = result1[i].torque;
-                    var angle = result1[i].angle;
-                    var date_dd = result1[i].torque_status;
-                    var rework_status = result1[i].rework_status;
-                    var bypass_operator = result1[i].bypass_operator;
-                    var bypass_reason = result1[i].bypass_reason;
-                    var process_name = result1[i].process_name;
-
-                    torque_arr.push(module_barcode);
-                    torque_arr.push(torque);
-                    torque_arr.push(angle);
-                    torque_arr.push(date_dd);
-                    torque_arr.push(rework_status);
-                    torque_arr.push(bypass_operator);
-                    torque_arr.push(bypass_reason);
-                    torque_arr.push(process_name);
-                }
-            }
-
-            // Second query: torque_details_EIP
-            request.query("SELECT * FROM taco_treceability.torque_details_EIP WHERE pack_no like '%" + final_qrcode_ID + "%' and pack_name like '%" + final_qrcode_batteryName + "%'", function (err, recordset2) {
-                if (err) console.log(err);
-                var result2 = recordset2.recordset;
-
-                if (result2.length > 0) {
-                    for (var i in result2) {
-                        var module_barcode = result2[i].module_barcode;
-                        var torque = result2[i].torque;
-                        var angle = result2[i].angle;
-                        var date_dd = result2[i].torque_status;
-                        var rework_status = result2[i].rework_status;
-                        var bypass_operator = result2[i].bypass_operator;
-                        var bypass_reason = result2[i].bypass_reason;
-                        var process_name = result2[i].process_name;
-
-                        torque_arr.push(module_barcode);
-                        torque_arr.push(torque);
-                        torque_arr.push(angle);
-                        torque_arr.push(date_dd);
-                        torque_arr.push(rework_status);
-                        torque_arr.push(bypass_operator);
-                        torque_arr.push(bypass_reason);
-                        torque_arr.push(process_name);
-                    }
-                }
-
-                // Emit final combined result
-                setTimeout(function () {
-                    socket.emit("set_export_all_battery_torque_arrDetails_editQRCode", torque_arr);
-                }, 100);
-            });
-        });
-    });
-});
+SELECT sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
+       module_barcode, process_status, pack_no, rework_status, bypass_operator, 
+       bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no 
+FROM taco_treceability.torque_details_EIP 
+WHERE pack_no IN (
+    'abc',
+    'DJ2043-G9V0003820', 'DJ2030-G9W0030588', 'DJ2025-G9W0006568',
+    'DJ1916-G9T0003380', 'DJ2030-G9W0030625', 'DJ2030-G9V0030555',
+    'DJ2043-G9N0003702', 'DJ2042-G9T0042473', 'DJ2043-G9W0003828',
+    'DJ2025-G9X0006589', 'DJ2043-G9K0003591', 'DJ2022-G9W0002057',
+    'DJ1916-G9S0003366', 'DJ2042-G9X0042663', 'DJ2042-G9X0042673',
+    'DJ2030-G9X0030820', 'DJ2043-G9W0003825', 'DJ2030-G920022165',
+    'DJ2029-G9X0001082', 'DJ2043-G9V0003812', 'DJ2022-G9L0001996',
+    'DJ2030-G9V0030534', 'DJ2025-G9W0006555', 'DJ2029-G9X0001081',
+    'DJ2025-G9V0006536', 'DJ2043-G9W0003835', 'DJ2025-G9W0006562',
+    'DJ2043-G9V0003804', 'DJ2043-G9V0003795', 'DJ2022-G9W0002067',
+    'DJ2029-G9X0001079', 'DJ2025-G9W0006565', 'DJ1927-G9W0016496',
+    'DJ2043-G9W0003827', 'DJ2043-G9J0003537', 'DJ2043-G9V0003810',
+    'DJ2042-G9W0042616', 'DJ1916-G9V0003400', 'DJ2043-G9M0003672',
+    'DJ2042-G9X0042639', 'DJ2025-G9W0006557', 'DJ2030-G9X0030778',
+    'DJ2043-G9V0003821', 'DJ2025-G9V0006545', 'DJ2048-G9K0000018',
+    'DJ2042-G9X0042646', 'DJ2043-G9V0003806', 'DJ2022-G9W0002069',
+    'DJ2043-G9V0003799', 'DJ1916-G9T0003379', 'DJ1916-G9S0003372',
+    'DJ2030-G9V0030568', 'DJ2043-G9C0003381', 'DJ2025-G9W0006551',
+    'DJ2043-G9P0003725', 'DJ2043-G9V0003790', 'DJ1916-G9S0003369',
+    'DJ2029-G9W0001076', 'DJ2030-G9W0030688', 'DJ1916-G9T0003385',
+    'DJ2018-G9V0045496', 'DJ2043-G9V0003800', 'DJ2025-G9W0006556',
+    'DJ2042-G9W0042603'
+);
