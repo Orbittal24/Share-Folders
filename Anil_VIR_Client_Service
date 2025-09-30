@@ -3,6 +3,11 @@
 pip install pyinstaller
 pyinstaller --onefile --noconsole serial_script.py
 
+py -3.11 -m venv venv
+venv\Scripts\activate
+pip install pyinstaller pandas pyserial requests openpyxl
+pyinstaller --onefile serial_script.py
+
 // const express = require('express');
 // const cors = require('cors');
 // // const { SerialPort } = require('serialport');
