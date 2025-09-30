@@ -1,4 +1,8 @@
 01TMB06S100027F9W0102030
+
+pip install pyinstaller
+pyinstaller --onefile --noconsole serial_script.py
+
 // const express = require('express');
 // const cors = require('cors');
 // // const { SerialPort } = require('serialport');
