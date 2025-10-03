@@ -1,4 +1,6 @@
 https://mistrace.tataautocomp.com:3242/auth/auth1/login
+
+http://mismainapp.tataautocomp.com
 USE [taco_treceability_master]
 GO
 
