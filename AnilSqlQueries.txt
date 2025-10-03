@@ -206,3 +206,132 @@ SELECT
     85    AS Output_Voltage,
     '2025-07-22 11:31:14.183' AS CurrentDate
 FROM #PackModuleMapping p;
+
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------
+                                                EOL_Autograph User query 
+-----------------------------------------------------------------------------------------------------------------------------------------
+USE [taco_treceability_master]
+GO
+
+CREATE OR ALTER PROCEDURE InsertEOLUsers
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    -- Create temporary table with static username/password values
+    CREATE TABLE #UserCredentials (
+        User_Num INT IDENTITY(1,1),
+        User_Name VARCHAR(55),
+        Password VARCHAR(255)
+    );
+
+    -- Insert all EOL users (1–70)
+    INSERT INTO #UserCredentials (User_Name, Password)
+    VALUES
+    ('EOL_1', '$2a$12$H4Ospjd8HdyCJydmln5oK.iQoP3cuoKf0QLbRhuy4n0ZvEfbiqniq'),
+    ('EOL_2', '$2a$12$cbr0nm28sUVg7bwXc9FiU.BIqMrrftNl21ZDor743tPaS.DKG4jVe'),
+    ('EOL_3', '$2a$12$aLB3SsFubxiyUMtwlsdBuuwfMqVC83F.B3roZkQtZ5I8/VUq4iC8O'),
+    ('EOL_4', '$2a$12$v/vwMvoC5.fkuC6FDyvh4eSuZjVaMH9KpX6EqsLtn2v2eIsphbMgG'),
+    ('EOL_5', '$2a$12$/XU6BxfxYc8OnmIuuNPZ9.YhWdSAUzGTMJK8bvrZLxa6.U/QV1sCu'),
+    ('EOL_6', '$2a$12$kKSs5MmWebDhfoJdmsHvqOsna6KkSQRjNe5xwzT8Jv3DdD8fgmuhq'),
+    ('EOL_7', '$2a$12$EWMoXxlU3m1Q8Mrhx3r/BeELK5g5vjE5N9eCyOvyGLyj.QpI9afMe'),
+    ('EOL_8', '$2a$12$q4IHAVBHr62Rx8gIwhs4h.8vBhU2CoIBefo02dzBMFPJHw5B.YY66'),
+    ('EOL_9', '$2a$12$6b8odepHWt2aC6J.e/ePNO44N5QayachMKWvHfN1nVi82n.khOZPq'),
+    ('EOL_10', '$2a$12$RxMFeFjurqJXs7y6kaGu7.OesPyUsAZGKMggJpSgpnPRXI20cj90K'),
+    ('EOL_11', '$2a$12$wGatwf4d0Zx.Rprs2hAqeeEwraDycvJrFgncFCCg.i/DWBiHGjsUu'),
+    ('EOL_12', '$2a$12$yHBOG/OxEMWouqMx07FX1u/CHK3KJQEqnd2g3RVThSqdPEZVLkH.e'),
+    ('EOL_13', '$2a$12$PH97xUroCLVVVmEADNpzBOoaYGSswFygxaubPAVlS86FFlaXxnrrK'),
+    ('EOL_14', '$2a$12$HL3oxGh5pKPWTzkqFs.DCue7aj7oJnuyF0kX8qBNYJlFkdwWx2Wi.'),
+    ('EOL_15', '$2a$12$uZK6WrFWEO5s4nLdRyXu6O9mdq/6zdJ8tEXNnFq96qAKFJkRAqvL2'),
+    ('EOL_16', '$2a$12$MAvqBau9pPFIDjddKxM0Ye2iECRYI/aDu8bYph3sUTtotlG6gA8wC'),
+    ('EOL_17', '$2a$12$BC25TEsAnEHPVNpvy0RyH.tIBrYJLyOLP0TAgoDOt.vC207bPbXSu'),
+    ('EOL_18', '$2a$12$ndtGBAGkXgqfvZPYBfRLnO1sfeWr31W1mkIDQRGcHSsz/pOggBgzG'),
+    ('EOL_19', '$2a$12$6WeVFOOeAA55k07R7ScaneqGBMacUYS3n9goQj.LGIOZUcnawPqFm'),
+    ('EOL_20', '$2a$12$EYY4hbpLzeKksfCxXpeQqOoQrUXMnRY3bS.V6aYRsrrkcNKD6zR26'),
+    ('EOL_21', '$2a$12$qmy7R5MD6z.ntT2.VNdwh.0o.dxknkMhN0LGVumqhIlZy/6m657Rm'),
+    ('EOL_22', '$2a$12$iYPPyPHDiuE1vebyTKBTFu5b5F8tNsZ7BWsEeYDSRlGT182DTtd2i'),
+    ('EOL_23', '$2a$12$FHa1z88XwlHFPqGiTBMonOJYuLarzb3w4SvQJRgc/mOoxdGygBizu'),
+    ('EOL_24', '$2a$12$ng/6tdLdLzWlX9eO3nTmGe.MdscSMvVZdsovcKpldtBnN9LES6jn6'),
+    ('EOL_25', '$2a$12$hOSc566xbRTpyoq6NtMKpuCJatSr.KcV7Guviy3LUhCbRsxz54v3a'),
+    ('EOL_26', '$2a$12$VGpM5YCsFximOlzNrjSWHOGByonBIKgndRwBBkcU6n99DvJforjru'),
+    ('EOL_27', '$2a$12$7.NJLkj.eHFrlKCSsaNbJ.kasPlepSNwcUMtOzD7GLoYhww5PKkDK'),
+    ('EOL_28', '$2a$12$/zk/wt0Lvgq6xFDhlvNDeePJEUld35xv0tU6tHC2WT3/rpPlRqcw2'),
+    ('EOL_29', '$2a$12$fNd1grd6wzW3dBRVXzf0a./5TeKtcD2.4otQGiNdmev5StT0qnQ/W'),
+    ('EOL_30', '$2a$12$/fjcg70REfHQyGscy6BiO.F4ewHrxGLn0L8yUXzEpTldFA2RR2KUi'),
+    ('EOL_31', '$2a$12$wArZmM.AojQStGJajNnEpOOwnQigXq6Zq2ijD2QZ/wbKmSTDq7GO.'),
+    ('EOL_32', '$2a$12$H8xuq3g8537Id7DcU9cN9u7kknaL4mYp82yQngr6kyUB7.kmBnaja'),
+    ('EOL_33', '$2a$12$T7Jw1wjHTfy/KDgiZ03zV.VRfz57oaXiARjvaNFLlR.I6RmqC.Lk6'),
+    ('EOL_34', '$2a$12$KnpzN.vVJCYgeVHsSx6fMeY5TzEzXsi58X7G6569KBERZ5V92R19a'),
+    ('EOL_35', '$2a$12$dLOF329EoXK1Q0GxTr2C2u7cAIAC0sMQjAT8264zUFPPn.KJL/Pja'),
+    ('EOL_36', '$2a$12$VI2Bk32sFKahc0gSiSDcSetI9UMqdT7pLh0ZOfMfjkUCBdu4Stf3.'),
+    ('EOL_37', '$2a$12$GQntqvvz/ECElZ8M5N7njOLx1n8jxv2D4kuvcdGpb3.y.j9GbKfyy'),
+    ('EOL_38', '$2a$12$xqpB2f1.OG3Tf7z5x22nD.kja/.d6LTsskxRUS6jVFYokCDfDiMEC'),
+    ('EOL_39', '$2a$12$MInYq93AWzQpre9lB/MhhutkDwEaS98ndrTMGP5vHidOM/vT/j4OO'),
+    ('EOL_40', '$2a$12$Z2zbPdEcdAn2MYRvwdraR.mROHVf5brVHxiPE89fPP1PVJMZb0PdG'),
+    ('EOL_41', '$2a$12$B1fiUAaqSy7TbvmeiSToieJj5fwr.vyLjaCW6lnRdKj41ZxkBioYW'),
+    ('EOL_42', '$2a$12$AFx5wwygXV55CPyLhjcRbudGwRTfFY2Er.hERmF5OkwEGVlp2eKPC'),
+    ('EOL_43', '$2a$12$6hB15BAMEWD0knkLHQyh.eS9KrYrr0dPRC8WjpxmGbc.Yx9nlXhG6'),
+    ('EOL_44', '$2a$12$tgM834bC/YPOqJrQsSVlmONqAsR5S2.F/Ufluf7vmEY8Zz3jyF4UC'),
+    ('EOL_45', '$2a$12$QtYWtxn3WqWzwriavZeYOOunYVEuUwglVE3z2wqzEFGqLBddkjOga'),
+    ('EOL_46', '$2a$12$HqfYrjDvGzrG30PBvL.bv.ovQhqANl05IKY9Hn/dxHQxNFVNcNdB6'),
+    ('EOL_47', '$2a$12$eg96d5HSYpHGp1wbmqU89.r67cXcIX6liYgsqLCgN0o0KucKc7v5y'),
+    ('EOL_48', '$2a$12$RwmA.RJIbjoCVyXbt8FdH.YclY/akkJs7wmwZhOxDRbMPNkYc2PsC'),
+    ('EOL_49', '$2a$12$GiyBIa4z6uRGy3S14LDasOZ58cuOowTcd67205os0mNOd1hUhnsiS'),
+    ('EOL_50', '$2a$12$52cepS1b1O1MOaB7F.aEeuqjvG4qzhDYyUTmdb4bJmnllvKSu9q8.'),
+    ('EOL_51', '$2a$12$cNjCVSefmTfgNh.FS9cgwexYxfVxIdQB8UeX1lySMf6hovbOsFfCC'),
+    ('EOL_52', '$2a$12$f4iYNEZfrynzTGFrz.Nel.WSvfYpY/ALz4Ghi6Nm/FQlL5nEeuJjq'),
+    ('EOL_53', '$2a$12$stvGjjL64XT.ik2JPxldMeYqDHn2yL3GEOPqO7U3d/PyGtgL0VdAG'),
+    ('EOL_54', '$2a$12$T3MeNZY.VySA8cE0gYLqe.aHivufPqUXIED2LFLImYrgvPv2SzmAS'),
+    ('EOL_55', '$2a$12$W4BokPVDcBbSCIlm5/oeJehE06N7Pp8FTTZvdprl6od4x6PW1DJbm'),
+    ('EOL_56', '$2a$12$lKpDhQo0O2DdFcvj4qxvNObIwpPRhXn5nnBmbBsdL1Md5uVselByW'),
+    ('EOL_57', '$2a$12$I9XNvy3IBqdnx72cT5.ve.g/AnD7OUlBmCOYM/fasb2nCh9jZwsDi'),
+    ('EOL_58', '$2a$12$J5SdP7MfsbPzO7Ag7QIz5OSefaU9cSOGZIV8iRTgG.4VE4rpIwVNW'),
+    ('EOL_59', '$2a$12$NqdS2YxOLOpo0AhZLu544Or/0aeRSKvBHqDk6flP2Jepz7yQPD8Ji'),
+    ('EOL_60', '$2a$12$9vDiCtX8ovZvzyat.URxfuXT7da//KSRFmKEKfOAmQlUgpU1yvqP6'),
+    ('EOL_61', '$2a$12$0avV8Z7Hu2Y4Md.i2fDKUuWWxxS5BFa0k0aKRqof1eZ9r5.idix.O'),
+    ('EOL_62', '$2a$12$Rg2VBVSlZCOtcV4KQAX4Ru2vJ2xL4tPSGMGmZtq2f9vKM8JH3HSH.'),
+    ('EOL_63', '$2a$12$z/ROwAvCcX534YagKjf4quFIjGiE/4reoh66LH8HrrukKxmmUKIHW'),
+    ('EOL_64', '$2a$12$scwKqryVLI/G2Q.PnSaE1OE4iTFnJdrmZEq2KEiw5b0zo2ZyIlxeO'),
+    ('EOL_65', '$2a$12$CS7G1pCxw5MumCWNKxajHObRIjTtDq4X01PmWSiEZT1adL1AtKedK'),
+    ('EOL_66', '$2a$12$usZsKczTLnO5UcYGDqEAzO0JuBoZ9INwDzBysaWIyzgUyzHQ.hpEm'),
+    ('EOL_67', '$2a$12$0X8TL7kZzJiJwcIQqAmWBuybuurC1uD80LeLrHDjgoNZZjDuIrpKu'),
+    ('EOL_68', '$2a$12$CXi2vYYmyBF8iPg7FsJr/u7Ea631ki80jAUWeibOC7q0htwal/As6'),
+    ('EOL_69', '$2a$12$ZCY34Fz2hseieYR581XCF.gXK/OxQJ3BGusoLjrCXnhBZdtdo8oi.'),
+    ('EOL_70', '$2a$12$5vrxsB9pWSophubdQbPqt.21XeEC9k49GE9uYbkETCLz4Arq0.bPa');
+
+    -- Insert records for all combinations
+    INSERT INTO [taco_treceability].[User_Master] (
+        [Station_ID],
+        [Line_ID],
+        [User_Name],
+        [Password],
+        [route],
+        [login_status],
+        [Shift]
+    )
+    SELECT 
+        '3026',             -- Fixed Station_ID 
+        L.Line_ID,          -- Line_ID
+        C.User_Name,        -- Each EOL_x user
+        C.Password,
+        '/auth/auth1/operator_login',
+        'inactive',
+        S.Shift
+    FROM 
+        (VALUES ('A'), ('B'), ('C')) AS S(Shift)       -- 3 Shifts
+    CROSS JOIN 
+        (VALUES ('1'),('2'),('3'),('4'),('5'),('6'),('7'),('8'),
+                ('A'),('B'),('C'),('D')) AS L(Line_ID) -- 12 lines
+    CROSS JOIN 
+        #UserCredentials C;                            -- All 70 users
+
+    DROP TABLE #UserCredentials;
+
+    PRINT 'Successfully inserted ' + CAST(@@ROWCOUNT AS VARCHAR) + ' user records.';
+END;
+GO
+
+EXEC InsertEOLUsers;
+
