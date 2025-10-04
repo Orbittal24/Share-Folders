@@ -1,6 +1,9 @@
 https://mistrace.tataautocomp.com:3242/auth/auth1/login
 
 https://mismainapp.tataautocomp.com:3241/docs
+
+pyinstaller --onefile test.py
+
 USE [taco_treceability_master]
 GO
 
