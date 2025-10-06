@@ -399,3 +399,23 @@ WHERE A.Gate_ID IS NULL;
 
 ----------------------------------------------------
 
+
+
+SELECT 
+    A.[srno],
+    A.[Gate_ID],
+    A.[Station_ID],
+    A.[Line_ID],
+    A.[Pack_ID],
+    A.[CheckList_ID],
+    B.[Check_List_Name],
+    A.[Checklist_Type_Scan_Name],
+    A.[Scan_ID],
+    A.[Sub_Station_Id],
+    A.[CreatedOn] AS Assign_CreatedOn,
+    B.[CreatedOn] AS Checklist_CreatedOn
+FROM [master_quality_gate].[taco_treceability].[Master_CheckList_Assign] AS A
+LEFT JOIN [master_quality_gate].[taco_treceability].[Master_CheckList_Name] AS B
+    ON A.[CheckList_ID] = B.[Check_List_ID];
+
+----------------------------------------------------
