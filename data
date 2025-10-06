@@ -1,63 +1,46 @@
-else if (message === "Process register updated successfully" && Process_Status === "Completed") {
-  try {
-    // 1. Extract Process_ID from putUrl
-    const processIdMatch = putUrl.match(/Process_ID=(\d+)/);
-    const processId = processIdMatch ? processIdMatch[1] : null;
-
-    if (!processId) {
-      console.error("❌ Process_ID not found in PUT_url:", putUrl);
-    } else {
-      console.log("✅ Extracted Process_ID:", processId);
-
-      // 2. Fetch Station_ID from DB
-      const stationResult = await pool1
-        .request()
-        .query(`SELECT Station_ID FROM taco_treceability.Process_Master WHERE Process_ID = '${processId}'`);
-
-      if (stationResult.recordset.length === 0) {
-        console.error("❌ No Station_ID found for Process_ID:", processId);
-      } else {
-        const stationId = stationResult.recordset[0].Station_ID;
-        console.log("✅ Fetched Station_ID:", stationId);
-
-        // 3. Build payload
-        const stationPayload = {
-          station_id: stationId,
-          line_id: "1",
-          customer_qrcode: module_barcode,
-          station_status: "OK",
-          checklist_name: "NA",
-          substation_id: processId
-        };
-
-        console.log("📤 Sending Station Payload:", stationPayload);
-
-        // 4. Send payload to API
-        try {
-          const stationResponse = await axios.post(
-            "https://Misapp.tataautocomp.com:5555/station_status/filter",
-            stationPayload,
-            {
-              headers: { "Content-Type": "application/json" }
-            }
-          );
-          console.log("✅ Station Status API Response:", JSON.stringify(stationResponse.data, null, 2));
-        } catch (stationErr) {
-          console.error("❌ Error sending Station Status API:", stationErr.message);
-          if (stationErr.response)
-            console.error("Station API Error Response:", JSON.stringify(stationErr.response.data, null, 2));
-        }
-      }
-    }
-
-    // 5. Delete record after successful process update
-    await pool1.request().query(
-      `DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no = ${row.sr_no}`
-    );
-    console.log(`🗑️ Deleted sr_no ${row.sr_no} after successful update.`);
-    console.log("Module sr_no complete***:::::::", message, Process_Status);
-    return startFetchLoop();
-  } catch (innerErr) {
-    console.error("❌ Error in Process Completed flow:", innerErr.message);
-  }
-}
+SELECT 
+    sr_no, 
+    pack_name, 
+    module_name, 
+    torque, 
+    angle, 
+    torque_status, 
+    date_dd, 
+    shift, 
+    module_barcode, 
+    process_status, 
+    pack_no, 
+    rework_status, 
+    bypass_operator, 
+    bypass_reason, 
+    process_name, 
+    station_name, 
+    smoke_sensor_linked_pack_no 
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+    'DJ1927-G9T0019328', 'DJ1916-GA10003432', 'DJ1916-GA30003440',
+    'DJ2042-GA40043086', 'DJ1927-GA40020042', 'DJ1927-GA20016614',
+    'DJ1916-GA30003442', 'DJ2029-GA10001089', 'DJ1918-G670001013',
+    'DJ1916-G9W0003405', 'DJ1927-G760009560', 'DJ2042-GA40043068',
+    'DJ1927-GA20016572', 'DJ2030-GA30031471', 'DJ2038-G990000052',
+    'DJ1916-GA40003455', 'DJ1927-GA20019810', 'DJ2022-GA30002327',
+    'DJ2042-GA10042779', 'DJ2029-GA30001093', 'DJ1916-GA30003446',
+    'DJ2022-GA30002336', 'DJ2042-G9R0020522', 'DJ1918-GA30001312',
+    'DJ1927-GA20019799', 'DJ2029-GA40001099', 'DJ2029-G9N0001046',
+    'DJ2042-GA10042839', 'DJ2048-G9K0000020', 'DJ1927-GA10019748',
+    'DJ2042-GA30042938', 'DJ1916-GA30003448', 'DJ2029-GA30001096',
+    'DJ2042-GA30042972', 'DJ2030-GA30031403', 'DJ1927-GA20019806',
+    'DJ2038-G9P0000053', 'DJ2030-GA20031349', 'DJ1927-GA30019866',
+    'DJ1927-GA30019846', 'DJ1916-GA10003434', 'DJ2030-GA20029434',
+    'DJ1927-GA20016582', 'DJ2042-GA30042921', 'DJ1927-GA20019807',
+    'DJ1916-GA30003444', 'DJ1916-GA30003450', 'DJ1916-GA30003438',
+    'DJ1916-G9T0003386', 'DJ1918-GA20001304', 'DJ2029-GA30001095',
+    'DJ1927-GA20016574', 'DJ1916-GA30003447', 'DJ2029-G9Y0001084',
+    'DJ2030-GA40031538', 'DJ2042-GA40043089', 'DJ2042-GA40043083',
+    'DJ1927-GA40020009', 'DJ2042-GA30043022', 'DJ1927-G7V0013140',
+    'DJ1916-GA30003449', 'DJ1927-G9M0018863', 'DJ1916-GA10003427',
+    'DJ1927-G9S0019133', 'DJ1916-GA10003430', 'DJ1916-G9L0003291',
+    'DJ1927-GA20019817', 'DJ1927-GA40020043', 'DJ1916-GA30003441',
+    'DJ2029-GA40001098', 'DJ1916-GA30003443', 'DJ2030-GA30031500',
+    'DJ2042-GA20020690'
+);
