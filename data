@@ -1,4 +1,3 @@
-mismainapp.tataautocomp.com:3241
 const sql = require('mssql');
 const axios = require('axios');
 const stringSimilarity = require('string‑similarity');
