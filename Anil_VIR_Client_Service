@@ -3,6 +3,9 @@
 pip install pyinstaller
 pyinstaller --onefile --noconsole serial_script.py
 
+pyinstaller --onefile --add-data "config/com_port_config.xlsx;config" main_serial_reader.py
+
+
 py -3.11 -m venv venv
 venv\Scripts\activate
 pip install pyinstaller pandas pyserial requests openpyxl
