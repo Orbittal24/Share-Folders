@@ -1,44 +1,86 @@
-SELECT 
-    sr_no, 
-    pack_name, 
-    module_name, 
-    torque, 
-    angle, 
-    torque_status, 
-    date_dd, 
-    shift, 
-    module_barcode, 
-    process_status, 
-    pack_no, 
-    rework_status, 
-    bypass_operator, 
-    bypass_reason, 
-    process_name, 
-    station_name, 
-    smoke_sensor_linked_pack_no
-FROM 
-    taco_treceability.torque_details_EIP
-WHERE 
-    pack_no IN (
-        'abc',
-        'DJ2030-GA70032110', 'DJ1916-GA60003488', 'DJ1916-GA60003487',
-        'DJ2030-GA80029576', 'DJ2029-GA70001114', 'DJ1916-GA60003483',
-        'DJ2042-GA70043413', 'DJ2022-GA80002584', 'DJ1918-GA30001316',
-        'DJ1916-GA30003453', 'DJ2042-GA80043445', 'DJ2042-GA70043434',
-        'DJ2029-GA60001111', 'DJ1927-G9T0019294', 'DJ2029-GA80001121',
-        'DJ2042-GA80043447', 'DJ2042-GA80043466', 'DJ1927-GA60020173',
-        'DJ2030-GA80029600', 'DJ2042-GA80020788', 'DJ2042-GA70043436',
-        'DJ2030-GA80032116', 'DJ1927-GA60020209', 'DJ1927-GA70020403',
-        'DJ2043-GA60003885', 'DJ2022-GA70002562', 'DJ2022-GA80002577',
-        'DJ1927-GA80020445', 'DJ1927-G9Y0019550', 'DJ2030-GA80032176',
-        'DJ2022-GA80002601', 'DJ2029-GA60001112', 'DJ1918-GA20001304',
-        'DJ2022-GA80002580', 'DJ2042-GA70043418', 'DJ2043-GA70003907',
-        'DJ2043-GA70003901', 'DJ2043-GA60003880', 'DJ2042-GA70043392',
-        'DJ2042-G9W0042634', 'DJ2042-GA70043424', 'DJ2029-GA80001124',
-        'DJ1916-GA60003486', 'DJ2030-GA80029578', 'DJ2043-GA60003871',
-        'DJ2029-GA70001119', 'DJ2042-GA70043435', 'DJ2042-GA40043048',
-        'DJ2042-GA70043432', 'DJ1916-G9R0003348', 'DJ2042-GA70043324',
-        'DJ2029-GA70001118', 'DJ1916-G9H0003225', 'DJ2042-GA80043517',
-        'DJ2029-GA30001094', 'DJ2029-GA30001093', 'DJ2030-GA80029582',
-        'DJ1916-GA70003496'
-    );
+socket.on('getGlobalIngersollData_alt_pdu', (pack_name, pack_no) => {
+    console.log('pack_name, pack_no $$$$$$', pack_name, pack_no);
+
+    var ingwholeData = [];
+    var ingpackDAta = [];
+
+    // Step 1: First query to get module_barcode from pack_name and pack_no
+    var moduleBarcodeQuery = `SELECT module_barcode FROM taco_treceability.pdu_qrcode_details WHERE final_qrcode = '${pack_no}' AND battery_pack_name = '${pack_name}'`;
+
+    sql.connect(sqlConfig, function (err) {
+        if (err) {
+            console.log("Connection error:", err);
+            return;
+        }
+
+        let request = new sql.Request();
+        request.query(moduleBarcodeQuery, function (err, recordset) {
+            if (err) {
+                console.log("Error fetching module_barcode:", err);
+                return;
+            }
+
+            // Check if module_barcode found
+            let module_barcode = (recordset.recordset.length > 0) ? recordset.recordset[0].module_barcode : pack_no; // Fallback to pack_no if not found
+
+            // Now proceed with original logic (first main query)
+            var query_GLOBALDATA = `SELECT module_name,pack_name,Station_name,process_name,COUNT(process_name) as processcount,sum(total_screw) as tot_screw_count FROM taco_treceability.taco_treceability.torque_masterEIP where pack_name='${pack_name}' AND Station_name IN ('PDU_alt_Cerus_450','PDU_alt_Cerus_300','PDU_alt_Kratos_450','PDU_alt_Kratos_300','PDU_alt_283','PDU_alt_424','PDU_alt_184') AND process_name IN ('Lid fitment to tray (Cerus_450_pdu)','Lid fitment to tray (Cerus_300_pdu)','Lid fitment to tray (Kratos_450_pdu)','Lid fitment to tray (Kratos_300_pdu)','Lid fitment to tray pdu 283','Lid fitment to tray pdu 424','Lid fitment to tray pdu 184') GROUP BY process_name,Station_name,pack_name,total_screw,module_name`;
+
+            request.query(query_GLOBALDATA, function (err, recordset) {
+                if (err) {
+                    console.log("Error in GLOBALDATA query:", err);
+                    return;
+                }
+
+                var result = recordset.recordset;
+
+                if (result.length != 0) {
+                    for (var i in result) {
+                        var module_name = result[i].module_name;
+                        var station_name = result[i].Station_name;
+                        var process_name = result[i].process_name;
+                        var processcount = result[i].processcount;
+                        var tot_screw_count = result[i].tot_screw_count;
+
+                        ingwholeData.push(module_name);
+                        ingwholeData.push(station_name);
+                        ingwholeData.push(process_name);
+                        ingwholeData.push(processcount);
+                        ingwholeData.push(tot_screw_count);
+                    }
+
+                    // Step 2: Use module_barcode instead of pack_no in dbQueryPack
+                    var dbQueryPack = `SELECT module_name,pack_name,pack_no,station_name,process_name,COUNT(process_name) as total_bolts FROM taco_treceability.taco_treceability.torque_details_EIP where pack_name='${pack_name}' and pack_no='${module_barcode}' GROUP BY process_name,station_name,pack_name,pack_no,module_name`;
+
+                    request.query(dbQueryPack, function (err, recordset) {
+                        if (err) {
+                            console.log("Error in dbQueryPack:", err);
+                            return;
+                        }
+
+                        var result = recordset.recordset;
+
+                        if (result.length != 0) {
+                            for (var i in result) {
+                                var module_name = result[i].module_name;
+                                var station_name = result[i].station_name;
+                                var process_name = result[i].process_name;
+                                var total_bolts = result[i].total_bolts;
+
+                                ingpackDAta.push(module_name);
+                                ingpackDAta.push(station_name);
+                                ingpackDAta.push(process_name);
+                                ingpackDAta.push(total_bolts);
+                            }
+
+                            socket.emit("setGlobalIngersollData", ingwholeData, ingpackDAta, pack_no);
+                        } else {
+                            socket.emit("setGlobalIngersollData", ingwholeData, ingpackDAta, pack_no);
+                        }
+                    });
+
+                }
+            });
+        });
+    });
+});
