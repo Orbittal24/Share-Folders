@@ -1,86 +1,31 @@
-socket.on('getGlobalIngersollData_alt_pdu', (pack_name, pack_no) => {
-    console.log('pack_name, pack_no $$$$$$', pack_name, pack_no);
-
-    var ingwholeData = [];
-    var ingpackDAta = [];
-
-    // Step 1: First query to get module_barcode from pack_name and pack_no
-    var moduleBarcodeQuery = `SELECT module_barcode FROM taco_treceability.pdu_qrcode_details WHERE final_qrcode = '${pack_no}' AND battery_pack_name = '${pack_name}'`;
-
-    sql.connect(sqlConfig, function (err) {
-        if (err) {
-            console.log("Connection error:", err);
-            return;
-        }
-
-        let request = new sql.Request();
-        request.query(moduleBarcodeQuery, function (err, recordset) {
-            if (err) {
-                console.log("Error fetching module_barcode:", err);
-                return;
-            }
-
-            // Check if module_barcode found
-            let module_barcode = (recordset.recordset.length > 0) ? recordset.recordset[0].module_barcode : pack_no; // Fallback to pack_no if not found
-
-            // Now proceed with original logic (first main query)
-            var query_GLOBALDATA = `SELECT module_name,pack_name,Station_name,process_name,COUNT(process_name) as processcount,sum(total_screw) as tot_screw_count FROM taco_treceability.taco_treceability.torque_masterEIP where pack_name='${pack_name}' AND Station_name IN ('PDU_alt_Cerus_450','PDU_alt_Cerus_300','PDU_alt_Kratos_450','PDU_alt_Kratos_300','PDU_alt_283','PDU_alt_424','PDU_alt_184') AND process_name IN ('Lid fitment to tray (Cerus_450_pdu)','Lid fitment to tray (Cerus_300_pdu)','Lid fitment to tray (Kratos_450_pdu)','Lid fitment to tray (Kratos_300_pdu)','Lid fitment to tray pdu 283','Lid fitment to tray pdu 424','Lid fitment to tray pdu 184') GROUP BY process_name,Station_name,pack_name,total_screw,module_name`;
-
-            request.query(query_GLOBALDATA, function (err, recordset) {
-                if (err) {
-                    console.log("Error in GLOBALDATA query:", err);
-                    return;
-                }
-
-                var result = recordset.recordset;
-
-                if (result.length != 0) {
-                    for (var i in result) {
-                        var module_name = result[i].module_name;
-                        var station_name = result[i].Station_name;
-                        var process_name = result[i].process_name;
-                        var processcount = result[i].processcount;
-                        var tot_screw_count = result[i].tot_screw_count;
-
-                        ingwholeData.push(module_name);
-                        ingwholeData.push(station_name);
-                        ingwholeData.push(process_name);
-                        ingwholeData.push(processcount);
-                        ingwholeData.push(tot_screw_count);
-                    }
-
-                    // Step 2: Use module_barcode instead of pack_no in dbQueryPack
-                    var dbQueryPack = `SELECT module_name,pack_name,pack_no,station_name,process_name,COUNT(process_name) as total_bolts FROM taco_treceability.taco_treceability.torque_details_EIP where pack_name='${pack_name}' and pack_no='${module_barcode}' GROUP BY process_name,station_name,pack_name,pack_no,module_name`;
-
-                    request.query(dbQueryPack, function (err, recordset) {
-                        if (err) {
-                            console.log("Error in dbQueryPack:", err);
-                            return;
-                        }
-
-                        var result = recordset.recordset;
-
-                        if (result.length != 0) {
-                            for (var i in result) {
-                                var module_name = result[i].module_name;
-                                var station_name = result[i].station_name;
-                                var process_name = result[i].process_name;
-                                var total_bolts = result[i].total_bolts;
-
-                                ingpackDAta.push(module_name);
-                                ingpackDAta.push(station_name);
-                                ingpackDAta.push(process_name);
-                                ingpackDAta.push(total_bolts);
-                            }
-
-                            socket.emit("setGlobalIngersollData", ingwholeData, ingpackDAta, pack_no);
-                        } else {
-                            socket.emit("setGlobalIngersollData", ingwholeData, ingpackDAta, pack_no);
-                        }
-                    });
-
-                }
-            });
-        });
-    });
-});
+SELECT 
+    sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
+    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
+    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+FROM 
+    taco_treceability.torque_details_EIP
+WHERE 
+    pack_no IN (
+        'abc', 
+        'DJ2022-GA80002564', 'DJ2030-GA90032311', 'DJ1927-GA60020207',
+        'DJ2022-GA90002642', 'DJ1919-GA80001073', 'DJ1927-GA80020458',
+        'DJ2030-GA80032210', 'DJ2022-GA80002620', 'DJ2030-GA90032318',
+        'DJ1927-G9H0019555', 'DJ2043-G9L0003624', 'DJ2043-GA70003905',
+        'DJ2029-GA70001120', 'DJ2025-G9H0006295', 'DJ1927-GA80020449',
+        'DJ2030-G8Y0023403', 'DJ1927-GA70020366', 'DJ2043-G9N0003695',
+        'DJ2029-GA80001122', 'DJ2029-GA70001115', 'DJ1916-GA80003515',
+        'DJ2022-GA80002621', 'DJ1927-GA30019899', 'DJ1927-GA80020473',
+        'DJ2022-GA90002636', 'DJ1916-G9R0003348', 'DJ2042-GA80043505',
+        'DJ2022-GA80002610', 'DJ1927-G9H0019554', 'DJ2045-GA90000047',
+        'DJ2022-GA90002638', 'DJ1927-GA40020047', 'DJ2022-GA80002586',
+        'DJ1916-GA80003512', 'DJ1927-GA70020274', 'DJ1927-G7V0013140',
+        'DJ2042-GA90020875', 'DJ2030-G9L0026044', 'DJ2029-GA70001119',
+        'DJ2038-GA30000054', 'DJ2030-GA80032250', 'DJ2042-GA90043567',
+        'DJ2045-GA90000048', 'DJ2029-GA80001123', 'DJ2042-GA20042893',
+        'DJ2042-GA90020798', 'DJ1927-G9R0019077', 'DJ2030-GA90032292',
+        'DJ2042-GA90043545', 'DJ1927-GA10019748', 'DJ1916-GA70003494',
+        'DJ1927-G9H0019552', 'DJ1916-G3V0001720', 'DJ1927-G9W0016487',
+        'DJ1916-GA80003508', 'DJ1916-GA80003510', 'DJ2022-GA80002598',
+        'DJ1916-GA80003506', 'DJ2030-GA80032213', 'DJ2048-G9L0000022',
+        'DJ2030-GA80032195', 'DJ2022-GA90002647'
+    );
