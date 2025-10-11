@@ -971,21 +971,28 @@ if __name__ == "__main__":
 
 
 import os
+import sys
 
-# Start from current script location
-base_dir = os.path.abspath(os.path.dirname(__file__))
+def get_base_path():
+    """Return base path for config file (works in .exe and .py modes)."""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled exe
+        base_path = sys._MEIPASS  # PyInstaller extracts here
+    else:
+        # Running as script
+        base_path = os.path.dirname(os.path.abspath(__file__))
 
-# Walk upward until "Python_VIR_Clinet" folder is found
-while True:
-    if os.path.basename(base_dir) == "Python_VIR_Clinet":
-        break
-    parent = os.path.dirname(base_dir)
-    if parent == base_dir:  # reached root drive
-        raise FileNotFoundError("Could not find 'Python_VIR_Clinet' folder")
-    base_dir = parent
+    # Walk up until Python_VIR_Clinet folder is found
+    while True:
+        if os.path.basename(base_path) == "Python_VIR_Clinet":
+            break
+        parent = os.path.dirname(base_path)
+        if parent == base_path:
+            raise FileNotFoundError("Could not find 'Python_VIR_Clinet' folder")
+        base_path = parent
 
-# Build full Excel path
-excel_path = os.path.join(base_dir, "com_port_config.xlsx")
+    return base_path
 
-print("Excel Path:", excel_path)
 
+# ✅ Use it to build your Excel path
+excel_path = os.path.join(get_base_path(), "com_port_config.xlsx")
