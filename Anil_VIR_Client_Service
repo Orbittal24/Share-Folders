@@ -973,26 +973,27 @@ if __name__ == "__main__":
 import os
 import sys
 
-def get_base_path():
-    """Return base path for config file (works in .exe and .py modes)."""
+def find_project_root(folder_name="Python_VIR_Clinet"):
+    """
+    Dynamically find the absolute path of the 'Python_VIR_Clinet' folder,
+    even if drive or parent path changes.
+    Works for both .py and PyInstaller .exe versions.
+    """
     if getattr(sys, 'frozen', False):
-        # Running as compiled exe
-        base_path = sys._MEIPASS  # PyInstaller extracts here
+        # Running as .exe (PyInstaller)
+        start_path = os.path.dirname(sys.executable)
     else:
-        # Running as script
-        base_path = os.path.dirname(os.path.abspath(__file__))
+        # Running as normal .py script
+        start_path = os.path.dirname(os.path.abspath(__file__))
 
-    # Walk up until Python_VIR_Clinet folder is found
+    current = start_path
     while True:
-        if os.path.basename(base_path) == "Python_VIR_Clinet":
-            break
-        parent = os.path.dirname(base_path)
-        if parent == base_path:
-            raise FileNotFoundError("Could not find 'Python_VIR_Clinet' folder")
-        base_path = parent
+        if os.path.basename(current) == folder_name:
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:  # reached drive root
+            raise FileNotFoundError(f"Folder '{folder_name}' not found.")
+        current = parent
 
-    return base_path
-
-
-# ✅ Use it to build your Excel path
-excel_path = os.path.join(get_base_path(), "com_port_config.xlsx")
+base_dir = find_project_root("Python_VIR_Clinet")
+excel_path = os.path.join(base_dir, "com_port_config.xlsx")
