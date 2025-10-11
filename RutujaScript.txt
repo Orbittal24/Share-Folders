@@ -11,10 +11,10 @@ import json
 print(" Initializing database connection...")
 mirror_connection_string = (
     "DRIVER={ODBC Driver 17 for SQL Server};"
-    "SERVER=localhost;"
+    "SERVER=10.9.4.28;"
     "DATABASE=module_bom_register;"
-    "UID=rutuja;"
-    "PWD=SimplePassword123"
+    "UID=10.9.4.28;"
+    "PWD=admin"
 )
 
 print(" Creating SQLAlchemy engine...")
