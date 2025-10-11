@@ -965,3 +965,27 @@ if __name__ == "__main__":
             serial_port.close()
         print("Script stopped")
 
+
+
+
+
+
+import os
+
+# Start from current script location
+base_dir = os.path.abspath(os.path.dirname(__file__))
+
+# Walk upward until "Python_VIR_Clinet" folder is found
+while True:
+    if os.path.basename(base_dir) == "Python_VIR_Clinet":
+        break
+    parent = os.path.dirname(base_dir)
+    if parent == base_dir:  # reached root drive
+        raise FileNotFoundError("Could not find 'Python_VIR_Clinet' folder")
+    base_dir = parent
+
+# Build full Excel path
+excel_path = os.path.join(base_dir, "com_port_config.xlsx")
+
+print("Excel Path:", excel_path)
+
