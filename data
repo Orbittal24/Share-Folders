@@ -1,31 +1,4 @@
-SELECT 
-    sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
-    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
-    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
-FROM 
-    taco_treceability.torque_details_EIP
-WHERE 
-    pack_no IN (
-        'abc',
-        'DJ2030-GAB0029714', 'DJ2043-GA80003923', 'DJ2022-GAC0002829',
-        'DJ2043-GA70003903', 'DJ2042-GAB0043666', 'DJ1916-GAA0003553',
-        'DJ2022-GAB0002816', 'DJ2030-GAB0032713', 'DJ1916-GAB0003554',
-        'DJ2022-GAB0002801', 'DJ2042-GA70043431', 'DJ2029-GAA0001127',
-        'DJ2022-GAC0002826', 'DJ2022-GAB0002818', 'DJ1927-GAB0020633',
-        'DJ2022-GAC0002822', 'DJ1916-GAB0003561', 'DJ1916-GAB0003562',
-        'DJ2022-GAC0002825', 'DJ2029-GAA0001125', 'DJ2022-GAC0002821',
-        'DJ2022-GAB0002805', 'DJ2022-GAB0002807', 'DJ2043-GA60003884',
-        'DJ2042-GAB0043712', 'DJ2030-GAB0032685', 'DJ2022-GAB0002799',
-        'DJ2022-GAC0002823', 'DJ1916-GAA0003540', 'DJ2038-GA30000054',
-        'DJ2022-GAB0002814', 'DJ2022-GAB0002809', 'DJ2029-GA50001102',
-        'DJ2022-GAA0002722', 'DJ2029-GAA0001126', 'DJ1916-GAA0003550',
-        'DJ1916-GAB0003558', 'DJ1916-GAA0003544', 'DJ2022-GAB0002817',
-        'DJ2045-GA90000049', 'DJ1916-GAB0003563', 'DJ2022-GAC0002828',
-        'DJ2022-GAB0002812', 'DJ1916-GAA0003548', 'DJ2042-GA80043444',
-        'DJ1919-GAB0001130', 'DJ1916-GAA0003545', 'DJ2022-GA90002676',
-        'DJ2022-GAC0002820', 'DJ2042-GAB0021058', 'DJ2022-GAC0002830',
-        'DJ2022-GAB0002813', 'DJ2030-GAB0032728', 'DJ2022-GAB0002819',
-        'DJ2043-GAB0004054', 'DJ2022-GAB0002792', 'DJ2030-GAC0029734',
-        'DJ1919-GAB0001126', 'DJ2022-GAB0002804', 'DJ2022-GAC0002837',
-        'DJ2029-GAA0001128'
-    );
+\<h3 style="color:red;">
+  Scan Foam of string starting from : 5040047824 OR<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;P1210140001001
+</h3>
