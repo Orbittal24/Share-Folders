@@ -1,14 +1,4 @@
-barcode.startsWith('5040047824') || 
-    barcode.startsWith('P1210140001001') || 
-    barcode.startsWith('01TM')
-
-
-if (
-    smokeQR && 
-    moduleQR && 
-    (
-        smokeQR.startsWith('5040047824') || 
-        smokeQR.startsWith('P1210140001001')
-    ) &&
-    moduleQR.startsWith('01TM')
-) {
+console.log("→ Matching process_name:", row.process_name);
+console.log("→ Normalized input:", inputNorm);
+console.log("→ Module Key:", modKey);
+console.log("→ Candidate processes:", pmRes.recordset.map(p => p.Process_Name));
