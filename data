@@ -1,36 +1,55 @@
-SELECT 
-    sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
-    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
-    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
-FROM 
-    taco_treceability.torque_details_EIP
-WHERE 
-    pack_no IN (
-        'abc',
-        'DJ2043-GAB0004048', 'DJ2022-GAC0002832', 'DJ2043-GAA0004041',
-        'DJ2043-GAB0004088', 'DJ1916-GAB0003567', 'DJ2043-GAB0004094',
-        'DJ2043-GAA0003996', 'DJ1927-G8B0015310', 'DJ2042-GAD0043860',
-        'DJ2029-GAD0001131', 'DJ2042-GAD0043887', 'DJ2043-GA90003976',
-        'DJ2042-GAD0043875', 'DJ2043-GAA0004039', 'DJ2043-GAB0004083',
-        'DJ2022-GAC0002827', 'DJ1916-GAB0003564', 'DJ2043-GAB0004045',
-        'DJ2043-GAB0004095', 'DJ2043-GAA0004002', 'DJ2022-GAC0002833',
-        'DJ2022-GAC0002838', 'DJ1919-GAC0001136', 'DJ2043-GAA0004015',
-        'DJ2022-GAC0002836', 'DJ2022-GAC0002840', 'DJ2043-GAB0004089',
-        'DJ1916-GAB0003566', 'DJ2043-GAA0003997', 'DJ2042-GAD0043883',
-        'DJ1927-GA70020297', 'DJ2043-GAB0004087', 'DJ2022-GAC0002835',
-        'DJ2043-GAA0004030', 'DJ2042-GAD0043853', 'DJ1916-GAB0003560',
-        'DJ2043-GAB0004073', 'DJ2043-GAB0004093', 'DJ2022-GAC0002842',
-        'DJ2038-GA30000054', 'DJ2045-GA90000048', 'DJ1927-GAC0020648',
-        'DJ1927-GAC0020668', 'DJ2022-GAC0002834', 'DJ2043-GAB0004096',
-        'DJ2043-GAA0004003', 'DJ2029-GAB0001130', 'DJ2022-GAB0002800',
-        'DJ2022-G7K0000689', 'DJ2029-GAA0001126', 'DJ2030-GAC0032869',
-        'DJ2022-GAB0002787', 'DJ2043-GAA0004035', 'DJ2042-GAD0043855',
-        'DJ2030-GAD0032961', 'DJ2042-GAD0043854', 'DJ2043-GA90003958',
-        'DJ1927-G8B0015304', 'DJ2022-GAC0002824', 'DJ2043-GAA0004024',
-        'DJ1916-G9V0003390', 'DJ2043-GAB0004098', 'DJ2042-GAB0043715',
-        'DJ2030-GAC0032831', 'DJ2022-GAA0002751', 'DJ2022-GA90002694',
-        'DJ2030-GAD0032958', 'DJ2043-GA90003979', 'DJ2043-GAB0004044',
-        'DJ2022-GAB0002775', 'DJ2030-GAD0032939', 'DJ2043-GAA0003994',
-        'DJ2022-GAC0002831', 'DJ2030-GAD0032955', 'DJ2043-GA90003967',
-        'DJ2030-GAD0029764', 'DJ1916-GA90003535'
-    );
+USE [taco_treceability]
+GO
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TRIGGER [taco_treceability].[trg_InsertTorqueDetailsEIP]
+ON [taco_treceability].[torque_details_EIP]
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO [taco_treceability].[torque_details_EIP_mirror] (
+        [pack_name],
+        [module_name],
+        [torque],
+        [angle],
+        [torque_status],
+        [date_dd],
+        [shift],
+        [module_barcode],
+        [process_status],
+        [pack_no],
+        [rework_status],
+        [bypass_operator],
+        [bypass_reason],
+        [process_name],
+        [station_name],
+        [smoke_sensor_linked_pack_no]
+    )
+    SELECT
+        [pack_name],
+        [module_name],
+        [torque],
+        [angle],
+        [torque_status],
+        [date_dd],
+        [shift],
+        [module_barcode],
+        [process_status],
+        [pack_no],
+        [rework_status],
+        [bypass_operator],
+        [bypass_reason],
+        [process_name],
+        [station_name],
+        [smoke_sensor_linked_pack_no]
+    FROM inserted
+    WHERE [pack_name] IN ('NOVA Prismatic LR', 'Tamor');
+END;
+GO
