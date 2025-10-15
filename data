@@ -1,55 +1,34 @@
-USE [taco_treceability]
-GO
-
-SET ANSI_NULLS ON
-GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-CREATE TRIGGER [taco_treceability].[trg_InsertTorqueDetailsEIP]
-ON [taco_treceability].[torque_details_EIP]
-AFTER INSERT
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    INSERT INTO [taco_treceability].[torque_details_EIP_mirror] (
-        [pack_name],
-        [module_name],
-        [torque],
-        [angle],
-        [torque_status],
-        [date_dd],
-        [shift],
-        [module_barcode],
-        [process_status],
-        [pack_no],
-        [rework_status],
-        [bypass_operator],
-        [bypass_reason],
-        [process_name],
-        [station_name],
-        [smoke_sensor_linked_pack_no]
-    )
-    SELECT
-        [pack_name],
-        [module_name],
-        [torque],
-        [angle],
-        [torque_status],
-        [date_dd],
-        [shift],
-        [module_barcode],
-        [process_status],
-        [pack_no],
-        [rework_status],
-        [bypass_operator],
-        [bypass_reason],
-        [process_name],
-        [station_name],
-        [smoke_sensor_linked_pack_no]
-    FROM inserted
-    WHERE [pack_name] IN ('NOVA Prismatic LR', 'Tamor');
-END;
-GO
+SELECT 
+    sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
+    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
+    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+FROM 
+    taco_treceability.torque_details_EIP
+WHERE 
+    pack_no IN (
+        'abc',
+        'DJ2029-G9T0001068', 'DJ2043-GAB0004074', 'DJ2030-GAD0033021',
+        'DJ1927-GAE0016686', 'DJ2022-GA80002598', 'DJ2042-GAE0043931',
+        'DJ2030-GAD0032954', 'DJ2042-GAE0043933', 'DJ1916-G940003062',
+        'DJ2043-GAC0004101', 'DJ2025-GAD0006660', 'DJ1916-GA90003527',
+        'DJ2029-GAB0001130', 'DJ2043-GAA0004043', 'DJ2043-G9Y0003863',
+        'DJ2022-GAC0002856', 'DJ2043-GA60003896', 'DJ2042-GAD0043874',
+        'DJ2042-GAD0043898', 'DJ2022-GAC0002855', 'DJ2042-GAE0043927',
+        'DJ2022-GAC0002847', 'DJ1917-GAE0000220', 'DJ2030-GAD0033016',
+        'DJ2029-G8T0000911', 'DJ2025-GAE0006666', 'DJ2022-GAC0002838',
+        'DJ2043-GAB0004097', 'DJ1927-GAD0021006', 'DJ1927-GAD0020965',
+        'DJ2022-GAC0002849', 'DJ2030-GAD0032999', 'DJ2022-GAD0002862',
+        'DJ2042-GAE0043937', 'DJ1916-G8W0003005', 'DJ2030-GAE0033037',
+        'DJ1916-GAD0003568', 'DJ1916-GAB0003559', 'DJ2043-GA70003910',
+        'DJ2030-GAD0033020', 'DJ1927-GAD0020954', 'DJ1927-GA10019718',
+        'DJ2042-GAD0043870', 'DJ2022-GAC0002859', 'DJ2043-GA60003889',
+        'DJ1916-G8Y0003029', 'DJ1927-GAE0020991', 'DJ1919-GAD0001159',
+        'DJ2029-GAD0001132', 'DJ2022-GAC0002848', 'DJ2043-GAB0004082',
+        'DJ2043-GA90003987', 'DJ2030-GAD0032998', 'DJ2030-GAE0033076',
+        'DJ2022-GAC0002860', 'DJ2025-G9X0006592', 'DJ2043-GA60003885',
+        'DJ1927-GAD0020694', 'DJ2022-GAE0002869', 'DJ1927-GAB0020643',
+        'DJ1927-G8B0015280', 'DJ2022-GAC0002854', 'DJ2022-GAA0002705',
+        'DJ2030-GAE0033111', 'DJ2029-GAE0001133', 'DJ1927-GAD0020919',
+        'DJ1916-GA90003531', 'DJ2022-GAC0002851', 'DJ2038-GA30000054',
+        'DJ2042-GA40043071', 'DJ2030-GAD0033002', 'DJ2029-GAB0001129'
+    );
