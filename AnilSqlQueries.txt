@@ -796,3 +796,42 @@ GROUP BY
     b.pack_name, b.module_group;
 
 ----------------------------------------------------------------------------------
+
+
+CASE
+    WHEN b.pack_name = 'NOVA_Prismatic_LR' THEN 1
+    WHEN b.pack_name = 'Bajaj_8.9' THEN 2
+    WHEN b.pack_name = 'Bajaj_11.8' THEN 3
+    WHEN b.pack_name = 'Kanger_1' THEN 4
+    WHEN b.pack_name = 'Kanger_1_AIO' THEN 5
+    WHEN b.pack_name = 'Kanger_2' THEN 6
+    WHEN b.pack_name = 'Limber' THEN 7
+    WHEN b.pack_name = 'Bajaj_6.1' THEN 8
+    WHEN b.pack_name = 'Ejeeto_21.3' THEN 9
+    WHEN b.pack_name = 'Ejeeto_18.4' THEN 10
+    WHEN b.pack_name = 'SM_eBada_Dost' THEN 11
+    WHEN b.pack_name = 'SM_eDost' THEN 12
+    WHEN b.pack_name = 'NOVA_MROPS' THEN 13
+    WHEN b.pack_name = 'NOVA_LROPS' THEN 14
+    WHEN b.pack_name = 'CORAL_SR' THEN 15
+    WHEN b.pack_name = 'Kratos1_450kwh' THEN 16
+    WHEN b.pack_name = 'EBUS_LR' THEN 17
+    WHEN b.pack_name = 'TVS_9' THEN 18
+    WHEN b.pack_name = 'Tamor' THEN 19
+    WHEN b.pack_name = 'Bajaj_12.1' THEN 20
+    WHEN b.pack_name = 'EBUS_283' THEN 21
+    WHEN b.pack_name = 'Cerus1|Cerus2|Kratos_HD_450kwh' THEN 22
+    WHEN b.pack_name = 'Kratos1_300kwh' THEN 23
+    WHEN b.pack_name = 'Cerus1|Cerus2_300kwh' THEN 24
+    WHEN b.pack_name = 'UPP_39.9' THEN 25
+    WHEN b.pack_name = 'UPP_27.8' THEN 26
+    WHEN b.pack_name = 'Bajaj_5.9' THEN 27
+    WHEN b.pack_name = 'Bajaj_9.2' THEN 28
+    WHEN b.pack_name = 'Bajaj_12.2' THEN 29
+    WHEN b.pack_name = 'EBUS_424' THEN 30
+    WHEN b.pack_name = 'Challenger_LR' THEN 31
+    WHEN b.pack_name = 'Challenger_MR' THEN 32
+    WHEN b.pack_name = 'TVS_12.1' THEN 33
+    WHEN b.pack_name = 'EBUS_184' THEN 34
+    WHEN b.pack_name = 'NULL' THEN 35
+    WHEN b.pack_name = 'NOVA_40kwh' THEN 36
