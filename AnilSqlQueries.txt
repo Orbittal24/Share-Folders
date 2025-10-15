@@ -425,21 +425,374 @@ LEFT JOIN [master_quality_gate].[taco_treceability].[Master_CheckList_Name] AS B
 INSERT INTO [master_taco_treceability_VIR].[dbo].[Master_VIR]
     ([PackID], [Voltage_Points], [IR_Points], [Output_Voltage], [Timestamp], [Station_ID], [srno], [Module_ID])
 SELECT 
-    p.Pack_ID,
-    COUNT(b.module_group),
-    COUNT(b.module_group),
-    75,
-    GETDATE(),
-    23,
-    23,
-    m.Module_ID
+    -- 🔹 Pack mapping
+    CASE 
+        WHEN b.pack_name = 'NOVA' THEN 1
+        WHEN b.pack_name = 'Bajaj 8.9' THEN 2
+        WHEN b.pack_name = 'Bajaj 11.8' THEN 3
+        WHEN b.pack_name = 'Kanger 1' THEN 4
+        WHEN b.pack_name = 'Kanger 1 AIO' THEN 5
+        WHEN b.pack_name = 'Kanger 2' THEN 6
+        WHEN b.pack_name = 'Limber' THEN 7
+        WHEN b.pack_name = 'Bajaj 6.1' THEN 8
+        WHEN b.pack_name = 'Ejeeto 21.3' THEN 9
+        WHEN b.pack_name = 'Ejeeto 18.4' THEN 10
+        WHEN b.pack_name = 'SM eBada Dost' THEN 11
+        WHEN b.pack_name = 'SM eDost' THEN 12
+        WHEN b.pack_name = 'NOVA MROPS' THEN 13
+        WHEN b.pack_name = 'NOVA LROPS' THEN 14
+        WHEN b.pack_name = 'CORAL SR' THEN 15
+        WHEN b.pack_name = 'Kratos1 450kwh' THEN 16
+        WHEN b.pack_name = 'EBUS LR' THEN 17
+        WHEN b.pack_name = 'TVS 9' THEN 18
+        WHEN b.pack_name = 'Tamor' THEN 19
+        WHEN b.pack_name = 'Bajaj 12.1' THEN 20
+        WHEN b.pack_name = 'EBUS 283' THEN 21
+        WHEN b.pack_name = 'Cerus1|Cerus2|Kratos HD 450kwh' THEN 22
+        WHEN b.pack_name = 'Kratos1 300kwh' THEN 23
+        WHEN b.pack_name = 'Cerus1|Cerus2 300kwh' THEN 24
+        WHEN b.pack_name = 'UPP 39.9' THEN 25
+        WHEN b.pack_name = 'UPP 27.8' THEN 26
+        WHEN b.pack_name = 'Bajaj 5.9' THEN 27
+        WHEN b.pack_name = 'Bajaj 9.2' THEN 28
+        WHEN b.pack_name = 'Bajaj 12.2' THEN 29
+        WHEN b.pack_name = 'EBUS 424' THEN 30
+        WHEN b.pack_name = 'Challenger LR' THEN 31
+        WHEN b.pack_name = 'Challenger MR' THEN 32
+        WHEN b.pack_name = 'TVS 12.1' THEN 33
+        WHEN b.pack_name = 'EBUS 184' THEN 34
+        WHEN b.pack_name = 'NOVA 40kwh' THEN 37
+        ELSE NULL
+    END AS PackID,
+
+    COUNT(b.module_group) AS Voltage_Points,
+    COUNT(b.module_group) AS IR_Points,
+    75 AS Output_Voltage,
+    GETDATE() AS [Timestamp],
+    23 AS Station_ID,
+    23 AS srno,
+
+   CASE
+    -- Pack 1: NOVA Prismatic LR
+    WHEN b.pack_name = 'NOVA Prismatic LR' AND b.module_group = 'A1' THEN 254
+    WHEN b.pack_name = 'NOVA Prismatic LR' AND b.module_group = 'A3' THEN 255
+    WHEN b.pack_name = 'NOVA Prismatic LR' AND b.module_group = 'A5' THEN 256
+    WHEN b.pack_name = 'NOVA Prismatic LR' AND b.module_group = 'A7' THEN 257
+    WHEN b.pack_name = 'NOVA Prismatic LR' AND b.module_group = 'B2' THEN 258
+    WHEN b.pack_name = 'NOVA Prismatic LR' AND b.module_group = 'B4' THEN 259
+    WHEN b.pack_name = 'NOVA Prismatic LR' AND b.module_group = 'B6' THEN 260
+
+    -- Pack 2: Bajaj 8.9
+    WHEN b.pack_name = 'Bajaj 8.9' AND b.module_group = 'M1' THEN 1
+    WHEN b.pack_name = 'Bajaj 8.9' AND b.module_group = 'M2' THEN 2
+    WHEN b.pack_name = 'Bajaj 8.9' AND b.module_group = 'M3' THEN 3
+    WHEN b.pack_name = 'Bajaj 8.9' AND b.module_group = 'M4' THEN 4
+
+    -- Pack 3: Bajaj 11.8
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M1' THEN 5
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M2' THEN 6
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M3' THEN 7
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M4' THEN 8
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M5' THEN 9
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M6' THEN 10
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M7' THEN 11
+    WHEN b.pack_name = 'Bajaj 11.8' AND b.module_group = 'M8' THEN 12
+
+    -- Pack 4: Kanger 1
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'A1' THEN 13
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'A2' THEN 14
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'A3' THEN 15
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'A4' THEN 16
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'A5' THEN 17
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'A6' THEN 18
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'A7' THEN 19
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'B8' THEN 20
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'B13' THEN 21
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'C9' THEN 22
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'C10' THEN 23
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'C11' THEN 24
+    WHEN b.pack_name = 'Kanger 1' AND b.module_group = 'C12' THEN 25
+
+    -- Pack 5: Kanger 1 AIO
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'A1' THEN 26
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'A2' THEN 27
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'A3' THEN 28
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'A4' THEN 29
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'A5' THEN 30
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'A6' THEN 31
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'A7' THEN 32
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'B8' THEN 33
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'B13' THEN 34
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'C9' THEN 35
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'C10' THEN 36
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'C11' THEN 37
+    WHEN b.pack_name = 'Kanger 1 AIO' AND b.module_group = 'C12' THEN 38
+
+    -- Pack 6: Kanger 2
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'A1' THEN 39
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'B2' THEN 40
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'B3' THEN 41
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'B4' THEN 42
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'B5' THEN 43
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'B6' THEN 44
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'B7' THEN 45
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'C8' THEN 46
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'C9' THEN 47
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'C10' THEN 48
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'C11' THEN 49
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'C12' THEN 50
+    WHEN b.pack_name = 'Kanger 2' AND b.module_group = 'C13' THEN 51
+
+    -- Pack 7: Limber
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M1' THEN 52
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M2' THEN 53
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M3' THEN 54
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M4' THEN 55
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M5' THEN 56
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M6' THEN 57
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M7' THEN 58
+    WHEN b.pack_name = 'Limber' AND b.module_group = 'M8' THEN 59
+
+    -- Pack 8: Bajaj 6.1
+    WHEN b.pack_name = 'Bajaj 6.1' AND b.module_group = 'M1' THEN 60
+    WHEN b.pack_name = 'Bajaj 6.1' AND b.module_group = 'M2' THEN 61
+    WHEN b.pack_name = 'Bajaj 6.1' AND b.module_group = 'M3' THEN 62
+    WHEN b.pack_name = 'Bajaj 6.1' AND b.module_group = 'M4' THEN 63
+
+    -- Pack 9: Ejeeto 21.3
+    WHEN b.pack_name = 'Ejeeto 21.3' AND b.module_group = 'M1' THEN 64
+    WHEN b.pack_name = 'Ejeeto 21.3' AND b.module_group = 'M2' THEN 65
+    WHEN b.pack_name = 'Ejeeto 21.3' AND b.module_group = 'M3' THEN 66
+
+    -- Pack 10: Ejeeto 18.4
+    WHEN b.pack_name = 'Ejeeto 18.4' AND b.module_group = 'M1' THEN 67
+    WHEN b.pack_name = 'Ejeeto 18.4' AND b.module_group = 'M2' THEN 68
+    WHEN b.pack_name = 'Ejeeto 18.4' AND b.module_group = 'M3' THEN 69
+ 
+	
+ -- Pack 11: SM eBada Dost
+    WHEN b.pack_name = 'SM eBada Dost' AND b.module_group = 'M1' THEN 70
+    WHEN b.pack_name = 'SM eBada Dost' AND b.module_group = 'M2' THEN 71
+    WHEN b.pack_name = 'SM eBada Dost' AND b.module_group = 'M3' THEN 72
+    WHEN b.pack_name = 'SM eBada Dost' AND b.module_group = 'M4' THEN 73
+    WHEN b.pack_name = 'SM eBada Dost' AND b.module_group = 'M5' THEN 74
+    WHEN b.pack_name = 'SM eBada Dost' AND b.module_group = 'M6' THEN 75
+
+    -- Pack 12: SM eDost
+    WHEN b.pack_name = 'SM eDost' AND b.module_group = 'M1' THEN 76
+    WHEN b.pack_name = 'SM eDost' AND b.module_group = 'M2' THEN 77
+    WHEN b.pack_name = 'SM eDost' AND b.module_group = 'M3' THEN 78
+    WHEN b.pack_name = 'SM eDost' AND b.module_group = 'M4' THEN 79
+    WHEN b.pack_name = 'SM eDost' AND b.module_group = 'M5' THEN 80
+
+    -- Pack 13: NOVA MROPS
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'A1' THEN 81
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'A2' THEN 82
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'A3' THEN 83
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'A4' THEN 84
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'A5' THEN 85
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'B6' THEN 86
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'B7' THEN 87
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'B8' THEN 88
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'B9' THEN 89
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'B10' THEN 90
+    WHEN b.pack_name = 'NOVA MROPS' AND b.module_group = 'B11' THEN 91
+
+    -- Pack 14: NOVA LROPS
+    WHEN b.pack_name = 'NOVA LROPS' AND b.module_group = 'M1' THEN 92
+    WHEN b.pack_name = 'NOVA LROPS' AND b.module_group = 'M2' THEN 93
+    WHEN b.pack_name = 'NOVA LROPS' AND b.module_group = 'M3' THEN 94
+    WHEN b.pack_name = 'NOVA LROPS' AND b.module_group = 'M4' THEN 95
+    WHEN b.pack_name = 'NOVA LROPS' AND b.module_group = 'M5' THEN 96
+    WHEN b.pack_name = 'NOVA LROPS' AND b.module_group = 'M6' THEN 97
+
+    -- Pack 15: CORAL SR
+    WHEN b.pack_name = 'CORAL SR' AND b.module_group = 'M1' THEN 98
+    WHEN b.pack_name = 'CORAL SR' AND b.module_group = 'M2' THEN 99
+    WHEN b.pack_name = 'CORAL SR' AND b.module_group = 'M3' THEN 100
+
+    -- Pack 16: Kratos1 450kwh
+    WHEN b.pack_name = 'Kratos1 450kwh' AND b.module_group = 'M1' THEN 101
+    WHEN b.pack_name = 'Kratos1 450kwh' AND b.module_group = 'M2' THEN 102
+    WHEN b.pack_name = 'Kratos1 450kwh' AND b.module_group = 'M3' THEN 103
+    WHEN b.pack_name = 'Kratos1 450kwh' AND b.module_group = 'M4' THEN 104
+    WHEN b.pack_name = 'Kratos1 450kwh' AND b.module_group = 'M5' THEN 105
+    WHEN b.pack_name = 'Kratos1 450kwh' AND b.module_group = 'M6' THEN 106
+
+    -- Pack 17: EBUS LR
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M1' THEN 107
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M2' THEN 108
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M3' THEN 109
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M4' THEN 110
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M5' THEN 111
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M6' THEN 112
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M7' THEN 113
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M8' THEN 114
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M9' THEN 115
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M10' THEN 116
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M11' THEN 117
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M12' THEN 118
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M13' THEN 119
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M14' THEN 120
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M15' THEN 121
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M16' THEN 122
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M17' THEN 123
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M18' THEN 124
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M19' THEN 125
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M20' THEN 126
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M21' THEN 127
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M22' THEN 128
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M23' THEN 129
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M24' THEN 130
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M25' THEN 131
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M26' THEN 132
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M27' THEN 133
+    WHEN b.pack_name = 'EBUS LR' AND b.module_group = 'M28' THEN 134
+
+    -- Pack 18: TVS 9
+    WHEN b.pack_name = 'TVS 9' AND b.module_group = 'M1' THEN 155
+    WHEN b.pack_name = 'TVS 9' AND b.module_group = 'M2' THEN 156
+    WHEN b.pack_name = 'TVS 9' AND b.module_group = 'M3' THEN 157
+    WHEN b.pack_name = 'TVS 9' AND b.module_group = 'M4' THEN 158
+
+    -- Pack 19: Tamor
+    WHEN b.pack_name = 'Tamor' AND b.module_group = 'A1' THEN 159
+    WHEN b.pack_name = 'Tamor' AND b.module_group = 'B2' THEN 160
+    WHEN b.pack_name = 'Tamor' AND b.module_group = 'B3' THEN 161
+    WHEN b.pack_name = 'Tamor' AND b.module_group = 'C4' THEN 162
+    WHEN b.pack_name = 'Tamor' AND b.module_group = 'C5' THEN 163
+    WHEN b.pack_name = 'Tamor' AND b.module_group = 'C6' THEN 164
+    WHEN b.pack_name = 'Tamor' AND b.module_group = 'C7' THEN 165
+
+    -- Pack 20: Bajaj 12.1
+    WHEN b.pack_name = 'Bajaj 12.1' AND b.module_group = 'M1' THEN 166
+    WHEN b.pack_name = 'Bajaj 12.1' AND b.module_group = 'M2' THEN 167
+    WHEN b.pack_name = 'Bajaj 12.1' AND b.module_group = 'M3' THEN 168
+    WHEN b.pack_name = 'Bajaj 12.1' AND b.module_group = 'M4' THEN 169
+
+ -- Pack 21: EBUS 283
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M1' THEN 168
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M2' THEN 169
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M3' THEN 170
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M4' THEN 171
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M5' THEN 172
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M6' THEN 173
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M7' THEN 174
+    WHEN b.pack_name = 'EBUS 283' AND b.module_group = 'M8' THEN 175
+
+    -- Pack 22: Cerus1|Cerus2|Kratos HD 450kwh
+    WHEN b.pack_name = 'Cerus1|Cerus2|Kratos HD 450kwh' AND b.module_group = 'M1' THEN 176
+    WHEN b.pack_name = 'Cerus1|Cerus2|Kratos HD 450kwh' AND b.module_group = 'M2' THEN 177
+    WHEN b.pack_name = 'Cerus1|Cerus2|Kratos HD 450kwh' AND b.module_group = 'M3' THEN 178
+    WHEN b.pack_name = 'Cerus1|Cerus2|Kratos HD 450kwh' AND b.module_group = 'M4' THEN 179
+    WHEN b.pack_name = 'Cerus1|Cerus2|Kratos HD 450kwh' AND b.module_group = 'M5' THEN 180
+    WHEN b.pack_name = 'Cerus1|Cerus2|Kratos HD 450kwh' AND b.module_group = 'M6' THEN 181
+
+    -- Pack 23: Kratos1 300kwh
+    WHEN b.pack_name = 'Kratos1 300kwh' AND b.module_group = 'M1' THEN 182
+    WHEN b.pack_name = 'Kratos1 300kwh' AND b.module_group = 'M2' THEN 183
+    WHEN b.pack_name = 'Kratos1 300kwh' AND b.module_group = 'M3' THEN 184
+    WHEN b.pack_name = 'Kratos1 300kwh' AND b.module_group = 'M4' THEN 185
+
+    -- Pack 24: Cerus1|Cerus2 300kwh
+    WHEN b.pack_name = 'Cerus1|Cerus2 300kwh' AND b.module_group = 'M1' THEN 186
+    WHEN b.pack_name = 'Cerus1|Cerus2 300kwh' AND b.module_group = 'M2' THEN 187
+    WHEN b.pack_name = 'Cerus1|Cerus2 300kwh' AND b.module_group = 'M3' THEN 188
+    WHEN b.pack_name = 'Cerus1|Cerus2 300kwh' AND b.module_group = 'M4' THEN 189
+
+    -- Pack 25: UPP 39.9
+    WHEN b.pack_name = 'UPP 39.9' AND b.module_group = 'M1' THEN 190
+    WHEN b.pack_name = 'UPP 39.9' AND b.module_group = 'M2' THEN 191
+    WHEN b.pack_name = 'UPP 39.9' AND b.module_group = 'M3' THEN 192
+    WHEN b.pack_name = 'UPP 39.9' AND b.module_group = 'M4' THEN 193
+    WHEN b.pack_name = 'UPP 39.9' AND b.module_group = 'M5' THEN 194
+    WHEN b.pack_name = 'UPP 39.9' AND b.module_group = 'M6' THEN 195
+
+    -- Pack 26: UPP 27.8
+    WHEN b.pack_name = 'UPP 27.8' AND b.module_group = 'M1' THEN 196
+    WHEN b.pack_name = 'UPP 27.8' AND b.module_group = 'M2' THEN 197
+    WHEN b.pack_name = 'UPP 27.8' AND b.module_group = 'M3' THEN 198
+    WHEN b.pack_name = 'UPP 27.8' AND b.module_group = 'M4' THEN 199
+    WHEN b.pack_name = 'UPP 27.8' AND b.module_group = 'M5' THEN 200
+
+    -- Pack 27: Bajaj 5.9
+    WHEN b.pack_name = 'Bajaj 5.9' AND b.module_group = 'M1' THEN 201
+    WHEN b.pack_name = 'Bajaj 5.9' AND b.module_group = 'M2' THEN 202
+    WHEN b.pack_name = 'Bajaj 5.9' AND b.module_group = 'M3' THEN 203
+    WHEN b.pack_name = 'Bajaj 5.9' AND b.module_group = 'M4' THEN 204
+
+    -- Pack 28: Bajaj 9.2
+    WHEN b.pack_name = 'Bajaj 9.2' AND b.module_group = 'M1' THEN 205
+    WHEN b.pack_name = 'Bajaj 9.2' AND b.module_group = 'M2' THEN 206
+    WHEN b.pack_name = 'Bajaj 9.2' AND b.module_group = 'M3' THEN 207
+    WHEN b.pack_name = 'Bajaj 9.2' AND b.module_group = 'M4' THEN 208
+
+    -- Pack 29: Bajaj 12.2
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M1' THEN 209
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M2' THEN 210
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M3' THEN 211
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M4' THEN 212
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M5' THEN 213
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M6' THEN 214
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M7' THEN 215
+    WHEN b.pack_name = 'Bajaj 12.2' AND b.module_group = 'M8' THEN 216
+
+    -- Pack 30: EBUS 424
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M1' THEN 217
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M2' THEN 218
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M3' THEN 219
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M4' THEN 220
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M5' THEN 221
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M6' THEN 222
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M7' THEN 223
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M8' THEN 224
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M9' THEN 225
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M10' THEN 226
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M11' THEN 227
+    WHEN b.pack_name = 'EBUS 424' AND b.module_group = 'M12' THEN 228
+
+ -- Pack 31: Challenger LR
+    WHEN b.pack_name = 'Challenger LR' AND b.module_group = 'A1' THEN 229
+    WHEN b.pack_name = 'Challenger LR' AND b.module_group = 'B1' THEN 230
+    WHEN b.pack_name = 'Challenger LR' AND b.module_group = 'B2' THEN 231
+    WHEN b.pack_name = 'Challenger LR' AND b.module_group = 'B3' THEN 232
+    WHEN b.pack_name = 'Challenger LR' AND b.module_group = 'B4' THEN 233
+    WHEN b.pack_name = 'Challenger LR' AND b.module_group = 'B5' THEN 234
+
+    -- Pack 32: Challenger MR
+    WHEN b.pack_name = 'Challenger MR' AND b.module_group = 'A1' THEN 235
+    WHEN b.pack_name = 'Challenger MR' AND b.module_group = 'B1' THEN 236
+    WHEN b.pack_name = 'Challenger MR' AND b.module_group = 'B2' THEN 237
+    WHEN b.pack_name = 'Challenger MR' AND b.module_group = 'B3' THEN 238
+    WHEN b.pack_name = 'Challenger MR' AND b.module_group = 'B4' THEN 239
+    WHEN b.pack_name = 'Challenger MR' AND b.module_group = 'B5' THEN 240
+
+    -- Pack 33: TVS 12.1
+    WHEN b.pack_name = 'TVS 12.1' AND b.module_group = 'A1' THEN 241
+
+    -- Pack 34: EBUS 184
+    -- Module IDs 242–254 are NULL, skipping mapping for now
+
+    -- Pack 35: skipped (no data in your list)
+
+    -- Pack 36: skipped (no data in your list)
+
+    -- Pack 37: NOVA 40kwh
+    WHEN b.pack_name = 'NOVA 40kwh' AND b.module_group = 'M1' THEN 254
+    WHEN b.pack_name = 'NOVA 40kwh' AND b.module_group = 'M2' THEN 255
+    WHEN b.pack_name = 'NOVA 40kwh' AND b.module_group = 'M3' THEN 256
+    WHEN b.pack_name = 'NOVA 40kwh' AND b.module_group = 'M4' THEN 257
+    WHEN b.pack_name = 'NOVA 40kwh' AND b.module_group = 'M5' THEN 258
+    WHEN b.pack_name = 'NOVA 40kwh' AND b.module_group = 'M6' THEN 259
+    WHEN b.pack_name = 'NOVA 40kwh' AND b.module_group = 'M7' THEN 260
+        ELSE NULL
+    END AS Module_ID
+
 FROM 
     [battery_pack_voltage_n_ir_details] b
-INNER JOIN 
-    [Pack_Master] p ON b.pack_name = p.Pack_Name
-INNER JOIN 
-    [Module_Master] m ON m.Pack_ID = p.Pack_ID
-       AND m.Module_Name = b.module_group
+WHERE 
+    b.pack_name IS NOT NULL
 GROUP BY 
-    p.Pack_ID, m.Module_ID;
+    b.pack_name, b.module_group;
+
 ----------------------------------------------------------------------------------
