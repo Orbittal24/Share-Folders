@@ -419,3 +419,27 @@ LEFT JOIN [master_quality_gate].[taco_treceability].[Master_CheckList_Name] AS B
     ON A.[CheckList_ID] = B.[Check_List_ID];
 
 ----------------------------------------------------
+               insert Master data in MasterVIR
+----------------------------------------------------
+
+INSERT INTO [master_taco_treceability_VIR].[dbo].[Master_VIR]
+    ([PackID], [Voltage_Points], [IR_Points], [Output_Voltage], [Timestamp], [Station_ID], [srno], [Module_ID])
+SELECT 
+    p.Pack_ID,
+    COUNT(b.module_group),
+    COUNT(b.module_group),
+    75,
+    GETDATE(),
+    23,
+    23,
+    m.Module_ID
+FROM 
+    [battery_pack_voltage_n_ir_details] b
+INNER JOIN 
+    [Pack_Master] p ON b.pack_name = p.Pack_Name
+INNER JOIN 
+    [Module_Master] m ON m.Pack_ID = p.Pack_ID
+       AND m.Module_Name = b.module_group
+GROUP BY 
+    p.Pack_ID, m.Module_ID;
+----------------------------------------------------------------------------------
