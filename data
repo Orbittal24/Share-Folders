@@ -1,117 +1,38 @@
-socket.on('getGlobalIngersollData_pdualt', (pack_name, pack_no) => {
-    console.log(':::::::', pack_name, pack_no);
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-    var ingwholeData = [];
-    var ingpackDAta = [];
+socket.on("getFinalQRCodeStatus_nova_pa_gun5", async (battery_qrcode) => {
+    try {
+        const requestData = {
+            station_id: 7,
+            line_id: 4,
+            customer_qrcode: battery_qrcode
+        };
+        console.log("requestData:::::::", requestData);
 
-    // Step 1: Query for Global Data (as before)
-    var query_GLOBALDATA = `
-        SELECT 
-            module_name,
-            pack_name,
-            Station_name,
-            process_name,
-            COUNT(process_name) AS processcount,
-            SUM(total_screw) AS tot_screw_count
-        FROM taco_treceability.taco_treceability.torque_masterEIP
-        WHERE pack_name='${pack_name}'
-        AND Station_name IN ('PDU1','PDU_alt_283','PDU_alt_424','PDU_alt_184')
-        GROUP BY process_name, Station_name, pack_name, total_screw, module_name
-    `;
-
-    sql.connect(sqlConfig, function (err) {
-        if (err) return console.log("SQL connection error:", err);
-
-        let request = new sql.Request();
-        request.query(query_GLOBALDATA, function (err, recordset) {
-            if (err) return console.log("Query GLOBALDATA error:", err);
-
-            var result = recordset.recordset;
-
-            if (result.length !== 0) {
-                for (var i in result) {
-                    var module_name = result[i].module_name;
-                    var station_name = result[i].Station_name;
-                    var process_name = result[i].process_name;
-                    var processcount = result[i].processcount;
-                    var tot_screw_count = result[i].tot_screw_count;
-
-                    ingwholeData.push(module_name);
-                    ingwholeData.push(station_name);
-                    ingwholeData.push(process_name);
-                    ingwholeData.push(processcount);
-                    ingwholeData.push(tot_screw_count);
-                }
-            }
-
-            // Step 2: Get module_barcode using pack_no
-            var queryModuleBarcode = `
-                SELECT module_barcode
-                FROM taco_treceability.pdu_qrcode_details
-                WHERE final_qrcode = '${pack_no}'
-            `;
-
-            sql.connect(sqlConfig, function (err) {
-                if (err) return console.log("SQL connection error:", err);
-
-                let request2 = new sql.Request();
-                request2.query(queryModuleBarcode, function (err, recordset2) {
-                    if (err) return console.log("Query module_barcode error:", err);
-
-                    if (recordset2.recordset.length === 0) {
-                        console.log("No module_barcode found for:", pack_no);
-                        socket.emit("setGlobalIngersollData_pdualt", ingwholeData, ingpackDAta, pack_no);
-                        return;
-                    }
-
-                    // Extract module_barcode
-                    var module_barcode = recordset2.recordset[0].module_barcode;
-                    console.log("Fetched module_barcode:", module_barcode);
-
-                    // Step 3: Use module_barcode instead of pack_no
-                    var dbQueryPack = `
-                        SELECT 
-                            module_name,
-                            pack_name,
-                            pack_no,
-                            station_name,
-                            process_name,
-                            COUNT(process_name) AS total_bolts
-                        FROM taco_treceability.taco_treceability.torque_details_EIP
-                        WHERE pack_name='${pack_name}' AND pack_no='${module_barcode}'
-                        GROUP BY process_name, station_name, pack_name, pack_no, module_name
-                    `;
-
-                    sql.connect(sqlConfig, function (err) {
-                        if (err) return console.log("SQL connection error:", err);
-
-                        let request3 = new sql.Request();
-                        request3.query(dbQueryPack, function (err, recordset3) {
-                            if (err) return console.log("Query dbQueryPack error:", err);
-
-                            var result3 = recordset3.recordset;
-                            if (result3.length !== 0) {
-                                for (var i in result3) {
-                                    var module_name = result3[i].module_name;
-                                    var station_name = result3[i].station_name;
-                                    var process_name = result3[i].process_name;
-                                    var total_bolts = result3[i].total_bolts;
-
-                                    ingpackDAta.push(module_name);
-                                    ingpackDAta.push(station_name);
-                                    ingpackDAta.push(process_name);
-                                    ingpackDAta.push(total_bolts);
-                                }
-
-                                console.log("ingwholeData***", ingwholeData, ingpackDAta);
-                                socket.emit("setGlobalIngersollData_pdualt", ingwholeData, ingpackDAta);
-                            } else {
-                                socket.emit("setGlobalIngersollData_pdualt", ingwholeData, ingpackDAta, pack_no);
-                            }
-                        });
-                    });
-                });
-            });
+        // Call API
+        const response = await fetch("https://mismainapp.tataautocomp.com:3241/station_interlock", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(requestData),
         });
-    });
+
+        if (!response.ok) {
+            console.error("Interlock API error:", response.status, response.statusText);
+            socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+            return;
+        }
+
+        // Parse JSON body
+        const result = await response.json();
+        console.log("API result:", JSON.stringify(result, null, 2));
+
+        // Send entire API response back to frontend
+        socket.emit("setFinalQRCodeStatus", result, battery_qrcode);
+
+    } catch (error) {
+        console.error("API error:", error.message);
+        socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+    }
 });
