@@ -1,47 +1,114 @@
-SELECT 
-    sr_no, 
-    pack_name, 
-    module_name, 
-    torque, 
-    angle, 
-    torque_status, 
-    date_dd, 
-    shift, 
-    module_barcode, 
-    process_status, 
-    pack_no, 
-    rework_status, 
-    bypass_operator, 
-    bypass_reason, 
-    process_name, 
-    station_name, 
-    smoke_sensor_linked_pack_no
-FROM 
-    taco_treceability.torque_details_EIP
-WHERE 
-    pack_no IN (
-        'DJ2029-GB80001223', 'DJ2030-GB70040679', 'DJ2042-GB70046769',
-        'DJ1927-GB70032010', 'DJ2029-GB70001219', 'DJ2042-GB70021539',
-        'DJ2022-GB70003301', 'DJ2022-GB70003262', 'DJ2022-GB70003273',
-        'DJ2022-GB70003300', 'DJ2022-GB70003291', 'DJ1916-GAX0003681',
-        'DJ1916-GB80003782', 'DJ2022-GB70003275', 'DJ1927-GB70032007',
-        'DJ2022-GB50003172', 'DJ2043-GB80004247', 'DJ2029-GB80001225',
-        'DJ2022-GB70003281', 'DJ1927-GB70032008', 'DJ2022-GB80003318',
-        'DJ2022-GB70003282', 'DJ2042-GAP0044999', 'DJ1927-GB70032025',
-        'DJ1919-GB60001251', 'DJ2022-GB80003311', 'DJ2029-GB70001220',
-        'DJ2022-GB60003207', 'DJ2022-GB70003310', 'DJ2042-GB70046741',
-        'DJ2022-GB70003264', 'DJ2030-GB80035595', 'DJ1927-GB70032024',
-        'DJ2022-GB70003249', 'DJ2022-GB70003296', 'DJ1927-GB70032022',
-        'DJ1916-GB70003762', 'DJ2022-GB70003285', 'DJ1927-GB70032009',
-        'DJ2022-GB70003276', 'DJ2022-GB70003295', 'DJ2022-GB70003279',
-        'DJ2042-GB80021573', 'DJ2030-GB10034744', 'DJ1927-GB70032019',
-        'DJ2022-GB80003329', 'DJ2022-GB60003234', 'DJ2030-GB80035612',
-        'DJ2022-GB70003263', 'DJ1927-GB70032026', 'DJ2029-GB70001218',
-        'DJ1927-GB70032004', 'DJ2022-GB70003270', 'DJ1927-GB70032011',
-        'DJ1927-G9L0021038', 'DJ1927-G740009460', 'DJ2029-GB70001216',
-        'DJ2022-GB70003265', 'DJ1927-GB10031229', 'DJ1927-GB70032018',
-        'DJ2022-GB70003251', 'DJ1927-GB70032012', 'DJ2042-GB80021575',
-        'DJ2022-GB70003277', 'DJ2022-GB60003240', 'DJ2022-GB70003268',
-        'DJ2022-GB70003245', 'DJ2022-GB70003254', 'DJ2022-GB70003278',
-        'DJ2022-GB80003319', 'DJ1927-GB70032020'
-    );
+const sql = require('mssql');
+const moment = require('moment');
+
+const sqlConfig = {
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability",
+  server: 'localhost\\MSSQLSERVER',
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000
+  },
+  options: {
+    encrypt: true,
+    trustServerCertificate: true
+  }
+};
+
+async function processModuleBarcodes() {
+  try {
+    // Create pool connection
+    const pool = await sql.connect(sqlConfig);
+    console.log("Connected to taco_treceability...");
+
+    // Step 1: Get all ModuleBarcodes
+    const moduleResult = await pool.request()
+      .query(`
+        SELECT ModuleBarcode
+        FROM taco_treceability.station_status_pdu
+        WHERE PackName = 'EBUS 283' AND FinalQRCodePrint_status = 'OK'
+      `);
+
+    const moduleBarcodes = moduleResult.recordset.map(r => r.ModuleBarcode);
+    console.log(`Found ${moduleBarcodes.length} ModuleBarcodes`);
+
+    // Step 2: Process each ModuleBarcode one by one
+    for (const barcode of moduleBarcodes) {
+      console.log(`Processing ModuleBarcode: ${barcode}`);
+
+      // Update torque_details_EIP_pdu_alt
+      await pool.request()
+        .input('module_barcode', sql.VarChar, barcode)
+        .input('pack_no', sql.VarChar, barcode)
+        .query(`
+          UPDATE taco_treceability.torque_details_EIP_pdu_alt
+          SET module_barcode = @module_barcode, pack_no = @pack_no
+          WHERE pack_no IS NULL OR pack_no = ''
+        `);
+
+      console.log(`Updated torque_details_EIP_pdu_alt for ${barcode}`);
+
+      // Select the updated rows
+      const selectResult = await pool.request()
+        .input('pack_no', sql.VarChar, barcode)
+        .query(`
+          SELECT sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode,
+                 process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name,
+                 station_name, smoke_sensor_linked_pack_no
+          FROM taco_treceability.torque_details_EIP_pdu_alt
+          WHERE pack_no = @pack_no
+        `);
+
+      const records = selectResult.recordset;
+
+      if (records.length > 0) {
+        console.log(`Inserting ${records.length} rows for ${barcode}...`);
+
+        // Insert into torque_details_EIP_pdu_alt_all
+        for (const r of records) {
+          await pool.request()
+            .input('sr_no', sql.Int, r.sr_no)
+            .input('pack_name', sql.VarChar, r.pack_name)
+            .input('module_name', sql.VarChar, r.module_name)
+            .input('torque', sql.Float, r.torque)
+            .input('angle', sql.Float, r.angle)
+            .input('torque_status', sql.VarChar, r.torque_status)
+            .input('date_dd', sql.DateTime, r.date_dd)
+            .input('shift', sql.VarChar, r.shift)
+            .input('module_barcode', sql.VarChar, r.module_barcode)
+            .input('process_status', sql.VarChar, r.process_status)
+            .input('pack_no', sql.VarChar, r.pack_no)
+            .input('rework_status', sql.VarChar, r.rework_status)
+            .input('bypass_operator', sql.VarChar, r.bypass_operator)
+            .input('bypass_reason', sql.VarChar, r.bypass_reason)
+            .input('process_name', sql.VarChar, r.process_name)
+            .input('station_name', sql.VarChar, r.station_name)
+            .input('smoke_sensor_linked_pack_no', sql.VarChar, r.smoke_sensor_linked_pack_no)
+            .query(`
+              INSERT INTO taco_treceability.torque_details_EIP_pdu_alt_all
+              (sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode,
+               process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name,
+               station_name, smoke_sensor_linked_pack_no)
+              VALUES (@sr_no, @pack_name, @module_name, @torque, @angle, @torque_status, @date_dd, @shift,
+                      @module_barcode, @process_status, @pack_no, @rework_status, @bypass_operator,
+                      @bypass_reason, @process_name, @station_name, @smoke_sensor_linked_pack_no)
+            `);
+        }
+
+        console.log(`Inserted ${records.length} rows into torque_details_EIP_pdu_alt_all`);
+      } else {
+        console.log(`No records found for ${barcode}`);
+      }
+    }
+
+    console.log("✅ All ModuleBarcodes processed successfully.");
+    await pool.close();
+
+  } catch (err) {
+    console.error("❌ Error:", err);
+  }
+}
+
+processModuleBarcodes();
