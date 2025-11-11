@@ -37,7 +37,7 @@ async function processModuleBarcodes() {
       console.log(`\n🔹 Processing ModuleBarcode: ${barcode}`);
 
       // Update torque_details_EIP_pdu_alt
-      const updateResult = await pool.request()
+      await pool.request()
         .input('module_barcode', sql.VarChar, barcode)
         .input('pack_no', sql.VarChar, barcode)
         .query(`
@@ -70,13 +70,16 @@ async function processModuleBarcodes() {
 
       // Insert each record into torque_details_EIP_pdu_alt_all
       for (const r of records) {
+        // Ensure date_dd is inserted as a DATETIME (not formatted string)
+        let dateValue = r.date_dd instanceof Date ? r.date_dd : new Date(r.date_dd);
+
         await pool.request()
           .input('pack_name', sql.VarChar, r.pack_name)
           .input('module_name', sql.VarChar, r.module_name)
           .input('torque', sql.Float, r.torque)
           .input('angle', sql.Float, r.angle)
           .input('torque_status', sql.VarChar, r.torque_status)
-          .input('date_dd', sql.DateTime, r.date_dd)
+          .input('date_dd', sql.DateTime, dateValue) // ✅ preserve actual SQL datetime
           .input('shift', sql.VarChar, r.shift)
           .input('module_barcode', sql.VarChar, r.module_barcode)
           .input('process_status', sql.VarChar, r.process_status)
