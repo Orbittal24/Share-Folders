@@ -20,20 +20,7 @@ const sqlConfig = {
 const moduleBarcodes = [
   '01TS0043000021E8G0000005',
   '01TS0043000021E8K0000006',
-  '01TS0043000021E9A0000007',
-  '01TS0043000021E9B0000008',
-  '01TS0043000021E9D0000010',
-  '01TS0043000021E9D0000011',
-  '01TS0043000021E9E0000012',
-  '01TS0043000021E9E0000013',
-  '01TS0043000021E9H0000014',
-  '01TS0043000021E9H0000015',
-  '01TS0043000021E9H0000016',
-  '01TS0043000021E9H0000017',
-  '01TS0043000021E9K0000019',
-  '01TS0043000021E9L0000020',
-  '01TS0043000021E9L0000021',
-  '01TS0043000021E9L0000022'
+  '01TS0043000021E9A0000007'
   // 👉 Add more ModuleBarcodes as needed
 ];
 
@@ -42,25 +29,25 @@ async function processModuleBarcodes() {
     const pool = await sql.connect(sqlConfig);
     console.log("✅ Connected to taco_treceability...");
 
-    console.log(`📦 Found ${moduleBarcodes.length} static ModuleBarcodes to process`);
+    console.log(`📦 Found ${moduleBarcodes.length} ModuleBarcodes to process`);
 
-    // Step 2: Process each ModuleBarcode one by one
+    // Process each barcode one by one
     for (const barcode of moduleBarcodes) {
       console.log(`\n🔹 Processing ModuleBarcode: ${barcode}`);
 
-      // Update torque_details_EIP_pdu_alt
-      await pool.request()
+      // Step 1: Update torque_details_EIP_pdu_alt
+      const updateResult = await pool.request()
         .input('module_barcode', sql.VarChar, barcode)
         .input('pack_no', sql.VarChar, barcode)
         .query(`
           UPDATE taco_treceability.torque_details_EIP_pdu_alt
           SET module_barcode = @module_barcode, pack_no = @pack_no
-          WHERE pack_no IS NULL OR pack_no = ''
+          WHERE pack_no = @pack_no OR (pack_no IS NULL OR pack_no = '')
         `);
 
-      console.log(`✅ Updated torque_details_EIP_pdu_alt for ${barcode}`);
+      console.log(`✅ Updated ${updateResult.rowsAffected} rows for ${barcode}`);
 
-      // Select the updated rows for this barcode
+      // Step 2: Select updated records for this barcode
       const selectResult = await pool.request()
         .input('pack_no', sql.VarChar, barcode)
         .query(`
@@ -78,11 +65,10 @@ async function processModuleBarcodes() {
         continue;
       }
 
-      console.log(`📥 Inserting ${records.length} rows for ${barcode}...`);
+      console.log(`📥 Found ${records.length} records for ${barcode}, inserting into _alt_all...`);
 
-      // Insert each record into torque_details_EIP_pdu_alt_all
+      // Step 3: Insert selected records into torque_details_EIP_pdu_alt_all
       for (const r of records) {
-        // Ensure date_dd is passed as a SQL DATETIME, not string
         const dateValue = r.date_dd instanceof Date ? r.date_dd : new Date(r.date_dd);
 
         await pool.request()
@@ -91,7 +77,7 @@ async function processModuleBarcodes() {
           .input('torque', sql.Float, r.torque)
           .input('angle', sql.Float, r.angle)
           .input('torque_status', sql.VarChar, r.torque_status)
-          .input('date_dd', sql.DateTime, dateValue) // ✅ preserves SQL datetime
+          .input('date_dd', sql.DateTime, dateValue) // ✅ preserves exact SQL datetime
           .input('shift', sql.VarChar, r.shift)
           .input('module_barcode', sql.VarChar, r.module_barcode)
           .input('process_status', sql.VarChar, r.process_status)
@@ -116,7 +102,7 @@ async function processModuleBarcodes() {
       console.log(`✅ Inserted ${records.length} rows for ${barcode} into torque_details_EIP_pdu_alt_all`);
     }
 
-    console.log("\n🎉 All static ModuleBarcodes processed successfully!");
+    console.log("\n🎉 All ModuleBarcodes processed successfully!");
     await pool.close();
 
   } catch (err) {
