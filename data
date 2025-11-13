@@ -1,114 +1,143 @@
 const sql = require('mssql');
+const moment = require('moment');
 
 const sqlConfig = {
   user: "user_mis",
   password: "admin",
   database: "taco_treceability",
   server: 'localhost\\MSSQLSERVER',
-  pool: {
-    max: 10,
-    min: 0,
-    idleTimeoutMillis: 30000
-  },
-  options: {
-    encrypt: true,
-    trustServerCertificate: true
-  }
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
 };
 
-// ✅ Static list of ModuleBarcodes
-const moduleBarcodes = [
-  '01TS0043000021E8G0000005',
-  '01TS0043000021E8K0000006',
-  '01TS0043000021E9A0000007'
-  // 👉 Add more ModuleBarcodes as needed
+// Array of QR codes to process dynamically
+const New_final_qr_code_arr = [
+  'DJ1919-F9E0000262',
+  'DJ1919-FBD0000282',
+  'DJ1919-G140000379'
 ];
 
-async function processModuleBarcodes() {
+async function main() {
   try {
-    const pool = await sql.connect(sqlConfig);
-    console.log("✅ Connected to taco_treceability...");
+    let pool = await sql.connect(sqlConfig);
+    console.log("Connected to taco_treceability...");
 
-    console.log(`📦 Found ${moduleBarcodes.length} ModuleBarcodes to process`);
+    for (const currentQR of New_final_qr_code_arr) {
+      console.log(`\n=== Processing QR: ${currentQR} ===`);
 
-    // Process each barcode one by one
-    for (const barcode of moduleBarcodes) {
-      console.log(`\n🔹 Processing ModuleBarcode: ${barcode}`);
+      // Step 1: Get module_barcode_string for Smoke Sensor
+      const smokeQuery = `
+        SELECT module_barcode_string
+        FROM taco_treceability.battery_details
+        WHERE battery_pack_name = 'SM eDost'
+          AND final_qrcode = '${currentQR}'
+          AND module_name = 'Smoke Sensor'
+      `;
+      const smokeResult = await pool.request().query(smokeQuery);
 
-      // Step 1: Update torque_details_EIP_pdu_alt
-      const updateResult = await pool.request()
-        .input('module_barcode', sql.VarChar, barcode)
-        .input('pack_no', sql.VarChar, barcode)
-        .query(`
-          UPDATE taco_treceability.torque_details_EIP_pdu_alt
-          SET module_barcode = @module_barcode, pack_no = @pack_no
-          WHERE pack_no = @pack_no OR (pack_no IS NULL OR pack_no = '')
-        `);
-
-      console.log(`✅ Updated ${updateResult.rowsAffected} rows for ${barcode}`);
-
-      // Step 2: Select updated records for this barcode
-      const selectResult = await pool.request()
-        .input('pack_no', sql.VarChar, barcode)
-        .query(`
-          SELECT pack_name, module_name, torque, angle, torque_status, date_dd, shift,
-                 module_barcode, process_status, pack_no, rework_status, bypass_operator,
-                 bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
-          FROM taco_treceability.torque_details_EIP_pdu_alt
-          WHERE pack_no = @pack_no
-        `);
-
-      const records = selectResult.recordset;
-
-      if (records.length === 0) {
-        console.log(`⚠️ No records found for ${barcode}`);
+      if (smokeResult.recordset.length === 0) {
+        console.warn(`⚠️ No Smoke Sensor found for ${currentQR}, skipping...`);
         continue;
       }
 
-      console.log(`📥 Found ${records.length} records for ${barcode}, inserting into _alt_all...`);
+      const new_smoke = smokeResult.recordset[0].module_barcode_string;
+      console.log(`Found Smoke Sensor Barcode: ${new_smoke}`);
 
-      // Step 3: Insert selected records into torque_details_EIP_pdu_alt_all
-      for (const r of records) {
-        const dateValue = r.date_dd instanceof Date ? r.date_dd : new Date(r.date_dd);
+      // Step 2: Get ModuleBarcode and moduleNumber for this QR
+      const moduleQuery = `
+        SELECT ModuleBarcode, moduleNumber 
+        FROM taco_treceability.station_status 
+        WHERE FinalQRCode='${currentQR}'
+      `;
+      const moduleResult = await pool.request().query(moduleQuery);
+      const modules = moduleResult.recordset;
 
-        await pool.request()
-          .input('pack_name', sql.VarChar, r.pack_name)
-          .input('module_name', sql.VarChar, r.module_name)
-          .input('torque', sql.Float, r.torque)
-          .input('angle', sql.Float, r.angle)
-          .input('torque_status', sql.VarChar, r.torque_status)
-          .input('date_dd', sql.DateTime, dateValue) // ✅ preserves exact SQL datetime
-          .input('shift', sql.VarChar, r.shift)
-          .input('module_barcode', sql.VarChar, r.module_barcode)
-          .input('process_status', sql.VarChar, r.process_status)
-          .input('pack_no', sql.VarChar, r.pack_no)
-          .input('rework_status', sql.VarChar, r.rework_status)
-          .input('bypass_operator', sql.VarChar, r.bypass_operator)
-          .input('bypass_reason', sql.VarChar, r.bypass_reason)
-          .input('process_name', sql.VarChar, r.process_name)
-          .input('station_name', sql.VarChar, r.station_name)
-          .input('smoke_sensor_linked_pack_no', sql.VarChar, r.smoke_sensor_linked_pack_no)
-          .query(`
-            INSERT INTO taco_treceability.torque_details_EIP_pdu_alt_all
-            (pack_name, module_name, torque, angle, torque_status, date_dd, shift,
-             module_barcode, process_status, pack_no, rework_status, bypass_operator,
-             bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
-            VALUES (@pack_name, @module_name, @torque, @angle, @torque_status, @date_dd, @shift,
-                    @module_barcode, @process_status, @pack_no, @rework_status, @bypass_operator,
-                    @bypass_reason, @process_name, @station_name, @smoke_sensor_linked_pack_no)
-          `);
+      if (modules.length === 0) {
+        console.warn(`⚠️ No module records found for ${currentQR}, skipping...`);
+        continue;
       }
 
-      console.log(`✅ Inserted ${records.length} rows for ${barcode} into torque_details_EIP_pdu_alt_all`);
+      // Step 3: Update all module records one by one
+      for (let i = 0; i < modules.length; i++) {
+        const { ModuleBarcode, moduleNumber } = modules[i];
+        const updateQuery = `
+          UPDATE taco_treceability.torque_details_EIP_traial2
+          SET pack_no='${currentQR}', module_barcode='${ModuleBarcode}'
+          WHERE module_name='${moduleNumber}'
+        `;
+        await pool.request().query(updateQuery);
+        console.log(`✔️ Updated module ${i + 1}/${modules.length} for ${currentQR}`);
+      }
+
+      // Step 4: Update smoke sensor barcode
+      const smokeUpdateQuery = `
+        UPDATE taco_treceability.torque_details_EIP_traial2
+        SET module_barcode='${new_smoke}', smoke_sensor_linked_pack_no='${new_smoke}'
+        WHERE smoke_sensor_linked_pack_no LIKE 'BA%'
+      `;
+      await pool.request().query(smokeUpdateQuery);
+      console.log(`✔️ Updated Smoke Sensor for ${currentQR}`);
+
+      // Step 5: Copy data to import2 (optional per QR)
+      await copyDataToImportTable(pool);
     }
 
-    console.log("\n🎉 All ModuleBarcodes processed successfully!");
-    await pool.close();
-
+    console.log("\n✅ All QR codes processed successfully.");
   } catch (err) {
     console.error("❌ Error:", err);
+  } finally {
+    sql.close();
   }
 }
 
-// Run the script
-processModuleBarcodes();
+// === Function to copy data ===
+async function copyDataToImportTable(pool) {
+  const selectQuery = `
+    SELECT pack_name, module_name, torque, angle, torque_status, date_dd, shift,
+           module_barcode, process_status, pack_no, rework_status, bypass_operator,
+           bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+    FROM taco_treceability.torque_details_EIP_traial2
+  `;
+
+  const insertQueryBase = `
+    INSERT INTO taco_treceability.torque_details_EIP_mirror_import2 
+    (pack_name, module_name, torque, angle, torque_status, date_dd, shift,
+     module_barcode, process_status, pack_no, rework_status, bypass_operator,
+     bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
+    VALUES
+  `;
+
+  const result = await pool.request().query(selectQuery);
+  const rows = result.recordset;
+
+  if (rows.length === 0) {
+    console.log("No data to insert.");
+    return;
+  }
+
+  const values = rows.map(r => `(
+    '${r.pack_name}',
+    '${r.module_name}',
+    ${r.torque !== null ? r.torque : 'NULL'},
+    ${r.angle !== null ? r.angle : 'NULL'},
+    '${r.torque_status}',
+    '${moment(r.date_dd).format('YYYY-MM-DD HH:mm:ss')}',
+    '${r.shift}',
+    '${r.module_barcode}',
+    '${r.process_status}',
+    '${r.pack_no}',
+    '${r.rework_status}',
+    '${r.bypass_operator}',
+    '${r.bypass_reason}',
+    '${r.process_name}',
+    '${r.station_name}',
+    '${r.smoke_sensor_linked_pack_no}'
+  )`).join(",");
+
+  const insertQuery = insertQueryBase + values;
+  await pool.request().query(insertQuery);
+  console.log("✔️ Data copied successfully to import2.");
+}
+
+// Start process
+main();
