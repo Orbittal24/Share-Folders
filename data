@@ -7,3 +7,9 @@ FROM sys.server_audits;
 SELECT name, audit_guid, is_state_enabled
 
 FROM sys.database_audit_specifications;
+
+SELECT *
+
+FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT)
+
+WHERE database_name = 'taco_treceability';
