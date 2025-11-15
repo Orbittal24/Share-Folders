@@ -13,3 +13,15 @@ SELECT *
 FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT)
 
 WHERE database_name = 'taco_treceability';
+
+
+✅ Disable the audit
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = OFF);
+GO
+
+⏳ (Wait for as long as you need…)
+✅ Re-enable the audit
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = ON);
+GO
