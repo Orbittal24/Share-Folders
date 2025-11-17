@@ -1,154 +1,131 @@
-socket.on('setGlobalIngersollData', (ingwholeData, ingpackDAta, pack_noo) => {
+socket.on("setGlobalIngersollData", (ingwholeData, ingpackDAta, pack_noo) => {
 
     console.log("ingwholeData:::::::::::::::::::::::::", ingwholeData, ingpackDAta, pack_noo);
 
-    var matches = false;
-    var matcheddata = [], notmatcheddata = [], total_screw_count_not_mached = [];
-    var station_array = [], process_array = [];
+    var pendingProcesses = []; // Same style as your reference code
 
-    for (var i = 0; i < ingwholeData.length; i = i + 5) {
-        matches = false;
-        for (var j = 0; j < ingpackDAta.length; j = j + 4) {
+    for (var i = 0; i < ingwholeData.length; i += 5) {
 
-            if ((ingwholeData[i] === ingpackDAta[j]) &&
-                (ingwholeData[i + 2] === ingpackDAta[j + 2]) &&
-                (parseInt(ingwholeData[i + 4]) == parseInt(ingpackDAta[j + 3]))) {
+        let module = ingwholeData[i];
+        let station = ingwholeData[i + 1];
+        let process = ingwholeData[i + 2];
+        let screwCount = parseInt(ingwholeData[i + 4]);
 
-                matches = true;
-                matcheddata.push(ingpackDAta[j]);
-                matcheddata.push(ingpackDAta[j + 2]);
-                matcheddata.push(ingpackDAta[j + 3]);
-            }
+        let isMatched = false;
 
-            if ((ingwholeData[i] === ingpackDAta[j]) &&
-                (ingwholeData[i + 2] === ingpackDAta[j + 2]) &&
-                (parseInt(ingwholeData[i + 4]) != parseInt(ingpackDAta[j + 3]))) {
+        for (var j = 0; j < ingpackDAta.length; j += 4) {
 
-                total_screw_count_not_mached.push(ingpackDAta[j + 3]);
-                total_screw_count_not_mached.push(ingwholeData[i + 4]);
-                total_screw_count_not_mached.push(ingwholeData[i + 1]);
-                total_screw_count_not_mached.push(ingwholeData[i + 2]);
-                total_screw_count_not_mached.push(ingwholeData[i]);
+            let packModule = ingpackDAta[j];
+            let packProcess = ingpackDAta[j + 2];
+            let completedCount = parseInt(ingpackDAta[j + 3]);
+
+            if (module === packModule && process === packProcess) {
+                isMatched = true;
+
+                if (screwCount !== completedCount) {
+                    pendingProcesses.push([
+                        station,
+                        process,
+                        `(${completedCount}/${screwCount})`,
+                        module
+                    ]);
+                }
+                break;
             }
         }
 
-        if (!matches) {
-            notmatcheddata.push(ingwholeData[i]);
-            notmatcheddata.push(ingwholeData[i + 2]);
-            notmatcheddata.push(ingwholeData[i + 4]);
-            notmatcheddata.push(ingwholeData[i + 1]);
-            station_array.push(ingwholeData[i + 1]);
-            process_array.push(ingwholeData[i + 2]);
-            process_array.push(ingwholeData[i]); 
+        if (!isMatched) {
+            pendingProcesses.push([
+                station,
+                process,
+                `(0/${screwCount})`,
+                module
+            ]);
         }
     }
 
-    console.log("notmatcheddata:", notmatcheddata);
+    var pack_no = pack_noo.substr(pack_noo.length - 6);
+    console.log("Final Pack No:", pack_no);
 
-    if (notmatcheddata.length != 0) {
+    if (pendingProcesses.length > 0) {
 
-        socket.emit("data_blocker", '1');
+        let tableContent = "";
 
-        var pack_no = $('#singlePackNumber').text();
-        var table = ``; 
-        var incompleteData = '';
-        var procerssList = '';
+        for (var k = 0; k < pendingProcesses.length; k++) {
+            let [station, process, status, module] = pendingProcesses[k];
 
-        if (total_screw_count_not_mached.length != 0) {
-
-            for (var k = 0; k < total_screw_count_not_mached.length; k = k + 5) {
-                table += `<tr>
-                    <td>${total_screw_count_not_mached[k + 2]}</td>
-                    <td>${total_screw_count_not_mached[k + 3]}</td>
-                    <td>( ${total_screw_count_not_mached[k]}/${total_screw_count_not_mached[k + 1]} )</td>
-                    <td>${total_screw_count_not_mached[k + 4]}</td>
+            tableContent += `
+                <tr>
+                    <td style="font-size:18px;">${station}</td>
+                    <td style="font-size:18px;">${process}</td>
+                    <td style="font-size:18px;">${status}</td>
+                    <td style="font-size:18px;">${module}</td>
                 </tr>`;
-            }
-
-            for (var m = 0; m < process_array.length; m = m + 2) {
-                procerssList += process_array[m] + " (" + process_array[m + 1] + ")<br>";
-            }
-
-            incompleteData = `${table} ${procerssList}`;
-        }
-        else {
-            table = `<td colspan='4'>No Data</td>`;
-
-            for (var m = 0; m < process_array.length; m = m + 2) {
-                procerssList += process_array[m] + " (" + process_array[m + 1] + ")<br>";
-            }
-
-            incompleteData = `${table} ${procerssList}`;
         }
 
-        // ============================================
-        //  CUSTOM POPUP CREATION (CSS + HTML + SHOW)
-        // ============================================
+        // -------------------------
+        // CREATE CUSTOM POPUP (Same style as your reference)
+        // -------------------------
 
-        // Inject CSS once
-        if (!document.getElementById("irAlertStyle")) {
-
-            const css = `
-            .ir-alert-overlay {
-                position: fixed; top:0; left:0; width:100%; height:100%;
-                background: rgba(0,0,0,0.55);
-                display:flex; justify-content:center; align-items:center;
-                z-index:99999; 
-            }
-            .ir-alert-box {
-                background:white; width:700px; padding:25px; text-align:center;
-                border-radius:8px; box-shadow:0px 0px 25px rgba(0,0,0,0.3);
-            }
-            .ir-alert-icon { font-size:40px; color:#3A7DDF; margin-bottom:10px; }
-            #irAlertTable table { width:100%; border-collapse:collapse; margin-top:15px; }
-            #irAlertTable th, #irAlertTable td { border:1px solid #ccc; padding:6px; }
-            #irAlertTable th { background:#e4eaf5; }
-            .ir-alert-close-btn {
-                margin-top:20px; padding:10px 30px; font-size:18px;
-                background:#3A7DDF; color:white; border:none; border-radius:5px; cursor:pointer;
-            }
-            .ir-alert-close-btn:hover{ background:#2E68C1; }
-        `;
-
-            const style = document.createElement("style");
-            style.id = "irAlertStyle";
-            style.innerHTML = css;
-            document.head.appendChild(style);
-        }
-
-        // Create popup HTML
         let popup = document.createElement("div");
-        popup.className = "ir-alert-overlay";
+        popup.style.position = "fixed";
+        popup.style.top = "50%";
+        popup.style.left = "50%";
+        popup.style.transform = "translate(-50%, -50%)";
+        popup.style.backgroundColor = "#fff";
+        popup.style.padding = "20px";
+        popup.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)";
+        popup.style.zIndex = "9999";
+        popup.style.width = "80%";
+        popup.style.maxWidth = "800px";
+        popup.style.borderRadius = "8px";
+
         popup.innerHTML = `
-            <div class="ir-alert-box">
-                <div class="ir-alert-icon">i</div>
-                <h2>IR Torque Pending for ${pack_no}!</h2>
-                <div>Pending Process:</div><br>
-                <div id="irAlertTable">
-                    <table>
-                        <thead>
-                            <tr><th colspan='4'>Incomplete Process</th></tr>
-                            <tr>
-                                <th>Station</th>
-                                <th>Process</th>
-                                <th>Status</th>
-                                <th>Module</th>
-                            </tr>
-                        </thead>
-                        <tbody>${incompleteData}</tbody>
-                    </table>
-                </div>
-                <button class="ir-alert-close-btn">OK</button>
+            <h2 style="font-size:30px; text-align:center; margin-bottom:15px;">
+                IR Torque Pending For Pack: ${pack_no}
+            </h2>
+
+            <span style="font-size:22px; display:block; margin-bottom:10px;">
+                Pending Process:
+            </span>
+
+            <table border="1" style="width:100%; margin-top:10px; font-size:18px; border-collapse:collapse;">
+                <thead>
+                    <tr style="background-color:#e4eaf5;">
+                        <th colspan="4" style="font-size:20px; text-align:center;">
+                            Incomplete Process
+                        </th>
+                    </tr>
+                    <tr>
+                        <th style="font-size:18px;">Station Name</th>
+                        <th style="font-size:18px;">Process Name</th>
+                        <th style="font-size:18px;">Status</th>
+                        <th style="font-size:18px;">Module No.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tableContent}
+                </tbody>
+            </table>
+
+            <div style="text-align:center; margin-top:20px;">
+                <button id="closePopupBtn"
+                    style="padding:10px 30px; font-size:20px; background:#3A7DDF; color:white; border:none; border-radius:5px; cursor:pointer;">
+                    OK
+                </button>
             </div>
         `;
 
         document.body.appendChild(popup);
 
-        // Close event
-        popup.querySelector(".ir-alert-close-btn").onclick = () => {
-            popup.remove();
+        // Close popup & reload
+        document.getElementById("closePopupBtn").onclick = () => {
+            document.body.removeChild(popup);
             location.reload();
         };
+
+    } else {
+        console.log("No pending processes.");
     }
 
 });
