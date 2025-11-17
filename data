@@ -1,131 +1,20 @@
-socket.on("setGlobalIngersollData", (ingwholeData, ingpackDAta, pack_noo) => {
+socket.on('get_module_count_283_getDJ', (barcode) => {
 
-    console.log("ingwholeData:::::::::::::::::::::::::", ingwholeData, ingpackDAta, pack_noo);
+    const sql = `SELECT FinalQRCode FROM taco_treceability.station_status WHERE ModuleBarcode='${barcode}'`;
 
-    var pendingProcesses = []; // Same style as your reference code
+    db.query(sql, (err, result) => {
 
-    for (var i = 0; i < ingwholeData.length; i += 5) {
-
-        let module = ingwholeData[i];
-        let station = ingwholeData[i + 1];
-        let process = ingwholeData[i + 2];
-        let screwCount = parseInt(ingwholeData[i + 4]);
-
-        let isMatched = false;
-
-        for (var j = 0; j < ingpackDAta.length; j += 4) {
-
-            let packModule = ingpackDAta[j];
-            let packProcess = ingpackDAta[j + 2];
-            let completedCount = parseInt(ingpackDAta[j + 3]);
-
-            if (module === packModule && process === packProcess) {
-                isMatched = true;
-
-                if (screwCount !== completedCount) {
-                    pendingProcesses.push([
-                        station,
-                        process,
-                        `(${completedCount}/${screwCount})`,
-                        module
-                    ]);
-                }
-                break;
-            }
+        if (err) {
+            socket.emit('FinalQRCode_response', "DB Error");
+            return;
         }
 
-        if (!isMatched) {
-            pendingProcesses.push([
-                station,
-                process,
-                `(0/${screwCount})`,
-                module
-            ]);
-        }
-    }
-
-    var pack_no = pack_noo.substr(pack_noo.length - 6);
-    console.log("Final Pack No:", pack_no);
-
-    if (pendingProcesses.length > 0) {
-
-        let tableContent = "";
-
-        for (var k = 0; k < pendingProcesses.length; k++) {
-            let [station, process, status, module] = pendingProcesses[k];
-
-            tableContent += `
-                <tr>
-                    <td style="font-size:18px;">${station}</td>
-                    <td style="font-size:18px;">${process}</td>
-                    <td style="font-size:18px;">${status}</td>
-                    <td style="font-size:18px;">${module}</td>
-                </tr>`;
+        if (result.length > 0) {
+            socket.emit('FinalQRCode_response', result[0].FinalQRCode);
+        } else {
+            socket.emit('FinalQRCode_response', "No Data");
         }
 
-        // -------------------------
-        // CREATE CUSTOM POPUP (Same style as your reference)
-        // -------------------------
-
-        let popup = document.createElement("div");
-        popup.style.position = "fixed";
-        popup.style.top = "50%";
-        popup.style.left = "50%";
-        popup.style.transform = "translate(-50%, -50%)";
-        popup.style.backgroundColor = "#fff";
-        popup.style.padding = "20px";
-        popup.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)";
-        popup.style.zIndex = "9999";
-        popup.style.width = "80%";
-        popup.style.maxWidth = "800px";
-        popup.style.borderRadius = "8px";
-
-        popup.innerHTML = `
-            <h2 style="font-size:30px; text-align:center; margin-bottom:15px;">
-                IR Torque Pending For Pack: ${pack_no}
-            </h2>
-
-            <span style="font-size:22px; display:block; margin-bottom:10px;">
-                Pending Process:
-            </span>
-
-            <table border="1" style="width:100%; margin-top:10px; font-size:18px; border-collapse:collapse;">
-                <thead>
-                    <tr style="background-color:#e4eaf5;">
-                        <th colspan="4" style="font-size:20px; text-align:center;">
-                            Incomplete Process
-                        </th>
-                    </tr>
-                    <tr>
-                        <th style="font-size:18px;">Station Name</th>
-                        <th style="font-size:18px;">Process Name</th>
-                        <th style="font-size:18px;">Status</th>
-                        <th style="font-size:18px;">Module No.</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${tableContent}
-                </tbody>
-            </table>
-
-            <div style="text-align:center; margin-top:20px;">
-                <button id="closePopupBtn"
-                    style="padding:10px 30px; font-size:20px; background:#3A7DDF; color:white; border:none; border-radius:5px; cursor:pointer;">
-                    OK
-                </button>
-            </div>
-        `;
-
-        document.body.appendChild(popup);
-
-        // Close popup & reload
-        document.getElementById("closePopupBtn").onclick = () => {
-            document.body.removeChild(popup);
-            location.reload();
-        };
-
-    } else {
-        console.log("No pending processes.");
-    }
+    });
 
 });
