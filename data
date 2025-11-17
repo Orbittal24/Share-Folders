@@ -1,41 +1,154 @@
-SELECT 
-    sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, 
-    shift, module_barcode, process_status, pack_no, rework_status, 
-    bypass_operator, bypass_reason, process_name, station_name, 
-    smoke_sensor_linked_pack_no
-FROM taco_treceability.torque_details_EIP
-WHERE pack_no IN (
-'DJ2042-GBF0047629', 'DJ2022-GBA0003408', 'DJ2043-GBE0004414',
-'DJ2025-GBF0007697', 'DJ2025-GBE0007686', 'DJ2042-GAX0045597',
-'DJ1916-GBF0003861', 'DJ2029-GBF0001266', 'DJ1927-GBE0032693',
-'DJ1927-GBF0032946', 'DJ1916-GBD0003847', 'DJ2042-GBF0021807',
-'DJ2028-GBB010603', 'DJ2043-GBF0004420', 'DJ2043-GBF0004442',
-'DJ2043-GBF0004433', 'DJ1927-GBF0032835', 'DJ2025-GBE0007673',
-'DJ1916-GBC0003835', 'DJ2042-GBF0047626', 'DJ2043-GBE0004394',
-'DJ2042-GBF0047577', 'DJ1927-GBF0032940', 'DJ2043-GBF0004439',
-'DJ2043-GBE0004398', 'DJ2025-GBF0007698', 'DJ2030-GBF0041334',
-'DJ2029-GBD0001252', 'DJ2043-GBF0004437', 'DJ2042-GBD0047361',
-'DJ2025-GBF0007703', 'DJ2029-GBF0001267', 'DJ2043-GBF0004432',
-'DJ1927-GBE0032730', 'DJ1927-GBF0032962', 'DJ1916-GBB0003824',
-'DJ1916-GBC0003834', 'DJ2042-GBF0047622', 'DJ2028-GBE010630',
-'DJ2030-GBF0041315', 'DJ2043-GBF0004441', 'DJ1927-GBE0032780',
-'DJ1927-GBE0032749', 'DJ2042-GBF0047571', 'DJ2042-GBF0021814',
-'DJ2042-GBE0047494', 'DJ2028-GBD010617', 'DJ2043-GBE0004415',
-'DJ1927-GA20016611', 'DJ2043-GBF0004438', 'DJ2030-GBF0041326',
-'DJ2042-GBF0047559', 'DJ1927-GBD0032652', 'DJ2029-GBF0001268',
-'DJ1927-GBE0032754', 'DJ1919-GB70001256', 'DJ1916-GBC0003836',
-'DJ2042-GBF0047627', 'DJ2030-GBE0041288', 'DJ2042-GBF0047592',
-'DJ2038-GBD0000065', 'DJ2042-GBF0047578', 'DJ1927-GBE0032801',
-'DJ2030-GBF0041395', 'DJ2043-GBF0004435', 'DJ2043-GBF0004434',
-'DJ2030-GBE0041233', 'DJ1916-GBC0003831', 'DJ2030-GBF0036659',
-'DJ2025-GBF0007730', 'DJ2043-GBF0004436', 'DJ2043-GBF0004421',
-'DJ2043-GBF0004440', 'DJ1927-GBF0032961', 'DJ1927-GBF0032834',
-'DJ1927-GBE0032761', 'DJ2025-GBF0007700', 'DJ2042-GBD0047410',
-'DJ2043-GBE0004404', 'DJ1916-GBB0003825', 'DJ2025-GBE0007682',
-'DJ2028-GBD010622', 'DJ1927-G8B0020734', 'DJ1916-GBE0003852',
-'DJ2029-GBE0001263', 'DJ2028-GBD010620', 'DJ1916-GBB0003819',
-'DJ2025-GBE0007670', 'DJ2025-GBF0007704', 'DJ2025-GB50007612',
-'DJ2042-GBF0047628', 'DJ2025-GBF0007694', 'DJ2042-GBF0021815',
-'DJ2042-GBF0047630', 'DJ1916-GBC0003833', 'DJ2042-GBE0047457',
-'DJ2028-GBE010631'
-);
+socket.on('setGlobalIngersollData', (ingwholeData, ingpackDAta, pack_noo) => {
+
+    console.log("ingwholeData:::::::::::::::::::::::::", ingwholeData, ingpackDAta, pack_noo);
+
+    var matches = false;
+    var matcheddata = [], notmatcheddata = [], total_screw_count_not_mached = [];
+    var station_array = [], process_array = [];
+
+    for (var i = 0; i < ingwholeData.length; i = i + 5) {
+        matches = false;
+        for (var j = 0; j < ingpackDAta.length; j = j + 4) {
+
+            if ((ingwholeData[i] === ingpackDAta[j]) &&
+                (ingwholeData[i + 2] === ingpackDAta[j + 2]) &&
+                (parseInt(ingwholeData[i + 4]) == parseInt(ingpackDAta[j + 3]))) {
+
+                matches = true;
+                matcheddata.push(ingpackDAta[j]);
+                matcheddata.push(ingpackDAta[j + 2]);
+                matcheddata.push(ingpackDAta[j + 3]);
+            }
+
+            if ((ingwholeData[i] === ingpackDAta[j]) &&
+                (ingwholeData[i + 2] === ingpackDAta[j + 2]) &&
+                (parseInt(ingwholeData[i + 4]) != parseInt(ingpackDAta[j + 3]))) {
+
+                total_screw_count_not_mached.push(ingpackDAta[j + 3]);
+                total_screw_count_not_mached.push(ingwholeData[i + 4]);
+                total_screw_count_not_mached.push(ingwholeData[i + 1]);
+                total_screw_count_not_mached.push(ingwholeData[i + 2]);
+                total_screw_count_not_mached.push(ingwholeData[i]);
+            }
+        }
+
+        if (!matches) {
+            notmatcheddata.push(ingwholeData[i]);
+            notmatcheddata.push(ingwholeData[i + 2]);
+            notmatcheddata.push(ingwholeData[i + 4]);
+            notmatcheddata.push(ingwholeData[i + 1]);
+            station_array.push(ingwholeData[i + 1]);
+            process_array.push(ingwholeData[i + 2]);
+            process_array.push(ingwholeData[i]); 
+        }
+    }
+
+    console.log("notmatcheddata:", notmatcheddata);
+
+    if (notmatcheddata.length != 0) {
+
+        socket.emit("data_blocker", '1');
+
+        var pack_no = $('#singlePackNumber').text();
+        var table = ``; 
+        var incompleteData = '';
+        var procerssList = '';
+
+        if (total_screw_count_not_mached.length != 0) {
+
+            for (var k = 0; k < total_screw_count_not_mached.length; k = k + 5) {
+                table += `<tr>
+                    <td>${total_screw_count_not_mached[k + 2]}</td>
+                    <td>${total_screw_count_not_mached[k + 3]}</td>
+                    <td>( ${total_screw_count_not_mached[k]}/${total_screw_count_not_mached[k + 1]} )</td>
+                    <td>${total_screw_count_not_mached[k + 4]}</td>
+                </tr>`;
+            }
+
+            for (var m = 0; m < process_array.length; m = m + 2) {
+                procerssList += process_array[m] + " (" + process_array[m + 1] + ")<br>";
+            }
+
+            incompleteData = `${table} ${procerssList}`;
+        }
+        else {
+            table = `<td colspan='4'>No Data</td>`;
+
+            for (var m = 0; m < process_array.length; m = m + 2) {
+                procerssList += process_array[m] + " (" + process_array[m + 1] + ")<br>";
+            }
+
+            incompleteData = `${table} ${procerssList}`;
+        }
+
+        // ============================================
+        //  CUSTOM POPUP CREATION (CSS + HTML + SHOW)
+        // ============================================
+
+        // Inject CSS once
+        if (!document.getElementById("irAlertStyle")) {
+
+            const css = `
+            .ir-alert-overlay {
+                position: fixed; top:0; left:0; width:100%; height:100%;
+                background: rgba(0,0,0,0.55);
+                display:flex; justify-content:center; align-items:center;
+                z-index:99999; 
+            }
+            .ir-alert-box {
+                background:white; width:700px; padding:25px; text-align:center;
+                border-radius:8px; box-shadow:0px 0px 25px rgba(0,0,0,0.3);
+            }
+            .ir-alert-icon { font-size:40px; color:#3A7DDF; margin-bottom:10px; }
+            #irAlertTable table { width:100%; border-collapse:collapse; margin-top:15px; }
+            #irAlertTable th, #irAlertTable td { border:1px solid #ccc; padding:6px; }
+            #irAlertTable th { background:#e4eaf5; }
+            .ir-alert-close-btn {
+                margin-top:20px; padding:10px 30px; font-size:18px;
+                background:#3A7DDF; color:white; border:none; border-radius:5px; cursor:pointer;
+            }
+            .ir-alert-close-btn:hover{ background:#2E68C1; }
+        `;
+
+            const style = document.createElement("style");
+            style.id = "irAlertStyle";
+            style.innerHTML = css;
+            document.head.appendChild(style);
+        }
+
+        // Create popup HTML
+        let popup = document.createElement("div");
+        popup.className = "ir-alert-overlay";
+        popup.innerHTML = `
+            <div class="ir-alert-box">
+                <div class="ir-alert-icon">i</div>
+                <h2>IR Torque Pending for ${pack_no}!</h2>
+                <div>Pending Process:</div><br>
+                <div id="irAlertTable">
+                    <table>
+                        <thead>
+                            <tr><th colspan='4'>Incomplete Process</th></tr>
+                            <tr>
+                                <th>Station</th>
+                                <th>Process</th>
+                                <th>Status</th>
+                                <th>Module</th>
+                            </tr>
+                        </thead>
+                        <tbody>${incompleteData}</tbody>
+                    </table>
+                </div>
+                <button class="ir-alert-close-btn">OK</button>
+            </div>
+        `;
+
+        document.body.appendChild(popup);
+
+        // Close event
+        popup.querySelector(".ir-alert-close-btn").onclick = () => {
+            popup.remove();
+            location.reload();
+        };
+    }
+
+});
