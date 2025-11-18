@@ -1,34 +1,10 @@
-socket.on('get_module_count_283_getDJ', (barcode) => {
+✅ Disable the audit
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = OFF);
+GO
 
-    const dbSelectQuery = `
-        SELECT FinalQRCode 
-        FROM taco_treceability.station_status 
-        WHERE ModuleBarcode='${barcode}'
-    `;
-
-    sql.connect(sqlConfig, function (err) {
-        if (err) {
-            console.log(err);
-            socket.emit('FinalQRCode_response', "DB Error");
-            return;
-        }
-
-        const request = new sql.Request();
-
-        request.query(dbSelectQuery, function (err, recordset) {
-            if (err) {
-                console.log(err);
-                socket.emit('FinalQRCode_response', "DB Error");
-                return;
-            }
-
-            const result = recordset.recordset;
-
-            if (result.length > 0) {
-                socket.emit('FinalQRCode_response', result[0].FinalQRCode);
-            } else {
-                socket.emit('FinalQRCode_response', "No Data");
-            }
-        });
-    });
-});
+⏳ (Wait for as long as you need…)
+✅ Re-enable the audit
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = ON);
+GO
