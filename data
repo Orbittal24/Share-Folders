@@ -1,40 +1,78 @@
-SELECT sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
-       module_barcode, process_status, pack_no, rework_status, bypass_operator, 
-       bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
-FROM taco_treceability.torque_details_EIP
-WHERE pack_no IN (
-'DJ2042-GBJ0047989', 'DJ2042-GBJ0047990', 'DJ2042-GBJ0047970',
-'DJ1916-GBH0003876', 'DJ2030-GBE0036456', 'DJ2042-GBJ0047993',
-'DJ2042-GBJ0047977', 'DJ2042-GBH0047747', 'DJ2042-GBJ0047897',
-'DJ2042-GBG0021853', 'DJ2042-GBJ0047949', 'DJ1927-GBG0033045',
-'DJ1927-GBJ0033283', 'DJ2042-GBJ0047987', 'DJ2042-GBJ0047893',
-'DJ2042-GBJ0047902', 'DJ1916-GBH0003866', 'DJ2042-GBJ0047940',
-'DJ2042-GBJ0047975', 'DJ1927-GB20031299', 'DJ2025-GBF0007698',
-'DJ2042-GBG0047744', 'DJ2042-GBJ0047972', 'DJ2042-GBJ0047942',
-'DJ2042-GBJ0047945', 'DJ2042-GBJ0047883', 'DJ1916-GBH0003864',
-'DJ2042-GBJ0047947', 'DJ1927-GBJ0033168', 'DJ2042-GBJ0047961',
-'DJ2042-GBJ0047985', 'DJ1916-GBH0003872', 'DJ2029-GBB0001243',
-'DJ2022-G8B0000956', 'DJ2042-GBJ0047955', 'DJ1927-GBH0033104',
-'DJ2030-GBJ0037082', 'DJ2042-GBJ0047963', 'DJ1916-GBH0003871',
-'DJ2042-GBJ0047984', 'DJ2042-GBH0047760', 'DJ1927-GBJ0033285',
-'DJ2042-GBJ0047959', 'DJ2042-GBJ0047991', 'DJ2038-GBF0000067',
-'DJ2042-GBJ0047936', 'DJ1927-GBJ0033204', 'DJ1927-GBJ0033269',
-'DJ2042-GBJ0048009', 'DJ2042-GBJ0047954', 'DJ2022-G8J0001062',
-'DJ2042-GBJ0048010', 'DJ2042-GBJ0048008', 'DJ2042-GBJ0047982',
-'DJ2043-GBC0004339', 'DJ2042-GBG0047740', 'DJ2022-G760000425',
-'DJ2042-GBJ0047937', 'DJ2028-GBH010643', 'DJ2042-GBJ0047956',
-'DJ2042-GBJ0047924', 'DJ2030-GBJ0037091', 'DJ2042-GBJ0047951',
-'DJ1927-GBH0025190', 'DJ2042-GBJ0047967', 'DJ2030-GBH0036902',
-'DJ2030-GBJ0037072', 'DJ2043-GB30004211', 'DJ2042-GBJ0047943',
-'DJ1927-GBJ0033275', 'DJ2043-GBC0004365', 'DJ2030-GBJ0041531',
-'DJ2042-GBJ0047979', 'DJ2042-GBJ0021885', 'DJ2042-GBJ0047969',
-'DJ2022-GB70003270', 'DJ2025-GB50007612', 'DJ2042-GBJ0047983',
-'DJ1927-GBD0032646', 'DJ2042-GBJ0047862', 'DJ1916-GBH0003870',
-'DJ2030-GBJ0041489', 'DJ2042-GBJ0047998', 'DJ2042-GBJ0047950',
-'DJ2022-G8H0001038', 'DJ2042-GBH0021866', 'DJ2043-GBH0002284',
-'DJ2042-GBJ0047980', 'DJ2042-GBG0021854', 'DJ2042-GBJ0047944',
-'DJ2042-GBJ0047968', 'DJ2030-GBJ0037089', 'DJ1927-GBJ0033219',
-'DJ2042-GBH0021868', 'DJ1927-GBE0032826', 'DJ2030-GBJ0037073',
-'DJ1927-GBJ0033223', 'DJ2042-GBJ0047986', 'DJ1916-GBE0003853',
-'DJ2030-GBJ0041491'
-);
+function update_defetclist_pack_assembly(defect_name, qrcode_str, packname) {
+
+    console.log("rework_yogita:", defect_name, qrcode_str);
+
+    sql.connect(sqlConfig, function (err) {
+        if (err) return console.log(err);
+
+        let request = new sql.Request();
+
+        // 1️⃣ FETCH existing final_qrcode
+        request.query(
+            `SELECT final_qrcode 
+             FROM taco_treceability.taco_treceability.rework_defect_list 
+             WHERE defect_name='${defect_name}'`,
+            function (err, recordset) {
+
+                if (err) return console.log(err);
+
+                let result = recordset.recordset;
+                if (result.length === 0) return;
+
+                let final_qrcode = result[0].final_qrcode;
+                let new_qrstr = "";
+
+                // 2️⃣ CASE 1: final_qrcode is NULL or empty → set new STRING
+                if (!final_qrcode || final_qrcode === 'null' || final_qrcode === '') {
+
+                    new_qrstr = qrcode_str;
+
+                    // UPDATE query
+                    let updateReq = new sql.Request();
+                    updateReq.query(
+                        `UPDATE taco_treceability.taco_treceability.rework_defect_list
+                         SET final_qrcode='${new_qrstr}'
+                         WHERE defect_name='${defect_name}'`,
+                        function (err) {
+                            if (err) console.log(err);
+                        }
+                    );
+
+                } else {
+
+                    // 3️⃣ CASE 2: Append only if NOT already included
+                    if (!final_qrcode.includes(qrcode_str)) {
+
+                        new_qrstr = final_qrcode + "," + qrcode_str;
+
+                        let updateReq = new sql.Request();
+                        updateReq.query(
+                            `UPDATE taco_treceability.taco_treceability.rework_defect_list
+                             SET final_qrcode='${new_qrstr}'
+                             WHERE defect_name='${defect_name}'`,
+                            function (err) {
+                                if (err) console.log(err);
+                            }
+                        );
+                    } else {
+                        // If already included, keep original
+                        new_qrstr = final_qrcode;
+                    }
+                }
+
+                // 4️⃣ INSERT QUERY (run for BOTH cases)
+                let insertReq = new sql.Request();
+                insertReq.query(
+                    `INSERT INTO taco_treceability.mis_rejection_data
+                     (battery_pack_name, rework_status, final_qrcode, station, rework_remark)
+                     VALUES ('${packname}', 'rejected', '${new_qrstr}', 'alt_station', '${defect_name}')`,
+                    function (err) {
+                        if (err) console.log(err);
+                        else console.log("Insert success");
+                    }
+                );
+
+            }
+        );
+    });
+}
