@@ -1,10 +1,1 @@
-✅ Disable the audit
-ALTER SERVER AUDIT Audit_TacoDB1
-WITH (STATE = OFF);
-GO
 
-⏳ (Wait for as long as you need…)
-✅ Re-enable the audit
-ALTER SERVER AUDIT Audit_TacoDB1
-WITH (STATE = ON);
-GO
