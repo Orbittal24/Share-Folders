@@ -1,78 +1,41 @@
-function update_defetclist_pack_assembly(defect_name, qrcode_str, packname) {
-
-    console.log("rework_yogita:", defect_name, qrcode_str);
-
-    sql.connect(sqlConfig, function (err) {
-        if (err) return console.log(err);
-
-        let request = new sql.Request();
-
-        // 1️⃣ FETCH existing final_qrcode
-        request.query(
-            `SELECT final_qrcode 
-             FROM taco_treceability.taco_treceability.rework_defect_list 
-             WHERE defect_name='${defect_name}'`,
-            function (err, recordset) {
-
-                if (err) return console.log(err);
-
-                let result = recordset.recordset;
-                if (result.length === 0) return;
-
-                let final_qrcode = result[0].final_qrcode;
-                let new_qrstr = "";
-
-                // 2️⃣ CASE 1: final_qrcode is NULL or empty → set new STRING
-                if (!final_qrcode || final_qrcode === 'null' || final_qrcode === '') {
-
-                    new_qrstr = qrcode_str;
-
-                    // UPDATE query
-                    let updateReq = new sql.Request();
-                    updateReq.query(
-                        `UPDATE taco_treceability.taco_treceability.rework_defect_list
-                         SET final_qrcode='${new_qrstr}'
-                         WHERE defect_name='${defect_name}'`,
-                        function (err) {
-                            if (err) console.log(err);
-                        }
-                    );
-
-                } else {
-
-                    // 3️⃣ CASE 2: Append only if NOT already included
-                    if (!final_qrcode.includes(qrcode_str)) {
-
-                        new_qrstr = final_qrcode + "," + qrcode_str;
-
-                        let updateReq = new sql.Request();
-                        updateReq.query(
-                            `UPDATE taco_treceability.taco_treceability.rework_defect_list
-                             SET final_qrcode='${new_qrstr}'
-                             WHERE defect_name='${defect_name}'`,
-                            function (err) {
-                                if (err) console.log(err);
-                            }
-                        );
-                    } else {
-                        // If already included, keep original
-                        new_qrstr = final_qrcode;
-                    }
-                }
-
-                // 4️⃣ INSERT QUERY (run for BOTH cases)
-                let insertReq = new sql.Request();
-                insertReq.query(
-                    `INSERT INTO taco_treceability.mis_rejection_data
-                     (battery_pack_name, rework_status, final_qrcode, station, rework_remark)
-                     VALUES ('${packname}', 'rejected', '${new_qrstr}', 'alt_station', '${defect_name}')`,
-                    function (err) {
-                        if (err) console.log(err);
-                        else console.log("Insert success");
-                    }
-                );
-
-            }
-        );
-    });
-}
+SELECT 
+    sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift,
+    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
+    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+'DJ2042-GBK0048158', 'DJ2025-GBK0007801', 'DJ2025-GBJ0007784',
+'DJ2042-GBK0048149', 'DJ2042-GBK0048129', 'DJ2042-GBK0048117',
+'DJ2042-GBK0048108', 'DJ2030-GBK0037216', 'DJ1927-GBJ0033256',
+'DJ2042-GBG0021821', 'DJ2043-GBJ0002295', 'DJ2042-GBJ0048027',
+'DJ2042-GBK0048137', 'DJ2042-GBJ0047913', 'DJ1927-GBJ0033197',
+'DJ2042-GBK0048153', 'DJ2030-GBJ0037068', 'DJ2042-GBK0048146',
+'DJ2030-GBK0037151', 'DJ2025-GBK0007806', 'DJ2042-GBK0048163',
+'DJ2025-GBK0007788', 'DJ2042-GBK0048171', 'DJ2028-GBF010635',
+'DJ2025-GBJ0007774', 'DJ2043-GA60003870', 'DJ2042-GBK0048161',
+'DJ2042-GBK0048125', 'DJ2025-GBK0007789', 'DJ2042-GBK0048156',
+'DJ2042-GBK0048084', 'DJ1916-GBH0003878', 'DJ2043-GBC0004349',
+'DJ2030-GBJ0041528', 'DJ2041-GBK0000216', 'DJ2028-GBJ010658',
+'DJ2042-GBG0021841', 'DJ2042-GBK0048148', 'DJ2042-GBK0021905',
+'DJ1927-GBK0033376', 'DJ2025-GBJ0007781', 'DJ1916-GBK0003901',
+'DJ2042-GBK0048167', 'DJ2043-GBC0004368', 'DJ2029-GBK0001280',
+'DJ2025-GBF0007697', 'DJ2030-GBK0041588', 'DJ2042-GBK0048131',
+'DJ1918-GAW0001400', 'DJ2030-GBK0041616', 'DJ2042-GBK0048140',
+'DJ2042-GBG0047672', 'DJ2042-GBK0048133', 'DJ2030-GBK0037212',
+'DJ2048-G9S0000028', 'DJ2028-GBJ010651', 'DJ2042-GBK0048152',
+'DJ1927-G8B0020728', 'DJ2042-GBJ0047884', 'DJ2042-GBJ0048010',
+'DJ2030-GBJ0037077', 'DJ2030-GBJ0037075', 'DJ2030-GBK0037142',
+'DJ2042-GBJ0048012', 'DJ2042-GBK0048150', 'DJ2029-GBH0001276',
+'DJ2030-GBK0037207', 'DJ2025-GBK0007796', 'DJ2042-GBH0021878',
+'DJ2030-GBJ0041518', 'DJ2025-GBK0007787', 'DJ2028-GBJ010656',
+'DJ2043-GBG0004455', 'DJ2043-GBF0004430', 'DJ1927-GBK0033416',
+'DJ2042-GBK0048159', 'DJ2042-GBK0021907', 'DJ2042-GBK0048128',
+'DJ1927-GBK0033374', 'DJ2030-GBJ0037042', 'DJ2030-GBJ0041549',
+'DJ2025-GBJ0007777', 'DJ2029-GBH0001277', 'DJ2042-GBK0048173',
+'DJ2030-GBJ0036945', 'DJ2042-GBJ0047899', 'DJ2042-GBJ0047918',
+'DJ2042-GBK0048144', 'DJ2042-GBK0048165', 'DJ2028-GBJ010657',
+'DJ2043-GBK0002307', 'DJ2030-GA40031670', 'DJ1927-GBJ0033279',
+'DJ2022-GAB0003109', 'DJ2041-GBK0000217', 'DJ1927-GBH0033108',
+'DJ2038-GBF0000067', 'DJ1927-GBE0032680', 'DJ2042-GBK0048151',
+'DJ2025-GBJ0007782'
+);
