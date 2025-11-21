@@ -1,72 +1,66 @@
-<div class="container-fluid">
-    <div class="page_header">
-        <h1 style="font-size: 3vh; color: green;">HV Rework Screwing Status</h1>
+<div class="container-fluid mt-4">
 
-        <!-- ROW 1 -->
-        <div class="row" style="margin-top: 20px;">
-            <!-- Dropdown 1 -->
-            <div class="col-md-3">
-                <label>Battery Type</label>
-                <select id="batteryType" class="form-control" style="height:5vh; font-size:2vh;">
-                    <option value="">Select Battery</option>
-                    <option value="Bajaj 8.9">Bajaj 8.9</option>
-                    <option value="Bajaj 5.8">Bajaj 5.8</option>
-                    <option value="Bajaj 12.1">Bajaj 12.1</option>
-                </select>
-            </div>
+    <!-- PAGE TITLE -->
+    <h3 style="color: green; margin-bottom: 25px;">
+        HV Rework Screwing Status
+    </h3>
 
-            <!-- Text Field -->
-            <div class="col-md-3">
-                <label>6 Digit Number</label>
-                <input id="batteryNumber" 
-                       type="text" 
-                       maxlength="6" 
-                       class="form-control" 
-                       style="height:5vh; font-size:2vh;" 
-                       placeholder="Enter 6 digit number">
-            </div>
+    <!-- FORM ROW -->
+    <div class="row align-items-center">
 
-            <!-- Dropdown 2 -->
-            <div class="col-md-3">
-                <label>Status</label>
-                <select id="statusDropdown" class="form-control" style="height:5vh; font-size:2vh;">
-                    <option value="reworked">Reworked</option>
-                </select>
-            </div>
+        <!-- Battery Type -->
+        <div class="col-md-3">
+            <label style="font-weight: 600;">Battery Type</label>
+            <select id="batteryType" class="form-control">
+                <option value="">Select Battery</option>
+                <option value="Bajaj 8.9">Bajaj 8.9</option>
+                <option value="Bajaj 5.8">Bajaj 5.8</option>
+                <option value="Bajaj 12.1">Bajaj 12.1</option>
+            </select>
         </div>
 
-        <!-- ROW 2 -->
-        <div class="row" style="margin-top:25px;">
-            <div class="col-md-3">
-                <button class="btn btn-success btn-block" style="height:6vh; font-size:2vh;" onclick="submitData()">
-                    Submit
-                </button>
-            </div>
+        <!-- 6 Digit Number -->
+        <div class="col-md-3">
+            <label style="font-weight: 600;">6 Digit Number</label>
+            <input id="batteryNumber" type="text" maxlength="6"
+                   class="form-control" placeholder="Enter 6 digit">
+        </div>
+
+        <!-- Status -->
+        <div class="col-md-3">
+            <label style="font-weight: 600;">Status</label>
+            <select id="statusDropdown" class="form-control">
+                <option value="reworked">Reworked</option>
+            </select>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="col-md-3 d-flex align-items-end" style="margin-top: 24px;">
+            <button class="btn btn-success btn-block" onclick="submitData()">
+                Submit
+            </button>
         </div>
 
     </div>
 </div>
 
 <script>
-    // Socket connection
-    const socket = io(); // make sure socket.io is included
+    const socket = io();
 
     function submitData() {
         const batteryType = document.getElementById("batteryType").value;
         const batteryNumber = document.getElementById("batteryNumber").value;
         const status = document.getElementById("statusDropdown").value;
 
-        // Basic validations
-        if (!batteryType) return alert("Please select battery type");
-        if (!/^\d{6}$/.test(batteryNumber)) return alert("Please enter a valid 6-digit number");
+        if (!batteryType) return alert("Select battery type");
+        if (!/^\d{6}$/.test(batteryNumber)) return alert("Enter valid 6-digit number");
 
-        // Emit to backend
         socket.emit("submit_rework_data", {
             batteryType,
             batteryNumber,
             status
         });
 
-        alert("Data Sent to Server!");
+        alert("Data sent!");
     }
 </script>
