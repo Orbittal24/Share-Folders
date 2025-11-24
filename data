@@ -1,37 +1,102 @@
-SELECT        sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, station_name, 
-                         smoke_sensor_linked_pack_no
-FROM            taco_treceability.torque_details_EIP
-WHERE        (pack_no IN ('DJ1927-GBL0033652', 'DJ2029-GBM0001290', 'DJ2028-GBM010698',
-'DJ2042-GBM0048489', 'DJ2042-GBM0048506', 'DJ2042-GBM0048521',
-'DJ2042-GBM0048511', 'DJ2028-GBL010682',  'DJ2028-GBM010697',
-'DJ2042-GBM0048396', 'DJ2042-GBM0021920', 'DJ2028-GBM010702',
-'DJ2030-GBL0041667', 'DJ2042-GBM0048509', 'DJ2043-GBL0004477',
-'DJ2042-GBL0048263', 'DJ2042-GBK0048108', 'DJ2042-GBM0048533',
-'DJ2028-GBM010709',  'DJ2046-GBL0000002', 'DJ1916-GBK0003906',
-'DJ2042-GBM0048510', 'DJ2042-GBM0048495', 'DJ2028-GBL010681',
-'DJ2042-GBM0048531', 'DJ2043-GBK0002317', 'DJ2028-GBL010678',
-'DJ1916-GBM0003925', 'DJ2042-GBM0048525', 'DJ1927-GBL0033670',
-'DJ2042-GBJ0047860', 'DJ2042-GBM0048493', 'DJ2042-GBM0048537',
-'DJ2042-GBM0048523', 'DJ2042-GBL0048294', 'DJ2042-GBM0021922',
-'DJ2028-GBB010603',  'DJ1927-GBM0033693', 'DJ2030-GBM0037439',
-'DJ1927-GBF0032957', 'DJ2028-GBL010693',  'DJ1927-GBL0033500',
-'DJ2030-GBM0037539', 'DJ2042-GBM0048517', 'DJ1916-GBL0003917',
-'DJ1927-GB50031796', 'DJ2042-GBM0048516', 'DJ2028-GBM010696',
-'DJ2042-GBM0048478', 'DJ2028-GBL010691',  'DJ2042-GBM0048494',
-'DJ1916-GBL0003914', 'DJ1916-GBM0003932', 'DJ1927-GBL0033636',
-'DJ2042-GBM0048526', 'DJ2030-GBM0037528', 'DJ2042-GBM0048491',
-'DJ1916-GBM0003934', 'DJ2042-GBM0048503', 'DJ2030-GBM0041727',
-'DJ2042-GBL0048272', 'DJ2028-GBD010621',  'DJ2042-GBM0048530',
-'DJ1916-GBL0003923', 'DJ1916-GBL0003912', 'DJ2042-GBM0048498',
-'DJ2042-GBM0048470', 'DJ2023-GBL0000013', 'DJ2042-GBM0048407',
-'DJ2042-GBM0021919', 'DJ2042-GBM0048501', 'DJ2030-GBL0037299',
-'DJ2042-GBM0048522', 'DJ1927-GBM0025199', 'DJ2028-GBL010685',
-'DJ2030-GBM0037482', 'DJ1927-GBK0033371', 'DJ2043-GBK0002313',
-'DJ2042-GBM0048528', 'DJ2028-GBM010699',  'DJ2030-GBL0037358',
-'DJ2029-GBL0001287', 'DJ2042-GBM0048446', 'DJ2042-GBM0048532',
-'DJ2042-GBK0048085', 'DJ2028-GBL010692',  'DJ2042-GBM0048481',
-'DJ2030-GBL0037410', 'DJ2028-GBL010689',  'DJ2042-GBM0048518',
-'DJ1927-GBL0033596', 'DJ2042-GBM0048476', 'DJ2030-GBL0037356',
-'DJ2030-GBL0037315', 'DJ2042-GBM0048505', 'DJ2042-GBM0048524',
-'DJ1927-GBM0033691', 'DJ2028-GBL010694',  'DJ2043-GBK0002310',
-'DJ1927-GBJ0033192')) 
+socket.on('setGlobalIngersollData', (ingwholeData, ingpackDAta, pack_noo, pack_name, mod_numb) => {
+    console.log("ingwholeData:", ingwholeData);
+    console.log("ingpackDAta:", ingpackDAta);
+
+    // pending torque summary array
+    let pendingList = [];
+
+    // Loop ingwholeData → this contains expected torque requirements
+    for (let i = 0; i < ingwholeData.length; i += 5) {
+
+        let moduleNo    = ingwholeData[i];
+        let station     = ingwholeData[i + 1];
+        let processName = ingwholeData[i + 2];
+        let totalCount  = parseInt(ingwholeData[i + 4]);
+
+        let doneCount = null;
+
+        // find process in actual pack data
+        for (let j = 0; j < ingpackDAta.length; j += 4) {
+
+            let packProcessName = ingpackDAta[j + 2];
+            let packDoneCount   = parseInt(ingpackDAta[j + 3]);
+
+            if (processName === packProcessName) {
+                doneCount = packDoneCount;
+                break;
+            }
+        }
+
+        // If not done OR partially done → add to pending list
+        if (doneCount === null || doneCount !== totalCount) {
+            pendingList.push({
+                module: moduleNo,
+                station: station,
+                process: processName,
+                done: doneCount ?? 0,
+                total: totalCount
+            });
+        }
+    }
+
+    console.log("PENDING PROCESSES:", pendingList);
+
+    // If pending torque operations exist → show popup
+    if (pendingList.length > 0) {
+
+        // build rows for table
+        let tableRows = ``;
+
+        pendingList.forEach(row => {
+            tableRows += `
+                <tr>
+                    <td>${row.station}</td>
+                    <td>${row.process}</td>
+                    <td>( ${row.done} / ${row.total} )</td>
+                    <td>${row.module}</td>
+                </tr>
+            `;
+        });
+
+        Swal.fire({
+            title: `IR Torque Pending for ${pack_noo}!`,
+            html: `
+                <span style='font-size:20px;'>Pending Process:</span>
+                <table border="1" width="100%">
+                <thead>
+                    <tr style="background:#e4eaf5;">
+                        <th colspan="4">Incomplete Process</th>
+                    </tr>
+                    <tr>
+                        <th>Station Name</th>
+                        <th>Process</th>
+                        <th>Status</th>
+                        <th>Module</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tableRows}
+                </tbody>
+            </table>`,
+            icon: 'info',
+            width: 900,
+            showConfirmButton: false,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            allowEnterKey: false
+        });
+
+        // Block next step
+        socket.emit("data_blocker", '1');
+        return;
+    }
+
+    // ELSE → everything matched, continue normal flow
+    console.log("All torque processes completed.");
+    socket.emit('get_module_count_283_pa_gun1',
+        pack_name,
+        mod_numb,
+        globalProcessName,
+        global_module_check
+    );
+});
