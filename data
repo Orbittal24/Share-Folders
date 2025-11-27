@@ -1,1 +1,10 @@
-socket.removeAllListeners('date_selected_searchdata_count_OK');
+module.exports = {
+    includeCode: function (io, sql, sqlConfig) {
+
+        // 🔥 Prevent duplicate loading
+        if (global.__includeCodeLoaded__) {
+            console.log("❌ includeCode already loaded, skipping...");
+            return;
+        }
+        global.__includeCodeLoaded__ = true;
+        console.log("🔥 includeCode LOADED FIRST TIME ONLY");
