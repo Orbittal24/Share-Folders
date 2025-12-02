@@ -1,13 +1,11 @@
-USE taco_treceability;
-
--- Trigger for INSERT
-DELIMITER $$
+INSERT
 
 CREATE TRIGGER trg_ocv_data_insert
-AFTER INSERT ON ocv_machine_data
-FOR EACH ROW
+ON taco_treceability.ocv_machine_data
+AFTER INSERT
+AS
 BEGIN
-    INSERT INTO ocv_machine_data_mirror
+    INSERT INTO taco_treceability.ocv_machine_data_mirror
     (
         sr_no,
         cell_qrcode,
@@ -23,34 +21,33 @@ BEGIN
         cell_capacity,
         cell_class
     )
-    VALUES
-    (
-        NEW.sr_no,
-        NEW.cell_qrcode,
-        NEW.voltage,
-        NEW.ir,
-        NEW.today_date,
-        NEW.updated_time,
-        NEW.machine_location,
-        NEW.shift,
-        NEW.used_on_line,
-        NEW.kvalue,
-        NEW.grade,
-        NEW.cell_capacity,
-        NEW.cell_class
-    );
-END$$
+    SELECT 
+        sr_no,
+        cell_qrcode,
+        voltage,
+        ir,
+        today_date,
+        updated_time,
+        machine_location,
+        shift,
+        used_on_line,
+        kvalue,
+        grade,
+        cell_capacity,
+        cell_class
+    FROM inserted;
+END;
+GO
 
-DELIMITER ;
 
--- Trigger for UPDATE
-DELIMITER $$
+UPDATE
 
 CREATE TRIGGER trg_ocv_data_update
-AFTER UPDATE ON ocv_machine_data
-FOR EACH ROW
+ON taco_treceability.ocv_machine_data
+AFTER UPDATE
+AS
 BEGIN
-    INSERT INTO ocv_machine_data_mirror
+    INSERT INTO taco_treceability.ocv_machine_data_mirror
     (
         sr_no,
         cell_qrcode,
@@ -66,22 +63,20 @@ BEGIN
         cell_capacity,
         cell_class
     )
-    VALUES
-    (
-        NEW.sr_no,
-        NEW.cell_qrcode,
-        NEW.voltage,
-        NEW.ir,
-        NEW.today_date,
-        NEW.updated_time,
-        NEW.machine_location,
-        NEW.shift,
-        NEW.used_on_line,
-        NEW.kvalue,
-        NEW.grade,
-        NEW.cell_capacity,
-        NEW.cell_class
-    );
-END$$
-
-DELIMITER ;
+    SELECT 
+        sr_no,
+        cell_qrcode,
+        voltage,
+        ir,
+        today_date,
+        updated_time,
+        machine_location,
+        shift,
+        used_on_line,
+        kvalue,
+        grade,
+        cell_capacity,
+        cell_class
+    FROM inserted;
+END;
+GO
