@@ -1,44 +1,31 @@
-SELECT 
-    sr_no, pack_name, module_name, torque, angle, torque_status, 
-    date_dd, shift, module_barcode, process_status, pack_no, 
-    rework_status, bypass_operator, bypass_reason, process_name, 
-    station_name, smoke_sensor_linked_pack_no
-FROM 
-    taco_treceability.torque_details_EIP
-WHERE 
-    pack_no IN (
-        'DJ1927-GBT0034378', 'DJ2042-GBW0049610', 'DJ2042-GBW0022043',
-        'DJ2042-GBW0049536', 'DJ2042-GBW0049565', 'DJ2042-GBW0022038',
-        'DJ2042-GBV0021985', 'DJ1927-GBT0034360', 'DJ2025-GBV0009011',
-        'DJ2043-GBM0002396', 'DJ2042-GBW0049572', 'DJ2042-GBW0049599',
-        'DJ2025-GBW0009076', 'DJ2042-GBW0049598', 'DJ1927-GBN0033982',
-        'DJ2042-GBW0049588', 'DJ2042-GBW0022031', 'DJ2028-GBV010826',
-        'DJ2030-GBT0038237', 'DJ2025-GBV0009009', 'DJ1927-GBJ0033303',
-        'DJ1927-GBR0034055', 'DJ2030-GBV0038364', 'DJ1927-GBT0034392',
-        'DJ1927-GBS0034240', 'DJ2042-GBW0049609', 'DJ1927-GBT0034435',
-        'DJ1927-GBT0034326', 'DJ2030-GBV0038306', 'DJ2042-GBW0049546',
-        'DJ2042-GBW0049596', 'DJ1927-GBT0034418', 'DJ2025-GBV0009025',
-        'DJ1927-GBS0034258', 'DJ2042-GBW0049604', 'DJ2042-GBW0049585',
-        'DJ2025-GBW0009062', 'DJ2028-GBV010821', 'DJ2025-GBV0009016',
-        'DJ2025-GBV0009032', 'DJ2042-GBW0049587', 'DJ1927-GBT0034399',
-        'DJ2029-GBP0001307', 'DJ2042-GBW0049602', 'DJ2030-GBV0038393',
-        'DJ2025-GBT0008072', 'DJ2028-GBV010835', 'DJ1927-GBV0034467',
-        'DJ1927-GBT0034323', 'DJ2042-GBW0022036', 'DJ2038-GBS0000072',
-        'DJ2042-GBW0049593', 'DJ2042-GBV0021983', 'DJ2025-GBV0009005',
-        'DJ1927-GBT0034440', 'DJ2025-GBV0009026', 'DJ1927-GBJ0033208',
-        'DJ2028-GBV010828', 'DJ1927-GBS0034238', 'DJ2042-GBW0049605',
-        'DJ2025-GBV0009019', 'DJ2028-GBV010822', 'DJ2029-GBW0001333',
-        'DJ2028-GBW010839', 'DJ1927-GBK0033343', 'DJ2042-GBV0049490',
-        'DJ2042-GBV0021993', 'DJ1927-GBS0034221', 'DJ2038-GBT0000073',
-        'DJ1927-GBV0034476', 'DJ1927-GBT0034433', 'DJ2025-GBV0009034',
-        'DJ2042-GBW0022037', 'DJ2025-GBV0009012', 'DJ2025-GBV0008098',
-        'DJ1927-GBR0034136', 'DJ2042-GBV0049437', 'DJ2042-GBW0049557',
-        'DJ1927-GBT0034411', 'DJ2042-GBW0022034', 'DJ1927-GBT0034336',
-        'DJ1927-GBT0034417', 'DJ2042-GBV0049440', 'DJ1927-GBT0034391',
-        'DJ1927-GBM0033790', 'DJ2043-GBR0002474', 'DJ1927-GBS0034241',
-        'DJ1927-GBN0033946', 'DJ1927-GBT0034434', 'DJ2038-GBT0000074',
-        'DJ2042-GBW0022027', 'DJ1927-GBS0034290', 'DJ2042-GBV0049520',
-        'DJ2030-GBW0042096', 'DJ1927-GBT0034432', 'DJ1927-GBT0034384',
-        'DJ2042-GBW0049545', 'DJ2042-GBW0022032', 'DJ2025-GBV0009015',
-        'DJ1927-GBT0034364'
-    );
+✔ Create trigger for INSERT
+CREATE TRIGGER trg_ocv_machine_data_after_insert
+AFTER INSERT ON taco_treceability.ocv_machine_data
+FOR EACH ROW
+INSERT INTO taco_treceability.ocv_machine_data_mirror 
+(
+    cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
+    shift, used_on_line, kvalue, grade, cell_capacity, cell_class
+)
+VALUES
+(
+    NEW.cell_qrcode, NEW.voltage, NEW.ir, NEW.today_date, NEW.updated_time,
+    NEW.machine_location, NEW.shift, NEW.used_on_line, NEW.kvalue,
+    NEW.grade, NEW.cell_capacity, NEW.cell_class
+);
+
+✔ Create trigger for UPDATE
+CREATE TRIGGER trg_ocv_machine_data_after_update
+AFTER UPDATE ON taco_treceability.ocv_machine_data
+FOR EACH ROW
+INSERT INTO taco_treceability.ocv_machine_data_mirror 
+(
+    cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
+    shift, used_on_line, kvalue, grade, cell_capacity, cell_class
+)
+VALUES
+(
+    NEW.cell_qrcode, NEW.voltage, NEW.ir, NEW.today_date, NEW.updated_time,
+    NEW.machine_location, NEW.shift, NEW.used_on_line, NEW.kvalue,
+    NEW.grade, NEW.cell_capacity, NEW.cell_class
+);
