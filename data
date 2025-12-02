@@ -1,31 +1,87 @@
-✔ Create trigger for INSERT
-CREATE TRIGGER trg_ocv_machine_data_after_insert
-AFTER INSERT ON taco_treceability.ocv_machine_data
-FOR EACH ROW
-INSERT INTO taco_treceability.ocv_machine_data_mirror 
-(
-    cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
-    shift, used_on_line, kvalue, grade, cell_capacity, cell_class
-)
-VALUES
-(
-    NEW.cell_qrcode, NEW.voltage, NEW.ir, NEW.today_date, NEW.updated_time,
-    NEW.machine_location, NEW.shift, NEW.used_on_line, NEW.kvalue,
-    NEW.grade, NEW.cell_capacity, NEW.cell_class
-);
+USE taco_treceability;
 
-✔ Create trigger for UPDATE
-CREATE TRIGGER trg_ocv_machine_data_after_update
-AFTER UPDATE ON taco_treceability.ocv_machine_data
+-- Trigger for INSERT
+DELIMITER $$
+
+CREATE TRIGGER trg_ocv_data_insert
+AFTER INSERT ON ocv_machine_data
 FOR EACH ROW
-INSERT INTO taco_treceability.ocv_machine_data_mirror 
-(
-    cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
-    shift, used_on_line, kvalue, grade, cell_capacity, cell_class
-)
-VALUES
-(
-    NEW.cell_qrcode, NEW.voltage, NEW.ir, NEW.today_date, NEW.updated_time,
-    NEW.machine_location, NEW.shift, NEW.used_on_line, NEW.kvalue,
-    NEW.grade, NEW.cell_capacity, NEW.cell_class
-);
+BEGIN
+    INSERT INTO ocv_machine_data_mirror
+    (
+        sr_no,
+        cell_qrcode,
+        voltage,
+        ir,
+        today_date,
+        updated_time,
+        machine_location,
+        shift,
+        used_on_line,
+        kvalue,
+        grade,
+        cell_capacity,
+        cell_class
+    )
+    VALUES
+    (
+        NEW.sr_no,
+        NEW.cell_qrcode,
+        NEW.voltage,
+        NEW.ir,
+        NEW.today_date,
+        NEW.updated_time,
+        NEW.machine_location,
+        NEW.shift,
+        NEW.used_on_line,
+        NEW.kvalue,
+        NEW.grade,
+        NEW.cell_capacity,
+        NEW.cell_class
+    );
+END$$
+
+DELIMITER ;
+
+-- Trigger for UPDATE
+DELIMITER $$
+
+CREATE TRIGGER trg_ocv_data_update
+AFTER UPDATE ON ocv_machine_data
+FOR EACH ROW
+BEGIN
+    INSERT INTO ocv_machine_data_mirror
+    (
+        sr_no,
+        cell_qrcode,
+        voltage,
+        ir,
+        today_date,
+        updated_time,
+        machine_location,
+        shift,
+        used_on_line,
+        kvalue,
+        grade,
+        cell_capacity,
+        cell_class
+    )
+    VALUES
+    (
+        NEW.sr_no,
+        NEW.cell_qrcode,
+        NEW.voltage,
+        NEW.ir,
+        NEW.today_date,
+        NEW.updated_time,
+        NEW.machine_location,
+        NEW.shift,
+        NEW.used_on_line,
+        NEW.kvalue,
+        NEW.grade,
+        NEW.cell_capacity,
+        NEW.cell_class
+    );
+END$$
+
+DELIMITER ;
