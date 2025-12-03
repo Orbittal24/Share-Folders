@@ -1,80 +1,150 @@
-INSERT
-CREATE TRIGGER trg_ocv_machine_data_ai
-ON taco_treceability.ocv_machine_data
-AFTER INSERT
-AS
-BEGIN
-    INSERT INTO taco_treceability.ocv_machine_data_mirror
-    (
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class
-    )
-    SELECT
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class
-    FROM inserted;     -- SQL Server uses "inserted" table
-END;
-GO
-
-
-
-UPDATE
-
-CREATE TRIGGER trg_ocv_machine_data_au
-ON taco_treceability.ocv_machine_data
-AFTER UPDATE
-AS
-BEGIN
-    INSERT INTO taco_treceability.ocv_machine_data_mirror
-    (
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class
-    )
-    SELECT
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class
-    FROM inserted;   -- inserted contains NEW values after update
-END;
-GO
-
-
+SELECT sr_no, pack_no, current_sensor_no, temp_date, module_barcode
+FROM taco_treceability.tvs_current_sensor_link_with_pack
+WHERE 
+    pack_no LIKE '%002900' OR
+    pack_no LIKE '%004553' OR
+    pack_no LIKE '%000083' OR
+    pack_no LIKE '%000675' OR
+    pack_no LIKE '%004867' OR
+    pack_no LIKE '%005944' OR
+    pack_no LIKE '%000397' OR
+    pack_no LIKE '%000488' OR
+    pack_no LIKE '%005456' OR
+    pack_no LIKE '%007244' OR
+    pack_no LIKE '%001617' OR
+    pack_no LIKE '%000491' OR
+    pack_no LIKE '%000377' OR
+    pack_no LIKE '%001673' OR
+    pack_no LIKE '%001313' OR
+    pack_no LIKE '%000992' OR
+    pack_no LIKE '%000510' OR
+    pack_no LIKE '%006812' OR
+    pack_no LIKE '%007200' OR
+    pack_no LIKE '%006789' OR
+    pack_no LIKE '%006527' OR
+    pack_no LIKE '%003164' OR
+    pack_no LIKE '%003862' OR
+    pack_no LIKE '%006444' OR
+    pack_no LIKE '%004902' OR
+    pack_no LIKE '%002233' OR
+    pack_no LIKE '%004398' OR
+    pack_no LIKE '%005176' OR
+    pack_no LIKE '%006185' OR
+    pack_no LIKE '%006113' OR
+    pack_no LIKE '%006405' OR
+    pack_no LIKE '%000080' OR
+    pack_no LIKE '%006442' OR
+    pack_no LIKE '%002619' OR
+    pack_no LIKE '%006471' OR
+    pack_no LIKE '%005131' OR
+    pack_no LIKE '%007162' OR
+    pack_no LIKE '%003762' OR
+    pack_no LIKE '%007287' OR
+    pack_no LIKE '%006821' OR
+    pack_no LIKE '%007029' OR
+    pack_no LIKE '%007229' OR
+    pack_no LIKE '%007231' OR
+    pack_no LIKE '%004011' OR
+    pack_no LIKE '%003557' OR
+    pack_no LIKE '%005503' OR
+    pack_no LIKE '%007297' OR
+    pack_no LIKE '%009013' OR
+    pack_no LIKE '%005979' OR
+    pack_no LIKE '%002303' OR
+    pack_no LIKE '%002867' OR
+    pack_no LIKE '%007809' OR
+    pack_no LIKE '%007608' OR
+    pack_no LIKE '%007633' OR
+    pack_no LIKE '%007760' OR
+    pack_no LIKE '%006102' OR
+    pack_no LIKE '%007035' OR
+    pack_no LIKE '%007472' OR
+    pack_no LIKE '%006964' OR
+    pack_no LIKE '%007175' OR
+    pack_no LIKE '%005643' OR
+    pack_no LIKE '%008166' OR
+    pack_no LIKE '%006857' OR
+    pack_no LIKE '%004637' OR
+    pack_no LIKE '%006542' OR
+    pack_no LIKE '%007804' OR
+    pack_no LIKE '%007882' OR
+    pack_no LIKE '%001580' OR
+    pack_no LIKE '%009435' OR
+    pack_no LIKE '%010339' OR
+    pack_no LIKE '%010065' OR
+    pack_no LIKE '%007494' OR
+    pack_no LIKE '%010862' OR
+    pack_no LIKE '%007500' OR
+    pack_no LIKE '%007837' OR
+    pack_no LIKE '%011982' OR
+    pack_no LIKE '%009381' OR
+    pack_no LIKE '%011422' OR
+    pack_no LIKE '%013301' OR
+    pack_no LIKE '%011977' OR
+    pack_no LIKE '%013582' OR
+    pack_no LIKE '%007957' OR
+    pack_no LIKE '%009239' OR
+    pack_no LIKE '%015306' OR
+    pack_no LIKE '%015289' OR
+    pack_no LIKE '%015269' OR
+    pack_no LIKE '%013584' OR
+    pack_no LIKE '%015276' OR
+    pack_no LIKE '%015317' OR
+    pack_no LIKE '%015309' OR
+    pack_no LIKE '%011628' OR
+    pack_no LIKE '%015284' OR
+    pack_no LIKE '%015286' OR
+    pack_no LIKE '%015307' OR
+    pack_no LIKE '%008806' OR
+    pack_no LIKE '%015318' OR
+    pack_no LIKE '%015321' OR
+    pack_no LIKE '%015316' OR
+    pack_no LIKE '%015391' OR
+    pack_no LIKE '%015290' OR
+    pack_no LIKE '%015007' OR
+    pack_no LIKE '%015279' OR
+    pack_no LIKE '%015274' OR
+    pack_no LIKE '%015267' OR
+    pack_no LIKE '%015264' OR
+    pack_no LIKE '%015323' OR
+    pack_no LIKE '%015322' OR
+    pack_no LIKE '%015324' OR
+    pack_no LIKE '%015303' OR
+    pack_no LIKE '%015285' OR
+    pack_no LIKE '%015308' OR
+    pack_no LIKE '%015314' OR
+    pack_no LIKE '%015298' OR
+    pack_no LIKE '%015310' OR
+    pack_no LIKE '%015280' OR
+    pack_no LIKE '%015247' OR
+    pack_no LIKE '%015282' OR
+    pack_no LIKE '%015278' OR
+    pack_no LIKE '%015283' OR
+    pack_no LIKE '%015172' OR
+    pack_no LIKE '%015304' OR
+    pack_no LIKE '%009460' OR
+    pack_no LIKE '%003132' OR
+    pack_no LIKE '%009438' OR
+    pack_no LIKE '%014972' OR
+    pack_no LIKE '%016202' OR
+    pack_no LIKE '%003095' OR
+    pack_no LIKE '%013302' OR
+    pack_no LIKE '%002375' OR
+    pack_no LIKE '%009102' OR
+    pack_no LIKE '%015278' OR
+    pack_no LIKE '%004886' OR
+    pack_no LIKE '%009101' OR
+    pack_no LIKE '%030896' OR
+    pack_no LIKE '%014079' OR
+    pack_no LIKE '%030831' OR
+    pack_no LIKE '%002874' OR
+    pack_no LIKE '%020047' OR
+    pack_no LIKE '%030018' OR
+    pack_no LIKE '%016873' OR
+    pack_no LIKE '%013063' OR
+    pack_no LIKE '%017178' OR
+    pack_no LIKE '%025055' OR
+    pack_no LIKE '%013140' OR
+    pack_no LIKE '%018123' OR
+    pack_no LIKE '%011673' OR
+    pack_no LIKE '%001630';
