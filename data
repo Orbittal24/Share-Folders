@@ -1,6 +1,426 @@
-SELECT 
-    sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
-    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
-    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
-FROM taco_treceability.torque_details_EIP
-WHERE pack_no IN ('abc', '1', '2', '3');
+const { Console } = require("console");
+
+module.exports = {
+    includeCode: function (io, sql, sqlConfig) {
+
+        const path = require("path");
+        const net = require("net");
+        const multer = require("multer");
+        const bodyParser = require("body-parser");
+        const WebSocketServer = require("websocket").server;
+        const http = require("http");
+        const sockets = [];
+        const events = require("events");
+        const em = new events.EventEmitter();
+        const express = require("express");
+        const app = express();
+        const util = require("util");
+        const fs = require("fs");
+        const moment = require("moment");
+
+        app.use(bodyParser.json());
+
+        // ============================================================
+        // ====================== OK DATA =============================
+        // ============================================================
+
+        io.on('connection', (socket) => {
+
+            socket.on('date_selected_searchdata_count_OK', (date) => {
+                console.log("Received date from client IRRRR search count:", date);
+
+                const final_qrcode_arr_eip_count = [];
+
+                sql.connect(sqlConfig, function (err) {
+                    if (err) {
+                        console.log("SQL Connection Error:", err);
+                        return;
+                    }
+
+                    const request = new sql.Request();
+                    const query = `
+                        SELECT DISTINCT pack_no 
+                        FROM taco_treceability.torque_details_EIP 
+                        WHERE CONVERT(varchar(200), date_dd) < '${date}' 
+                        AND pack_no != 'not_linked'
+                    `;
+
+                    request.query(query, async function (err, result) {
+                        if (err) {
+                            console.log("SQL Query Error:", err);
+                            return;
+                        }
+
+                        const rows = result.recordset;
+                        rows.forEach(row => {
+                            final_qrcode_arr_eip_count.push(row.pack_no);
+                        });
+
+                        try {
+                            const collectedFinalQRCodes_count = [];
+
+                            for (const packNo of final_qrcode_arr_eip_count) {
+                                const safePackNo = packNo.replace(/'/g, "''");
+
+                                const innerQuery = `
+                                    SELECT DISTINCT FinalQRCode 
+                                    FROM taco_treceability.station_status 
+                                    WHERE FinalQRCode LIKE '%${safePackNo}%'
+                                    AND FinalQRCodePrint_status = 'OK'
+                                `;
+
+                                const innerRequest = new sql.Request();
+                                const result = await innerRequest.query(innerQuery);
+
+                                if (result.recordset.length > 0) {
+                                    const foundCodes = result.recordset.map(r => r.FinalQRCode);
+                                    collectedFinalQRCodes_count.push(...foundCodes);
+                                }
+                            }
+
+                            console.log("Final QRCodes from station_status ok:", collectedFinalQRCodes_count);
+
+                            let totalCount = 0;
+
+                            for (const finalQRCode of collectedFinalQRCodes_count) {
+                                const safeQRCode = finalQRCode.replace(/'/g, "''");
+
+                                const additionalQuery = `
+                                    SELECT pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, 
+                                           process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, 
+                                           station_name, smoke_sensor_linked_pack_no 
+                                    FROM taco_treceability.torque_details_EIP 
+                                    WHERE pack_no LIKE '%${safeQRCode}%'
+                                `;
+
+                                const additionalRequest = new sql.Request();
+                                const additionalResult = await additionalRequest.query(additionalQuery);
+                                totalCount += additionalResult.recordset.length;
+                            }
+
+                            console.log('TOTAL Count_EIP_data:', totalCount);
+
+                            socket.emit('total_eip_data_count_fe', totalCount);
+
+                        } catch (err) {
+                            console.error("Error during FinalQRCode fetching:", err);
+                        }
+                    });
+                });
+            });
+
+            socket.on('date_selected_OK', (date) => {
+                console.log("Received date from client IRRRR shift:", date);
+
+                const final_qrcode_arr_eip = [];
+
+                sql.connect(sqlConfig, function (err) {
+                    if (err) {
+                        console.log("SQL Connection Error:", err);
+                        return;
+                    }
+
+                    const request = new sql.Request();
+                    const query = `
+                        SELECT DISTINCT pack_no 
+                        FROM taco_treceability.torque_details_EIP 
+                        WHERE CONVERT(varchar(200), date_dd) < '${date}' 
+                        AND pack_no != 'not_linked'
+                    `;
+
+                    request.query(query, async function (err, result) {
+                        if (err) {
+                            console.log("SQL Query Error:", err);
+                            return;
+                        }
+
+                        const rows = result.recordset;
+                        rows.forEach(row => {
+                            final_qrcode_arr_eip.push(row.pack_no);
+                        });
+
+                        try {
+                            const collectedFinalQRCodes = [];
+
+                            for (const packNo of final_qrcode_arr_eip) {
+                                const safePackNo = packNo.replace(/'/g, "''");
+
+                                const innerQuery = `
+                                    SELECT DISTINCT FinalQRCode 
+                                    FROM taco_treceability.station_status 
+                                    WHERE FinalQRCode LIKE '%${safePackNo}%'
+                                    AND FinalQRCodePrint_status = 'OK'
+                                `;
+
+                                const innerRequest = new sql.Request();
+                                const result = await innerRequest.query(innerQuery);
+
+                                if (result.recordset.length > 0) {
+                                    const foundCodes = result.recordset.map(r => r.FinalQRCode);
+                                    collectedFinalQRCodes.push(...foundCodes);
+                                }
+                            }
+
+                            for (const finalQRCode of collectedFinalQRCodes) {
+                                const safeQRCode = finalQRCode.replace(/'/g, "''");
+
+                                const additionalQuery = `
+                                    SELECT pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, 
+                                           process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, 
+                                           station_name, smoke_sensor_linked_pack_no 
+                                    FROM taco_treceability.torque_details_EIP 
+                                    WHERE pack_no LIKE '%${safeQRCode}%'
+                                `;
+
+                                const additionalRequest = new sql.Request();
+                                const additionalResult = await additionalRequest.query(additionalQuery);
+
+                                if (additionalResult.recordset.length > 0) {
+                                    for (const record of additionalResult.recordset) {
+                                        const insertQuery = `
+                                            INSERT INTO taco_treceability.torque_details_EIP_import2
+                                            (pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, 
+                                             process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, 
+                                             station_name, smoke_sensor_linked_pack_no)
+                                            VALUES
+                                            ('${record.pack_name}', '${record.module_name}', '${record.torque}', '${record.angle}', 
+                                             '${record.torque_status}', '${record.date_dd}', '${record.shift}', '${record.module_barcode}', 
+                                             '${record.process_status}', '${record.pack_no}', '${record.rework_status}', 
+                                             '${record.bypass_operator}', '${record.bypass_reason}', '${record.process_name}', 
+                                             '${record.station_name}', '${record.smoke_sensor_linked_pack_no}')
+                                        `;
+
+                                        const insertRequest = new sql.Request();
+                                        await insertRequest.query(insertQuery);
+                                    }
+
+                                    console.log('Data inserted into torque_details_EIP_import2 for QRCode:', finalQRCode);
+                                } else {
+                                    console.log('No data found for QRCode:', finalQRCode);
+                                }
+                            }
+
+                            const deleteQuery = `
+                                DELETE FROM taco_treceability.torque_details_EIP 
+                                WHERE pack_no IN (${collectedFinalQRCodes.map(qr => `'${qr.replace(/'/g, "''")}'`).join(', ')})
+                            `;
+
+                            const deleteRequest = new sql.Request();
+                            await deleteRequest.query(deleteQuery);
+
+                            console.log("Data deleted from torque_details_EIP");
+
+                            socket.emit("data_inserted_and_deleted", {
+                                message: "Data has been inserted into torque_details_EIP_import2 and deleted from taco_treceability.torque_details_EIP"
+                            });
+
+                        } catch (err) {
+                            console.error("Error during FinalQRCode fetching and insertion:", err);
+                        }
+                    });
+                });
+            });
+
+            // ============================================================
+            // =================== NOT OK DATA ============================
+            // ============================================================
+
+            socket.on('date_selected_searchdata_count_notok_shifting', (date) => {
+                console.log("Received date from client IRRRR search count:", date);
+
+                const final_qrcode_arr_eip_count_notok = [];
+
+                sql.connect(sqlConfig, function (err) {
+                    if (err) {
+                        console.log("SQL Connection Error:", err);
+                        return;
+                    }
+
+                    const request = new sql.Request();
+                    const query = `
+                        SELECT DISTINCT pack_no 
+                        FROM taco_treceability.torque_details_EIP 
+                        WHERE CONVERT(varchar(200), date_dd) < '${date}' 
+                        AND pack_no != 'not_linked'
+                    `;
+
+                    request.query(query, async function (err, result) {
+                        if (err) {
+                            console.log("SQL Query Error:", err);
+                            return;
+                        }
+
+                        const rows = result.recordset;
+                        rows.forEach(row => {
+                            final_qrcode_arr_eip_count_notok.push(row.pack_no);
+                        });
+
+                        try {
+                            const collectedFinalQRCodes_count = [];
+
+                            for (const packNo of final_qrcode_arr_eip_count_notok) {
+                                const safePackNo = packNo.replace(/'/g, "''");
+
+                                const innerQuery = `
+                                    SELECT DISTINCT FinalQRCode 
+                                    FROM taco_treceability.station_status 
+                                    WHERE FinalQRCode LIKE '%${safePackNo}%'
+                                    AND FinalQRCodePrint_status = 'NOT OK'
+                                `;
+
+                                const innerRequest = new sql.Request();
+                                const result = await innerRequest.query(innerQuery);
+
+                                if (result.recordset.length > 0) {
+                                    const foundCodes = result.recordset.map(r => r.FinalQRCode);
+                                    collectedFinalQRCodes_count.push(...foundCodes);
+                                }
+                            }
+
+                            console.log("Final QRCodes from station_status not ok:", collectedFinalQRCodes_count);
+
+                            let totalCount = 0;
+
+                            for (const finalQRCode of collectedFinalQRCodes_count) {
+                                const safeQRCode = finalQRCode.replace(/'/g, "''");
+
+                                const additionalQuery = `
+                                    SELECT pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, 
+                                           process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, 
+                                           station_name, smoke_sensor_linked_pack_no 
+                                    FROM taco_treceability.torque_details_EIP 
+                                    WHERE pack_no LIKE '%${safeQRCode}%'
+                                `;
+
+                                const additionalRequest = new sql.Request();
+                                const additionalResult = await additionalRequest.query(additionalQuery);
+                                totalCount += additionalResult.recordset.length;
+                            }
+
+                            console.log('TOTAL Count_EIP_data:', totalCount);
+
+                            socket.emit('total_eip_data_count_fe_notok', totalCount);
+
+                        } catch (err) {
+                            console.error("Error during FinalQRCode fetching:", err);
+                        }
+                    });
+                });
+            });
+
+            socket.on('date_selected_notok_shifting', (date) => {
+                console.log("Received date from client IRRRR:", date);
+
+                const final_qrcode_arr_eip_notok = [];
+
+                sql.connect(sqlConfig, function (err) {
+                    if (err) {
+                        console.log("SQL Connection Error:", err);
+                        return;
+                    }
+
+                    const request = new sql.Request();
+                    const query = `
+                        SELECT DISTINCT pack_no 
+                        FROM taco_treceability.torque_details_EIP 
+                        WHERE CONVERT(varchar(200), date_dd) < '${date}' 
+                        AND pack_no != 'not_linked'
+                    `;
+
+                    request.query(query, async function (err, result) {
+                        if (err) {
+                            console.log("SQL Query Error:", err);
+                            return;
+                        }
+
+                        const rows = result.recordset;
+                        rows.forEach(row => {
+                            final_qrcode_arr_eip_notok.push(row.pack_no);
+                        });
+
+                        try {
+                            const collectedFinalQRCodes = [];
+
+                            for (const packNo of final_qrcode_arr_eip_notok) {
+                                const safePackNo = packNo.replace(/'/g, "''");
+
+                                const innerQuery = `
+                                    SELECT DISTINCT FinalQRCode 
+                                    FROM taco_treceability.station_status 
+                                    WHERE FinalQRCode LIKE '%${safePackNo}%'
+                                    AND FinalQRCodePrint_status = 'NOT OK'
+                                `;
+
+                                const innerRequest = new sql.Request();
+                                const result = await innerRequest.query(innerQuery);
+
+                                if (result.recordset.length > 0) {
+                                    const foundCodes = result.recordset.map(r => r.FinalQRCode);
+                                    collectedFinalQRCodes.push(...foundCodes);
+                                }
+                            }
+
+                            for (const finalQRCode of collectedFinalQRCodes) {
+                                const safeQRCode = finalQRCode.replace(/'/g, "''");
+
+                                const additionalQuery = `
+                                    SELECT pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, 
+                                           process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, 
+                                           station_name, smoke_sensor_linked_pack_no 
+                                    FROM taco_treceability.torque_details_EIP 
+                                    WHERE pack_no LIKE '%${safeQRCode}%'
+                                `;
+
+                                const additionalRequest = new sql.Request();
+                                const additionalResult = await additionalRequest.query(additionalQuery);
+
+                                if (additionalResult.recordset.length > 0) {
+                                    for (const record of additionalResult.recordset) {
+                                        const insertQuery = `
+                                            INSERT INTO taco_treceability.torque_details_EIP_import2
+                                            (pack_name, module_name, torque, angle, torque_status, date_dd, shift, module_barcode, 
+                                             process_status, pack_no, rework_status, bypass_operator, bypass_reason, process_name, 
+                                             station_name, smoke_sensor_linked_pack_no)
+                                            VALUES
+                                            ('${record.pack_name}', '${record.module_name}', '${record.torque}', '${record.angle}', 
+                                             '${record.torque_status}', '${record.date_dd}', '${record.shift}', '${record.module_barcode}', 
+                                             '${record.process_status}', '${record.pack_no}', '${record.rework_status}', '${record.bypass_operator}', 
+                                             '${record.bypass_reason}', '${record.process_name}', '${record.station_name}', 
+                                             '${record.smoke_sensor_linked_pack_no}')
+                                        `;
+
+                                        const insertRequest = new sql.Request();
+                                        await insertRequest.query(insertQuery);
+                                    }
+
+                                    console.log('Data inserted into torque_details_EIP_import2 for QRCode:', finalQRCode);
+                                } else {
+                                    console.log('No data found for QRCode:', finalQRCode);
+                                }
+                            }
+
+                            const deleteQuery = `
+                                DELETE FROM taco_treceability.torque_details_EIP 
+                                WHERE pack_no IN (${collectedFinalQRCodes.map(qr => `'${qr.replace(/'/g, "''")}'`).join(', ')})
+                            `;
+
+                            const deleteRequest = new sql.Request();
+                            await deleteRequest.query(deleteQuery);
+
+                            console.log("Data deleted from torque_details_EIP");
+
+                            socket.emit("data_inserted_and_deleted_notok", {
+                                message: "Data has been inserted into torque_details_EIP_import2 and deleted from taco_treceability.torque_details_EIP"
+                            });
+
+                        } catch (err) {
+                            console.error("Error during FinalQRCode fetching and insertion:", err);
+                        }
+                    });
+                });
+            });
+
+        });
+    }
+};
+
