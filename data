@@ -1,7 +1,17 @@
+let handlersAttached = false;   // ⭐ FIX: Prevent duplicate socket listeners
+
 const { Console } = require("console");
 
 module.exports = {
     includeCode: function (io, sql, sqlConfig) {
+
+        // ⭐ Prevent registering socket handlers more than once
+        if (handlersAttached) {
+            console.log("Handlers already attached – avoiding duplicates.");
+            return;
+        }
+        handlersAttached = true;
+        console.log("Attaching EIP socket handlers...");
 
         const path = require("path");
         const net = require("net");
@@ -423,4 +433,3 @@ module.exports = {
         });
     }
 };
-
