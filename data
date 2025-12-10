@@ -1,4 +1,13 @@
 const sql = require("mssql");
+const Redis = require("ioredis");
+
+// -------------------------
+// REDIS CONFIG
+// -------------------------
+const redis = new Redis({
+  host: "127.0.0.1",
+  port: 6379
+});
 
 // -------------------------
 // DB CONFIGS
@@ -52,6 +61,7 @@ function safeString(val) {
 // PROCESS ONE RECORD
 // -------------------------
 async function processRecord() {
+
   const src = await sql.connect(sqlConfig1);
   const dst = await sql.connect(sqlConfig2);
 
@@ -73,56 +83,38 @@ async function processRecord() {
   console.log("\n================ NEW RECORD ================");
   console.log("QR CODE:", qr);
 
-  // -----------------------
-  // STEP 1: Extract date code safely
-  // -----------------------
+  // ----------------------- Extract date code -----------------------
   if (!qr || qr.length < 16) {
     console.error("❌ ERROR: QR too short, skipping:", qr);
     return;
   }
 
   const code12_13 = qr.substring(12, 14);
-  console.log("Extracted 12-13 Code:", code12_13);
+  let dateCode = specialCodes.includes(code12_13)
+    ? qr.substring(14, 17)
+    : qr.substring(8, 11);
 
-  let dateCode = "";
-
-  if (specialCodes.includes(code12_13)) {
-    dateCode = qr.substring(14, 17);
-  } else {
-    dateCode = qr.substring(8, 11);
-  }
-
-  console.log("Extracted Date Code:", dateCode);
-
-  const yearChar = dateCode[0];
-  const monthChar = dateCode[1];
-  const dayChar = dateCode[2];
-
-  console.log("Parsed Date Characters:", { yearChar, monthChar, dayChar });
-
-  // -----------------------
-  // STEP 2: Map from code tables
-  // -----------------------
-  const yearValue = yearMap[yearChar];
-  const monthValue = monthMap[monthChar];
-  const dayValue = dayMap[dayChar];
-
-  console.log("Mapped Date Values:", { yearValue, monthValue, dayValue });
+  const yearValue = yearMap[dateCode[0]];
+  const monthValue = monthMap[dateCode[1]];
+  const dayValue = dayMap[dateCode[2]];
 
   if (!yearValue || !monthValue || !dayValue) {
-    console.error("❌ ERROR: Mapping failed! Skipping QR:", qr);
+    console.error("❌ Mapping failed! Skip", qr);
     return;
   }
 
   const year = 2000 + yearValue;
-  const month = monthValue.toString().padStart(2, "0");
-  const day = dayValue.toString().padStart(2, "0");
+  const month = String(monthValue).padStart(2, "0");
+  const day = String(dayValue).padStart(2, "0");
 
   const tableName = `dbo.ocv_cell_data_${year}_${month}_${day}`;
-  console.log("Target Table:", tableName);
+  const redisKey = `ocv_cell_data:${year}_${month}_${day}`; // <<< Redis key
+
+  console.log("SQL Table:", tableName);
+  console.log("Redis Key:", redisKey);
 
   // -----------------------
-  // STEP 3: Create table if missing (with proper schema check)
+  // STEP 3 SQL: Create table if not exists
   // -----------------------
   await dst.request().query(`
     IF NOT EXISTS (
@@ -148,27 +140,58 @@ async function processRecord() {
   `);
 
   // -----------------------
-  // STEP 4: Insert / Update
+  // STEP 3 REDIS: No table creation needed
+  // -----------------------
+  // But we log it for clarity
+  console.log(`Redis structure ready: ${redisKey}`);
+
+  // -----------------------
+  // STEP 4 SQL INSERT / UPDATE
   // -----------------------
   const check = await dst.request()
     .input("qr", sql.VarChar, qr)
     .query(`SELECT * FROM ${tableName} WHERE cell_qrcode = @qr`);
 
+  const payload = {
+    sr_no: row.sr_no,
+    cell_qrcode: row.cell_qrcode,
+    voltage: safeString(row.voltage),
+    ir: safeString(row.ir),
+    today_date: row.today_date?.toISOString(),
+    updated_time: row.updated_time?.toISOString(),
+    machine_location: row.machine_location,
+    shift: row.shift,
+    used_on_line: row.used_on_line,
+    kvalue: safeString(row.kvalue),
+    grade: row.grade,
+    cell_capacity: safeString(row.cell_capacity),
+    cell_class: row.cell_class
+  };
+
+  // -----------------------
+  // REDIS INSERT / UPDATE (Step 4)
+  // -----------------------
+  await redis.hset(redisKey, qr, JSON.stringify(payload));
+
+  console.log("📦 Redis Saved →", qr);
+
+  // -----------------------
+  // SQL Insert/Update
+  // -----------------------
   if (check.recordset.length === 0) {
-    // INSERT
     await dst.request()
       .input("sr_no", sql.Int, row.sr_no)
       .input("cell_qrcode", sql.VarChar, row.cell_qrcode)
-      .input("voltage", sql.VarChar, safeString(row.voltage))
-      .input("ir", sql.VarChar, safeString(row.ir))
+      .input("voltage", sql.VarChar, payload.voltage)
+      .input("ir", sql.VarChar, payload.ir)
       .input("today_date", sql.DateTime, row.today_date)
       .input("updated_time", sql.DateTime, row.updated_time)
       .input("machine_location", sql.VarChar, row.machine_location)
       .input("shift", sql.VarChar, row.shift)
       .input("used_on_line", sql.VarChar, row.used_on_line)
-      .input("kvalue", sql.VarChar, safeString(row.kvalue))
+      .input("kvalue", sql.VarChar, payload.kvalue)
       .input("grade", sql.VarChar, row.grade)
-      .input("cell_capacity", sql.VarChar, safeString(row.cell_capacity))
+      .input("cell_capacity", sql.VarChar, payload.cell_capacity)
       .input("cell_class", sql.VarChar, row.cell_class)
       .query(`
         INSERT INTO ${tableName}
@@ -176,21 +199,20 @@ async function processRecord() {
                 @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
       `);
 
-    console.log(`✅ INSERTED → ${qr}`);
+    console.log(`✅ INSERTED SQL → ${qr}`);
   } else {
-    // UPDATE
     await dst.request()
       .input("qr", sql.VarChar, qr)
-      .input("voltage", sql.VarChar, safeString(row.voltage))
-      .input("ir", sql.VarChar, safeString(row.ir))
+      .input("voltage", sql.VarChar, payload.voltage)
+      .input("ir", sql.VarChar, payload.ir)
       .input("today_date", sql.DateTime, row.today_date)
       .input("updated_time", sql.DateTime, row.updated_time)
       .input("machine_location", sql.VarChar, row.machine_location)
       .input("shift", sql.VarChar, row.shift)
       .input("used_on_line", sql.VarChar, row.used_on_line)
-      .input("kvalue", sql.VarChar, safeString(row.kvalue))
+      .input("kvalue", sql.VarChar, payload.kvalue)
       .input("grade", sql.VarChar, row.grade)
-      .input("cell_capacity", sql.VarChar, safeString(row.cell_capacity))
+      .input("cell_capacity", sql.VarChar, payload.cell_capacity)
       .input("cell_class", sql.VarChar, row.cell_class)
       .query(`
         UPDATE ${tableName}
@@ -200,18 +222,15 @@ async function processRecord() {
         WHERE cell_qrcode = @qr
       `);
 
-    console.log(`🔄 UPDATED → ${qr}`);
+    console.log(`🔄 UPDATED SQL → ${qr}`);
   }
 
   // -----------------------
-  // STEP 5: DELETE source row
+  // DELETE source row
   // -----------------------
   await src.request()
     .input("qr", sql.VarChar, qr)
-    .query(`
-        DELETE FROM taco_treceability.ocv_machine_data_mirror
-        WHERE cell_qrcode = @qr
-    `);
+    .query(`DELETE FROM taco_treceability.ocv_machine_data_mirror WHERE cell_qrcode = @qr`);
 
   console.log(`🗑️ DELETED SOURCE → ${qr}`);
 }
@@ -226,7 +245,7 @@ async function start() {
     } catch (err) {
       console.error("ERROR:", err);
     }
-    await new Promise(res => setTimeout(res, 2000));
+    await new Promise(res => setTimeout(res, 1000));
   }
 }
 
