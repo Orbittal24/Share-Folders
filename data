@@ -123,8 +123,8 @@ async function processRecord() {
         CREATE TABLE ${tableName} (
             sr_no INT,
             cell_qrcode VARCHAR(100),
-            voltage FLOAT,
-            ir FLOAT,
+            voltage VARCHAR(50),
+            ir VARCHAR(50),
             today_date DATETIME,
             updated_time DATETIME,
             machine_location VARCHAR(50),
@@ -132,7 +132,7 @@ async function processRecord() {
             used_on_line VARCHAR(10),
             kvalue VARCHAR(50),
             grade VARCHAR(50),
-            cell_capacity FLOAT,
+            cell_capacity VARCHAR(50),
             cell_class VARCHAR(50)
         );
     `);
@@ -149,8 +149,8 @@ async function processRecord() {
     await dst.request()
       .input("sr_no", sql.Int, row.sr_no)
       .input("cell_qrcode", sql.VarChar, row.cell_qrcode)
-      .input("voltage", sql.Float, row.voltage)
-      .input("ir", sql.Float, row.ir)
+      .input("voltage", sql.VarChar, safeString(row.voltage))
+      .input("ir", sql.VarChar, safeString(row.ir))
       .input("today_date", sql.DateTime, row.today_date)
       .input("updated_time", sql.DateTime, row.updated_time)
       .input("machine_location", sql.VarChar, row.machine_location)
@@ -158,21 +158,21 @@ async function processRecord() {
       .input("used_on_line", sql.VarChar, row.used_on_line)
       .input("kvalue", sql.VarChar, safeString(row.kvalue))
       .input("grade", sql.VarChar, row.grade)
-      .input("cell_capacity", sql.Float, row.cell_capacity)
+      .input("cell_capacity", sql.VarChar, safeString(row.cell_capacity))
       .input("cell_class", sql.VarChar, row.cell_class)
       .query(`
-                INSERT INTO ${tableName}
-                VALUES (@sr_no, @cell_qrcode, @voltage, @ir, @today_date, @updated_time,
-                        @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
-            `);
+        INSERT INTO ${tableName}
+        VALUES (@sr_no, @cell_qrcode, @voltage, @ir, @today_date, @updated_time,
+                @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
+      `);
 
     console.log(`✅ INSERTED → ${qr}`);
   } else {
     // UPDATE
     await dst.request()
       .input("qr", sql.VarChar, qr)
-      .input("voltage", sql.Float, row.voltage)
-      .input("ir", sql.Float, row.ir)
+      .input("voltage", sql.VarChar, safeString(row.voltage))
+      .input("ir", sql.VarChar, safeString(row.ir))
       .input("today_date", sql.DateTime, row.today_date)
       .input("updated_time", sql.DateTime, row.updated_time)
       .input("machine_location", sql.VarChar, row.machine_location)
@@ -180,15 +180,15 @@ async function processRecord() {
       .input("used_on_line", sql.VarChar, row.used_on_line)
       .input("kvalue", sql.VarChar, safeString(row.kvalue))
       .input("grade", sql.VarChar, row.grade)
-      .input("cell_capacity", sql.Float, row.cell_capacity)
+      .input("cell_capacity", sql.VarChar, safeString(row.cell_capacity))
       .input("cell_class", sql.VarChar, row.cell_class)
       .query(`
-                UPDATE ${tableName}
-                SET voltage=@voltage, ir=@ir, today_date=@today_date, updated_time=@updated_time,
-                    machine_location=@machine_location, shift=@shift, used_on_line=@used_on_line,
-                    kvalue=@kvalue, grade=@grade, cell_capacity=@cell_capacity, cell_class=@cell_class
-                WHERE cell_qrcode = @qr
-            `);
+        UPDATE ${tableName}
+        SET voltage=@voltage, ir=@ir, today_date=@today_date, updated_time=@updated_time,
+            machine_location=@machine_location, shift=@shift, used_on_line=@used_on_line,
+            kvalue=@kvalue, grade=@grade, cell_capacity=@cell_capacity, cell_class=@cell_class
+        WHERE cell_qrcode = @qr
+      `);
 
     console.log(`🔄 UPDATED → ${qr}`);
   }
