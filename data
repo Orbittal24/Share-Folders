@@ -35,10 +35,11 @@ const dayMap = {
 async function processRecord() {
   let pool1, pool2;
   try {
+    // Connect to both databases
     pool1 = await sql.connect(sqlConfig1);
     pool2 = await sql.connect(sqlConfig2);
 
-    // 1. Fetch one record
+    // 1. Fetch one record from source
     const result = await pool1.request()
       .query(`SELECT TOP 1 sr_no, cell_qrcode, voltage, ir, today_date, updated_time, machine_location, shift, used_on_line, kvalue, grade, cell_capacity, cell_class
               FROM taco_treceability.ocv_machine_data_mirror`);
@@ -52,12 +53,12 @@ async function processRecord() {
     const { cell_qrcode } = record;
 
     // 2. Parse cell_qrcode
-    const pos12_13 = cell_qrcode.substring(11, 13); // 12th,13th char
+    const pos12_13 = cell_qrcode.substring(12, 14); // 12th and 13th chars
     let subStr;
     if (['BJ', 'CJ', 'CR', 'GD', 'AG', 'DR'].includes(pos12_13)) {
-      subStr = cell_qrcode.substring(13, 16);
+      subStr = cell_qrcode.substring(14, 17);
     } else {
-      subStr = cell_qrcode.substring(7, 10);
+      subStr = cell_qrcode.substring(8, 11);
     }
 
     const year = yearMap[subStr[0]] + 2000;
@@ -70,9 +71,14 @@ async function processRecord() {
 
     // 3. Check if table exists, if not create it
     const tableExists = await pool2.request()
-      .query(`IF OBJECT_ID('taco_treceability.${tableName}', 'U') IS NOT NULL SELECT 1 AS exists ELSE SELECT 0 AS exists`);
+      .query(`
+        IF OBJECT_ID('taco_treceability.${tableName}', 'U') IS NOT NULL 
+            SELECT 1 AS tableExists 
+        ELSE 
+            SELECT 0 AS tableExists
+      `);
 
-    if (!tableExists.recordset[0].exists) {
+    if (!tableExists.recordset[0].tableExists) {
       await pool2.request()
         .query(`
           SELECT TOP 0 *
@@ -85,7 +91,7 @@ async function processRecord() {
     // 4. Check if record exists
     const recordExists = await pool2.request()
       .input('cell_qrcode', sql.VarChar, cell_qrcode)
-      .query(`SELECT 1 AS exists FROM taco_treceability.${tableName} WHERE cell_qrcode = @cell_qrcode`);
+      .query(`SELECT 1 AS recordExists FROM taco_treceability.${tableName} WHERE cell_qrcode = @cell_qrcode`);
 
     if (recordExists.recordset.length) {
       // Update
