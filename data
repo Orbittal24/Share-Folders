@@ -1,5 +1,153 @@
-const srcPool = new sql.ConnectionPool(sqlConfig1);
-const dstPool = new sql.ConnectionPool(sqlConfig2);
+const sql = require('mssql');
 
-await srcPool.connect();
-await dstPool.connect();
+const sqlConfig1 = {
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability",
+  server: '10.9.4.28',
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
+};
+
+const sqlConfig2 = {
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability_OVC",
+  server: '10.9.4.28',
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
+};
+
+const yearMap = {
+  B: 21, C: 22, D: 23, E: 24, F: 25, G: 26, H: 27, J: 28, K: 29, L: 30,
+  M: 31, N: 32, P: 33, R: 34, S: 35, T: 36, V: 37, W: 38, X: 39, Y: 40,
+  1: 41, 2: 42, 3: 43, 4: 44, 5: 45, 6: 46, 7: 47, 8: 48, 9: 49, A: 50
+};
+
+const monthMap = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, A: 10, B: 11, C: 12 };
+
+const dayMap = {
+  1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, A: 10, B: 11, C: 12,
+  D: 13, E: 14, F: 15, G: 16, H: 17, J: 18, K: 19, L: 20, M: 21, N: 22,
+  P: 23, R: 24, S: 25, T: 26, V: 27, W: 28, X: 29, Y: 30, 0: 31
+};
+
+async function processRecord() {
+  let pool1, pool2;
+  try {
+    pool1 = await sql.connect(sqlConfig1);
+    pool2 = await sql.connect(sqlConfig2);
+
+    // 1. Fetch one record
+    const result = await pool1.request()
+      .query(`SELECT TOP 1 sr_no, cell_qrcode, voltage, ir, today_date, updated_time, machine_location, shift, used_on_line, kvalue, grade, cell_capacity, cell_class
+              FROM taco_treceability.ocv_machine_data_mirror`);
+
+    if (!result.recordset.length) {
+      console.log('No records to process');
+      return;
+    }
+
+    const record = result.recordset[0];
+    const { cell_qrcode } = record;
+
+    // 2. Parse cell_qrcode
+    const pos12_13 = cell_qrcode.substring(11, 13); // 12th,13th char
+    let subStr;
+    if (['BJ', 'CJ', 'CR', 'GD', 'AG', 'DR'].includes(pos12_13)) {
+      subStr = cell_qrcode.substring(13, 16);
+    } else {
+      subStr = cell_qrcode.substring(7, 10);
+    }
+
+    const year = yearMap[subStr[0]] + 2000;
+    const month = monthMap[subStr[1]]?.toString().padStart(2, '0');
+    const day = dayMap[subStr[2]]?.toString().padStart(2, '0');
+
+    if (!year || !month || !day) throw new Error('Invalid cell_qrcode mapping');
+
+    const tableName = `ocv_cell_data_${year}_${month}_${day}`;
+
+    // 3. Check if table exists, if not create it
+    const tableExists = await pool2.request()
+      .query(`IF OBJECT_ID('taco_treceability.${tableName}', 'U') IS NOT NULL SELECT 1 AS exists ELSE SELECT 0 AS exists`);
+
+    if (!tableExists.recordset[0].exists) {
+      await pool2.request()
+        .query(`
+          SELECT TOP 0 *
+          INTO taco_treceability.${tableName}
+          FROM taco_treceability_OVC.dbo.ocv_machine_data_mirror
+        `);
+      console.log(`Table ${tableName} created`);
+    }
+
+    // 4. Check if record exists
+    const recordExists = await pool2.request()
+      .input('cell_qrcode', sql.VarChar, cell_qrcode)
+      .query(`SELECT 1 AS exists FROM taco_treceability.${tableName} WHERE cell_qrcode = @cell_qrcode`);
+
+    if (recordExists.recordset.length) {
+      // Update
+      await pool2.request()
+        .input('sr_no', sql.Int, record.sr_no)
+        .input('voltage', sql.Float, record.voltage)
+        .input('ir', sql.Float, record.ir)
+        .input('today_date', sql.DateTime, record.today_date)
+        .input('updated_time', sql.DateTime, record.updated_time)
+        .input('machine_location', sql.VarChar, record.machine_location)
+        .input('shift', sql.VarChar, record.shift)
+        .input('used_on_line', sql.VarChar, record.used_on_line)
+        .input('kvalue', sql.Float, record.kvalue)
+        .input('grade', sql.VarChar, record.grade)
+        .input('cell_capacity', sql.Float, record.cell_capacity)
+        .input('cell_class', sql.VarChar, record.cell_class)
+        .input('cell_qrcode', sql.VarChar, record.cell_qrcode)
+        .query(`
+          UPDATE taco_treceability.${tableName}
+          SET sr_no=@sr_no, voltage=@voltage, ir=@ir, today_date=@today_date, updated_time=@updated_time,
+              machine_location=@machine_location, shift=@shift, used_on_line=@used_on_line, kvalue=@kvalue,
+              grade=@grade, cell_capacity=@cell_capacity, cell_class=@cell_class
+          WHERE cell_qrcode=@cell_qrcode
+        `);
+      console.log(`Record updated in ${tableName}`);
+    } else {
+      // Insert
+      await pool2.request()
+        .input('sr_no', sql.Int, record.sr_no)
+        .input('cell_qrcode', sql.VarChar, record.cell_qrcode)
+        .input('voltage', sql.Float, record.voltage)
+        .input('ir', sql.Float, record.ir)
+        .input('today_date', sql.DateTime, record.today_date)
+        .input('updated_time', sql.DateTime, record.updated_time)
+        .input('machine_location', sql.VarChar, record.machine_location)
+        .input('shift', sql.VarChar, record.shift)
+        .input('used_on_line', sql.VarChar, record.used_on_line)
+        .input('kvalue', sql.Float, record.kvalue)
+        .input('grade', sql.VarChar, record.grade)
+        .input('cell_capacity', sql.Float, record.cell_capacity)
+        .input('cell_class', sql.VarChar, record.cell_class)
+        .query(`
+          INSERT INTO taco_treceability.${tableName} 
+          (sr_no, cell_qrcode, voltage, ir, today_date, updated_time, machine_location, shift, used_on_line, kvalue, grade, cell_capacity, cell_class)
+          VALUES (@sr_no, @cell_qrcode, @voltage, @ir, @today_date, @updated_time, @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
+        `);
+      console.log(`Record inserted into ${tableName}`);
+    }
+
+    // 5. Delete processed record from source
+    await pool1.request()
+      .input('sr_no', sql.Int, record.sr_no)
+      .query(`DELETE FROM taco_treceability.ocv_machine_data_mirror WHERE sr_no=@sr_no`);
+
+    console.log('Record deleted from source');
+
+  } catch (err) {
+    console.error('Error processing record:', err);
+  } finally {
+    sql.close();
+  }
+}
+
+// Run the function
+processRecord();
