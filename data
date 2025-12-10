@@ -1,6 +1,8 @@
 const sql = require("mssql");
 
+// -------------------------
 // DB CONFIGS
+// -------------------------
 const sqlConfig1 = {
   user: "user_mis",
   password: "admin",
@@ -19,7 +21,9 @@ const sqlConfig2 = {
   options: { encrypt: true, trustServerCertificate: true }
 };
 
+// -------------------------
 // MAPPING TABLES
+// -------------------------
 const yearMap = {
   B: 21, C: 22, D: 23, E: 24, F: 25, G: 26, H: 27, J: 28, K: 29, L: 30,
   M: 31, N: 32, P: 33, R: 34, S: 35, T: 36, V: 37, W: 38, X: 39, Y: 40,
@@ -37,14 +41,16 @@ const dayMap = {
 
 const specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"];
 
+// -------------------------
 // Helper to safely convert any value to string
+// -------------------------
 function safeString(val) {
   return val === null || val === undefined ? null : val.toString();
 }
 
-// -----------------------------------------------------
+// -------------------------
 // PROCESS ONE RECORD
-// -----------------------------------------------------
+// -------------------------
 async function processRecord() {
   const src = await sql.connect(sqlConfig1);
   const dst = await sql.connect(sqlConfig2);
@@ -54,7 +60,7 @@ async function processRecord() {
         SELECT TOP 1 *
         FROM taco_treceability.ocv_machine_data_mirror
         ORDER BY sr_no ASC
-    `);
+  `);
 
   if (fetch.recordset.length === 0) {
     console.log("No new records...");
@@ -116,26 +122,30 @@ async function processRecord() {
   console.log("Target Table:", tableName);
 
   // -----------------------
-  // STEP 3: Create table if missing
+  // STEP 3: Create table if missing (with proper schema check)
   // -----------------------
   await dst.request().query(`
-        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'ocv_cell_data_${year}_${month}_${day}')
-        CREATE TABLE ${tableName} (
-            sr_no INT,
-            cell_qrcode VARCHAR(100),
-            voltage VARCHAR(50),
-            ir VARCHAR(50),
-            today_date DATETIME,
-            updated_time DATETIME,
-            machine_location VARCHAR(50),
-            shift VARCHAR(10),
-            used_on_line VARCHAR(10),
-            kvalue VARCHAR(50),
-            grade VARCHAR(50),
-            cell_capacity VARCHAR(50),
-            cell_class VARCHAR(50)
-        );
-    `);
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='ocv_cell_data_${year}_${month}_${day}'
+    )
+    CREATE TABLE dbo.ocv_cell_data_${year}_${month}_${day} (
+        sr_no INT,
+        cell_qrcode VARCHAR(100),
+        voltage VARCHAR(50),
+        ir VARCHAR(50),
+        today_date DATETIME,
+        updated_time DATETIME,
+        machine_location VARCHAR(50),
+        shift VARCHAR(10),
+        used_on_line VARCHAR(10),
+        kvalue VARCHAR(50),
+        grade VARCHAR(50),
+        cell_capacity VARCHAR(50),
+        cell_class VARCHAR(50)
+    );
+  `);
 
   // -----------------------
   // STEP 4: Insert / Update
@@ -206,9 +216,9 @@ async function processRecord() {
   console.log(`🗑️ DELETED SOURCE → ${qr}`);
 }
 
-// -----------------------------------------------------
+// -------------------------
 // CONTINUOUS LOOP
-// -----------------------------------------------------
+// -------------------------
 async function start() {
   while (true) {
     try {
