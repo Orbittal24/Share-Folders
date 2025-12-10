@@ -41,8 +41,16 @@ const specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"];
 // PROCESS ONE RECORD
 // -----------------------------------------------------
 async function processRecord() {
-  const src = await sql.connect(sqlConfig1);
-  const dst = await sql.connect(sqlConfig2);
+
+  // FIXED: separate DB connections (corrects table creation issue)
+  const srcPool = new sql.ConnectionPool(sqlConfig1);
+  const dstPool = new sql.ConnectionPool(sqlConfig2);
+
+  await srcPool.connect();
+  await dstPool.connect();
+
+  const src = srcPool;
+  const dst = dstPool;
 
   // Fetch ONE record
   const fetch = await src.request().query(`
@@ -62,23 +70,21 @@ async function processRecord() {
   console.log("\n================ NEW RECORD ================");
   console.log("QR CODE:", qr);
 
-  // -----------------------
-  // STEP 1: Extract date code safely
-  // -----------------------
+  // STEP 1 — Extract date code
   if (!qr || qr.length < 16) {
     console.error("❌ ERROR: QR too short, skipping:", qr);
     return;
   }
 
-  const code12_13 = qr.substring(11, 13);
+  const code12_13 = qr.substring(12, 14);
   console.log("Extracted 12-13 Code:", code12_13);
 
   let dateCode = "";
 
   if (specialCodes.includes(code12_13)) {
-    dateCode = qr.substring(13, 16);
+    dateCode = qr.substring(14, 17);   // 14,15,16
   } else {
-    dateCode = qr.substring(7, 10);
+    dateCode = qr.substring(8, 11);    // 8,9,10
   }
 
   console.log("Extracted Date Code:", dateCode);
@@ -89,9 +95,7 @@ async function processRecord() {
 
   console.log("Parsed Date Characters:", { yearChar, monthChar, dayChar });
 
-  // -----------------------
-  // STEP 2: Map from code tables
-  // -----------------------
+  // STEP 2 — Map to actual date
   const yearValue = yearMap[yearChar];
   const monthValue = monthMap[monthChar];
   const dayValue = dayMap[dayChar];
@@ -110,9 +114,7 @@ async function processRecord() {
   const tableName = `dbo.ocv_cell_data_${year}_${month}_${day}`;
   console.log("Target Table:", tableName);
 
-  // -----------------------
-  // STEP 3: Create table if missing
-  // -----------------------
+  // STEP 3 — Create table if not exists (IN OVC DB)
   await dst.request().query(`
         IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'ocv_cell_data_${year}_${month}_${day}')
         CREATE TABLE ${tableName} (
@@ -132,12 +134,10 @@ async function processRecord() {
         );
     `);
 
-  // -----------------------
-  // STEP 4: Insert / Update
-  // -----------------------
+  // STEP 4 — Insert or Update
   const check = await dst.request()
     .input("qr", sql.VarChar, qr)
-    .query(`SELECT * FROM ${tableName} WHERE cell_qrcode = @qr`);
+    .query(`SELECT * FROM ${tableName} WHERE cell_qrcode=@qr`);
 
   if (check.recordset.length === 0) {
     // INSERT
@@ -156,10 +156,10 @@ async function processRecord() {
       .input("cell_capacity", sql.Float, row.cell_capacity)
       .input("cell_class", sql.VarChar, row.cell_class)
       .query(`
-                INSERT INTO ${tableName}
-                VALUES (@sr_no, @cell_qrcode, @voltage, @ir, @today_date, @updated_time,
-                        @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
-            `);
+        INSERT INTO ${tableName}
+        VALUES (@sr_no, @cell_qrcode, @voltage, @ir, @today_date, @updated_time,
+                @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
+      `);
 
     console.log(`✅ INSERTED → ${qr}`);
   } else {
@@ -178,24 +178,22 @@ async function processRecord() {
       .input("cell_capacity", sql.Float, row.cell_capacity)
       .input("cell_class", sql.VarChar, row.cell_class)
       .query(`
-                UPDATE ${tableName}
-                SET voltage=@voltage, ir=@ir, today_date=@today_date, updated_time=@updated_time,
-                    machine_location=@machine_location, shift=@shift, used_on_line=@used_on_line,
-                    kvalue=@kvalue, grade=@grade, cell_capacity=@cell_capacity, cell_class=@cell_class
-                WHERE cell_qrcode = @qr
-            `);
+        UPDATE ${tableName}
+        SET voltage=@voltage, ir=@ir, today_date=@today_date, updated_time=@updated_time,
+            machine_location=@machine_location, shift=@shift, used_on_line=@used_on_line,
+            kvalue=@kvalue, grade=@grade, cell_capacity=@cell_capacity, cell_class=@cell_class
+        WHERE cell_qrcode=@qr
+      `);
 
     console.log(`🔄 UPDATED → ${qr}`);
   }
 
-  // -----------------------
-  // STEP 5: DELETE source row
-  // -----------------------
+  // STEP 5 — Delete from source table
   await src.request()
     .input("qr", sql.VarChar, qr)
     .query(`
         DELETE FROM taco_treceability.ocv_machine_data_mirror
-        WHERE cell_qrcode = @qr
+        WHERE cell_qrcode=@qr
     `);
 
   console.log(`🗑️ DELETED SOURCE → ${qr}`);
