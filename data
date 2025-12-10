@@ -2,14 +2,6 @@ const sql = require("mssql");
 const Redis = require("ioredis");
 
 // -------------------------
-// REDIS CONFIG
-// -------------------------
-const redis = new Redis({
-  host: "127.0.0.1",
-  port: 6379
-});
-
-// -------------------------
 // DB CONFIGS
 // -------------------------
 const sqlConfig1 = {
@@ -29,6 +21,14 @@ const sqlConfig2 = {
   pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
   options: { encrypt: true, trustServerCertificate: true }
 };
+
+// -------------------------
+// REDIS CONFIG
+// -------------------------
+const redis = new Redis({
+  host: "127.0.0.1",
+  port: 6379,
+});
 
 // -------------------------
 // MAPPING TABLES
@@ -51,17 +51,25 @@ const dayMap = {
 const specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"];
 
 // -------------------------
-// Helper to safely convert any value to string
+// HELPERS
 // -------------------------
 function safeString(val) {
   return val === null || val === undefined ? null : val.toString();
+}
+
+function safeDate(val) {
+  if (!val) return null;
+  try {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  } catch (e) {}
+  return null;
 }
 
 // -------------------------
 // PROCESS ONE RECORD
 // -------------------------
 async function processRecord() {
-
   const src = await sql.connect(sqlConfig1);
   const dst = await sql.connect(sqlConfig2);
 
@@ -83,13 +91,13 @@ async function processRecord() {
   console.log("\n================ NEW RECORD ================");
   console.log("QR CODE:", qr);
 
-  // ----------------------- Extract date code -----------------------
   if (!qr || qr.length < 16) {
-    console.error("❌ ERROR: QR too short, skipping:", qr);
+    console.error("❌ ERROR: QR too short. Skipping.");
     return;
   }
 
   const code12_13 = qr.substring(12, 14);
+
   let dateCode = specialCodes.includes(code12_13)
     ? qr.substring(14, 17)
     : qr.substring(8, 11);
@@ -99,28 +107,27 @@ async function processRecord() {
   const dayValue = dayMap[dateCode[2]];
 
   if (!yearValue || !monthValue || !dayValue) {
-    console.error("❌ Mapping failed! Skip", qr);
+    console.error("❌ ERROR: Date mapping failed. Skipping.");
     return;
   }
 
   const year = 2000 + yearValue;
-  const month = String(monthValue).padStart(2, "0");
-  const day = String(dayValue).padStart(2, "0");
+  const month = monthValue.toString().padStart(2, "0");
+  const day = dayValue.toString().padStart(2, "0");
 
   const tableName = `dbo.ocv_cell_data_${year}_${month}_${day}`;
-  const redisKey = `ocv_cell_data:${year}_${month}_${day}`; // <<< Redis key
+  const redisKey = `ocv_cell_data:${year}_${month}_${day}`;
 
   console.log("SQL Table:", tableName);
   console.log("Redis Key:", redisKey);
 
   // -----------------------
-  // STEP 3 SQL: Create table if not exists
+  // CREATE TABLE IF NOT EXISTS
   // -----------------------
   await dst.request().query(`
     IF NOT EXISTS (
-        SELECT 1 
-        FROM INFORMATION_SCHEMA.TABLES 
-        WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='ocv_cell_data_${year}_${month}_${day}'
+      SELECT 1 FROM INFORMATION_SCHEMA.TABLES 
+      WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='ocv_cell_data_${year}_${month}_${day}'
     )
     CREATE TABLE dbo.ocv_cell_data_${year}_${month}_${day} (
         sr_no INT,
@@ -140,25 +147,27 @@ async function processRecord() {
   `);
 
   // -----------------------
-  // STEP 3 REDIS: No table creation needed
+  // REDIS: Create structure
   // -----------------------
-  // But we log it for clarity
-  console.log(`Redis structure ready: ${redisKey}`);
+  await redis.hset(redisKey, "initialized", "1");
 
   // -----------------------
-  // STEP 4 SQL INSERT / UPDATE
+  // SQL BEFORE INSERT/UPDATE
   // -----------------------
   const check = await dst.request()
     .input("qr", sql.VarChar, qr)
     .query(`SELECT * FROM ${tableName} WHERE cell_qrcode = @qr`);
 
+  // -----------------------
+  // Common Redis Payload
+  // -----------------------
   const payload = {
     sr_no: row.sr_no,
     cell_qrcode: row.cell_qrcode,
     voltage: safeString(row.voltage),
     ir: safeString(row.ir),
-    today_date: row.today_date?.toISOString(),
-    updated_time: row.updated_time?.toISOString(),
+    today_date: safeDate(row.today_date),
+    updated_time: safeDate(row.updated_time),
     machine_location: row.machine_location,
     shift: row.shift,
     used_on_line: row.used_on_line,
@@ -169,14 +178,7 @@ async function processRecord() {
   };
 
   // -----------------------
-  // REDIS INSERT / UPDATE (Step 4)
-  // -----------------------
-  await redis.hset(redisKey, qr, JSON.stringify(payload));
-
-  console.log("📦 Redis Saved →", qr);
-
-  // -----------------------
-  // SQL Insert/Update
+  // SQL INSERT
   // -----------------------
   if (check.recordset.length === 0) {
     await dst.request()
@@ -199,8 +201,12 @@ async function processRecord() {
                 @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
       `);
 
-    console.log(`✅ INSERTED SQL → ${qr}`);
-  } else {
+    console.log("✅ SQL INSERTED");
+  }
+  // -----------------------
+  // SQL UPDATE
+  // -----------------------
+  else {
     await dst.request()
       .input("qr", sql.VarChar, qr)
       .input("voltage", sql.VarChar, payload.voltage)
@@ -222,17 +228,23 @@ async function processRecord() {
         WHERE cell_qrcode = @qr
       `);
 
-    console.log(`🔄 UPDATED SQL → ${qr}`);
+    console.log("🔄 SQL UPDATED");
   }
 
   // -----------------------
-  // DELETE source row
+  // REDIS INSERT/UPDATE
+  // -----------------------
+  await redis.hset(redisKey, qr, JSON.stringify(payload));
+  console.log("📦 Redis update done");
+
+  // -----------------------
+  // DELETE SOURCE
   // -----------------------
   await src.request()
     .input("qr", sql.VarChar, qr)
     .query(`DELETE FROM taco_treceability.ocv_machine_data_mirror WHERE cell_qrcode = @qr`);
 
-  console.log(`🗑️ DELETED SOURCE → ${qr}`);
+  console.log("🗑️ SOURCE ROW DELETED");
 }
 
 // -------------------------
