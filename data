@@ -13,11 +13,9 @@ redis_db = 31
 # Connect to Redis
 r = redis.StrictRedis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
 
-
 # Safe string conversion
 def safe(val):
     return "" if val is None else str(val)
-
 
 # -----------------------------------
 # DB CONFIGS
@@ -36,7 +34,6 @@ sqlConfig2 = {
     "password": "admin",
 }
 
-
 # -----------------------------------
 # CONNECT FUNCTION
 # -----------------------------------
@@ -50,7 +47,6 @@ def connect_db(config):
         f"TrustServerCertificate=yes;"
     )
     return conn
-
 
 # -----------------------------------
 # MAPPING TABLES
@@ -69,9 +65,6 @@ dayMap = {
     "L": 20, "M": 21, "N": 22, "P": 23, "R": 24, "S": 25, "T": 26, "V": 27, "W": 28, "X": 29,
     "Y": 30, "0": 31,
 }
-
-specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"]
-
 
 # -----------------------------------
 # PROCESS ONE RECORD
@@ -102,7 +95,12 @@ def process_record(src_conn, dst_conn):
 
     # Extract Plant Code & Batch Code
     code12_13 = qr[12:14]
-    dateCode = qr[14:17] if code12_13 in specialCodes else qr[8:11]
+
+    # Dynamic dateCode logic
+    if code12_13 == 'BV':
+        dateCode = qr[8:11]
+    else:
+        dateCode = qr[14:17]
 
     print("Plant code:", code12_13)
     print("Batch code:", dateCode)
@@ -210,7 +208,7 @@ def process_record(src_conn, dst_conn):
         "batch": safe(dateCode),
         "plant_code": safe(code12_13)
     }
-    r.set(f"cell:{qr}", json.dumps(row_dict))  # This will overwrite if already exists
+    r.set(f"cell:{qr}", json.dumps(row_dict))  # Overwrites if exists
     print(f"📦 REDIS → Updated cell:{qr}")
 
     # -----------------------------------
@@ -222,7 +220,6 @@ def process_record(src_conn, dst_conn):
     )
     src_conn.commit()
     print(f"🗑️ DELETED SOURCE → {qr}")
-
 
 # -----------------------------------
 # CONTINUOUS LOOP
@@ -237,6 +234,5 @@ def start():
         except Exception as e:
             print("ERROR:", e)
         time.sleep(1)
-
 
 start()
