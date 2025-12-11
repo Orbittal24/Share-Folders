@@ -54,7 +54,7 @@ const specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"];
 // HELPERS
 // -------------------------
 function safeString(val) {
-  return val === null || val === undefined ? null : val.toString();
+  return val == null ? null : val.toString();
 }
 
 function safeDate(val) {
@@ -70,181 +70,177 @@ function safeDate(val) {
 // PROCESS ONE RECORD
 // -------------------------
 async function processRecord() {
-  const src = await sql.connect(sqlConfig1);
-  const dst = await sql.connect(sqlConfig2);
 
-  // Fetch ONE record
-  const fetch = await src.request().query(`
-        SELECT TOP 1 *
-        FROM taco_treceability.ocv_machine_data_mirror
-        ORDER BY sr_no ASC
-  `);
+  // Create isolated SQL pools (fix for your issue)
+  const srcPool = new sql.ConnectionPool(sqlConfig1);
+  const dstPool = new sql.ConnectionPool(sqlConfig2);
+  const src = await srcPool.connect();
+  const dst = await dstPool.connect();
 
-  if (fetch.recordset.length === 0) {
-    console.log("No new records...");
-    return;
-  }
+  try {
+    // Fetch ONE record
+    const fetch = await src.request().query(`
+      SELECT TOP 1 *
+      FROM taco_treceability.ocv_machine_data_mirror
+      ORDER BY sr_no ASC
+    `);
 
-  const row = fetch.recordset[0];
-  const qr = row.cell_qrcode;
+    if (fetch.recordset.length === 0) {
+      console.log("No new records...");
+      return;
+    }
 
-  console.log("\n================ NEW RECORD ================");
-  console.log("QR CODE:", qr);
+    const row = fetch.recordset[0];
+    const qr = row.cell_qrcode;
 
-  if (!qr || qr.length < 16) {
-    console.error("❌ ERROR: QR too short. Skipping.");
-    return;
-  }
+    console.log("\n================ NEW RECORD ================");
+    console.log("QR CODE:", qr);
 
-  const code12_13 = qr.substring(12, 14);
+    if (!qr || qr.length < 16) {
+      console.error("❌ ERROR: QR too short. Skipping.");
+      return;
+    }
 
-  let dateCode = specialCodes.includes(code12_13)
-    ? qr.substring(14, 17)
-    : qr.substring(8, 11);
+    const code12_13 = qr.substring(12, 14);
+    console.log("Extracted 12-13 Code:", code12_13);
 
-  const yearValue = yearMap[dateCode[0]];
-  const monthValue = monthMap[dateCode[1]];
-  const dayValue = dayMap[dateCode[2]];
+    let dateCode = specialCodes.includes(code12_13)
+      ? qr.substring(14, 17)
+      : qr.substring(8, 11);
 
-  if (!yearValue || !monthValue || !dayValue) {
-    console.error("❌ ERROR: Date mapping failed. Skipping.");
-    return;
-  }
+    console.log("Extracted Date Code:", dateCode);
 
-  const year = 2000 + yearValue;
-  const month = monthValue.toString().padStart(2, "0");
-  const day = dayValue.toString().padStart(2, "0");
+    const yearValue = yearMap[dateCode[0]];
+    const monthValue = monthMap[dateCode[1]];
+    const dayValue = dayMap[dateCode[2]];
 
-  const tableName = `dbo.ocv_cell_data_${year}_${month}_${day}`;
-  const redisKey = `ocv_cell_data:${year}_${month}_${day}`;
+    if (!yearValue || !monthValue || !dayValue) {
+      console.error("❌ ERROR: Date mapping failed. Skipping.");
+      return;
+    }
 
-  console.log("SQL Table:", tableName);
-  console.log("Redis Key:", redisKey);
+    const year = 2000 + yearValue;
+    const month = monthValue.toString().padStart(2, "0");
+    const day = dayValue.toString().padStart(2, "0");
 
-  // -----------------------
-  // CREATE TABLE IF NOT EXISTS
-  // -----------------------
-  await dst.request().query(`
-    IF NOT EXISTS (
-      SELECT 1 FROM INFORMATION_SCHEMA.TABLES 
-      WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='ocv_cell_data_${year}_${month}_${day}'
-    )
-    CREATE TABLE dbo.ocv_cell_data_${year}_${month}_${day} (
-        sr_no INT,
-        cell_qrcode VARCHAR(100),
-        voltage VARCHAR(50),
-        ir VARCHAR(50),
-        today_date DATETIME,
-        updated_time DATETIME,
-        machine_location VARCHAR(50),
-        shift VARCHAR(10),
-        used_on_line VARCHAR(10),
-        kvalue VARCHAR(50),
-        grade VARCHAR(50),
-        cell_capacity VARCHAR(50),
-        cell_class VARCHAR(50)
-    );
-  `);
+    const tableName = `dbo.ocv_cell_data_${year}_${month}_${day}`;
+    const redisKey = `ocv_cell_data:${year}_${month}_${day}`;
 
-  // -----------------------
-  // REDIS: Create structure
-  // -----------------------
-  await redis.hset(redisKey, "initialized", "1");
+    console.log("SQL Table:", tableName);
+    console.log("Redis Key:", redisKey);
 
-  // -----------------------
-  // SQL BEFORE INSERT/UPDATE
-  // -----------------------
-  const check = await dst.request()
-    .input("qr", sql.VarChar, qr)
-    .query(`SELECT * FROM ${tableName} WHERE cell_qrcode = @qr`);
+    // CREATE TABLE IN sqlConfig2 (now guaranteed)
+    await dst.request().query(`
+      IF NOT EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='ocv_cell_data_${year}_${month}_${day}'
+      )
+      CREATE TABLE dbo.ocv_cell_data_${year}_${month}_${day} (
+          sr_no INT,
+          cell_qrcode VARCHAR(100),
+          voltage VARCHAR(50),
+          ir VARCHAR(50),
+          today_date DATETIME,
+          updated_time DATETIME,
+          machine_location VARCHAR(50),
+          shift VARCHAR(10),
+          used_on_line VARCHAR(10),
+          kvalue VARCHAR(50),
+          grade VARCHAR(50),
+          cell_capacity VARCHAR(50),
+          cell_class VARCHAR(50)
+      );
+    `);
 
-  // -----------------------
-  // Common Redis Payload
-  // -----------------------
-  const payload = {
-    sr_no: row.sr_no,
-    cell_qrcode: row.cell_qrcode,
-    voltage: safeString(row.voltage),
-    ir: safeString(row.ir),
-    today_date: safeDate(row.today_date),
-    updated_time: safeDate(row.updated_time),
-    machine_location: row.machine_location,
-    shift: row.shift,
-    used_on_line: row.used_on_line,
-    kvalue: safeString(row.kvalue),
-    grade: row.grade,
-    cell_capacity: safeString(row.cell_capacity),
-    cell_class: row.cell_class
-  };
+    // REDIS INIT
+    await redis.hset(redisKey, "initialized", "1");
 
-  // -----------------------
-  // SQL INSERT
-  // -----------------------
-  if (check.recordset.length === 0) {
-    await dst.request()
-      .input("sr_no", sql.Int, row.sr_no)
-      .input("cell_qrcode", sql.VarChar, row.cell_qrcode)
-      .input("voltage", sql.VarChar, payload.voltage)
-      .input("ir", sql.VarChar, payload.ir)
-      .input("today_date", sql.DateTime, row.today_date)
-      .input("updated_time", sql.DateTime, row.updated_time)
-      .input("machine_location", sql.VarChar, row.machine_location)
-      .input("shift", sql.VarChar, row.shift)
-      .input("used_on_line", sql.VarChar, row.used_on_line)
-      .input("kvalue", sql.VarChar, payload.kvalue)
-      .input("grade", sql.VarChar, row.grade)
-      .input("cell_capacity", sql.VarChar, payload.cell_capacity)
-      .input("cell_class", sql.VarChar, row.cell_class)
-      .query(`
-        INSERT INTO ${tableName}
-        VALUES (@sr_no, @cell_qrcode, @voltage, @ir, @today_date, @updated_time,
-                @machine_location, @shift, @used_on_line, @kvalue, @grade, @cell_capacity, @cell_class)
-      `);
-
-    console.log("✅ SQL INSERTED");
-  }
-  // -----------------------
-  // SQL UPDATE
-  // -----------------------
-  else {
-    await dst.request()
+    // SQL BEFORE UPSERT
+    const check = await dst.request()
       .input("qr", sql.VarChar, qr)
-      .input("voltage", sql.VarChar, payload.voltage)
-      .input("ir", sql.VarChar, payload.ir)
-      .input("today_date", sql.DateTime, row.today_date)
-      .input("updated_time", sql.DateTime, row.updated_time)
-      .input("machine_location", sql.VarChar, row.machine_location)
-      .input("shift", sql.VarChar, row.shift)
-      .input("used_on_line", sql.VarChar, row.used_on_line)
-      .input("kvalue", sql.VarChar, payload.kvalue)
-      .input("grade", sql.VarChar, row.grade)
-      .input("cell_capacity", sql.VarChar, payload.cell_capacity)
-      .input("cell_class", sql.VarChar, row.cell_class)
-      .query(`
-        UPDATE ${tableName}
-        SET voltage=@voltage, ir=@ir, today_date=@today_date, updated_time=@updated_time,
-            machine_location=@machine_location, shift=@shift, used_on_line=@used_on_line,
-            kvalue=@kvalue, grade=@grade, cell_capacity=@cell_capacity, cell_class=@cell_class
-        WHERE cell_qrcode = @qr
-      `);
+      .query(`SELECT * FROM ${tableName} WHERE cell_qrcode = @qr`);
 
-    console.log("🔄 SQL UPDATED");
+    const payload = {
+      sr_no: row.sr_no,
+      cell_qrcode: row.cell_qrcode,
+      voltage: safeString(row.voltage),
+      ir: safeString(row.ir),
+      today_date: safeDate(row.today_date),
+      updated_time: safeDate(row.updated_time),
+      machine_location: row.machine_location,
+      shift: row.shift,
+      used_on_line: row.used_on_line,
+      kvalue: safeString(row.kvalue),
+      grade: row.grade,
+      cell_capacity: safeString(row.cell_capacity),
+      cell_class: row.cell_class
+    };
+
+    // INSERT OR UPDATE
+    if (check.recordset.length === 0) {
+      await dst.request()
+        .input("sr_no", sql.Int, row.sr_no)
+        .input("cell_qrcode", sql.VarChar, row.cell_qrcode)
+        .input("voltage", sql.VarChar, payload.voltage)
+        .input("ir", sql.VarChar, payload.ir)
+        .input("today_date", sql.DateTime, row.today_date)
+        .input("updated_time", sql.DateTime, row.updated_time)
+        .input("machine_location", sql.VarChar, row.machine_location)
+        .input("shift", sql.VarChar, row.shift)
+        .input("used_on_line", sql.VarChar, row.used_on_line)
+        .input("kvalue", sql.VarChar, payload.kvalue)
+        .input("grade", sql.VarChar, row.grade)
+        .input("cell_capacity", sql.VarChar, payload.cell_capacity)
+        .input("cell_class", sql.VarChar, row.cell_class)
+        .query(`
+          INSERT INTO ${tableName}
+          VALUES (@sr_no, @cell_qrcode, @voltage, @ir, @today_date, @updated_time,
+                  @machine_location, @shift, @used_on_line, @kvalue, @grade,
+                  @cell_capacity, @cell_class)
+        `);
+
+      console.log("✅ SQL INSERTED");
+    } else {
+      await dst.request()
+        .input("qr", sql.VarChar, qr)
+        .input("voltage", sql.VarChar, payload.voltage)
+        .input("ir", sql.VarChar, payload.ir)
+        .input("today_date", sql.DateTime, row.today_date)
+        .input("updated_time", sql.DateTime, row.updated_time)
+        .input("machine_location", sql.VarChar, row.machine_location)
+        .input("shift", sql.VarChar, row.shift)
+        .input("used_on_line", sql.VarChar, row.used_on_line)
+        .input("kvalue", sql.VarChar, payload.kvalue)
+        .input("grade", sql.VarChar, row.grade)
+        .input("cell_capacity", sql.VarChar, payload.cell_capacity)
+        .input("cell_class", sql.VarChar, row.cell_class)
+        .query(`
+          UPDATE ${tableName}
+          SET voltage=@voltage, ir=@ir, today_date=@today_date, updated_time=@updated_time,
+              machine_location=@machine_location, shift=@shift, used_on_line=@used_on_line,
+              kvalue=@kvalue, grade=@grade, cell_capacity=@cell_capacity, cell_class=@cell_class
+          WHERE cell_qrcode = @qr
+        `);
+
+      console.log("🔄 SQL UPDATED");
+    }
+
+    // REDIS UPSERT
+    await redis.hset(redisKey, qr, JSON.stringify(payload));
+    console.log("📦 Redis update done");
+
+    // DELETE SOURCE ROW
+    await src.request()
+      .input("qr", sql.VarChar, qr)
+      .query(`DELETE FROM taco_treceability.ocv_machine_data_mirror WHERE cell_qrcode = @qr`);
+
+    console.log("🗑️ SOURCE ROW DELETED");
+
+  } finally {
+    // IMPORTANT: Close connections
+    srcPool.close();
+    dstPool.close();
   }
-
-  // -----------------------
-  // REDIS INSERT/UPDATE
-  // -----------------------
-  await redis.hset(redisKey, qr, JSON.stringify(payload));
-  console.log("📦 Redis update done");
-
-  // -----------------------
-  // DELETE SOURCE
-  // -----------------------
-  await src.request()
-    .input("qr", sql.VarChar, qr)
-    .query(`DELETE FROM taco_treceability.ocv_machine_data_mirror WHERE cell_qrcode = @qr`);
-
-  console.log("🗑️ SOURCE ROW DELETED");
 }
 
 // -------------------------
