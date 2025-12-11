@@ -1,5 +1,23 @@
 import pyodbc
 import time
+import redis
+import json
+
+# -----------------------------------
+# REDIS CONFIG
+# -----------------------------------
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 31
+
+# Connect to Redis
+r = redis.StrictRedis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
+
+
+# Safe string conversion
+def safe(val):
+    return "" if val is None else str(val)
+
 
 # -----------------------------------
 # DB CONFIGS
@@ -18,6 +36,7 @@ sqlConfig2 = {
     "password": "admin",
 }
 
+
 # -----------------------------------
 # CONNECT FUNCTION
 # -----------------------------------
@@ -31,6 +50,7 @@ def connect_db(config):
         f"TrustServerCertificate=yes;"
     )
     return conn
+
 
 # -----------------------------------
 # MAPPING TABLES
@@ -51,6 +71,7 @@ dayMap = {
 }
 
 specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"]
+
 
 # -----------------------------------
 # PROCESS ONE RECORD
@@ -87,14 +108,9 @@ def process_record(src_conn, dst_conn):
     print("Plant code:", code12_13)
     print("Batch code:", dateCode)
 
-    yearChar = dateCode[0]
-    monthChar = dateCode[1]
-    dayChar = dateCode[2]
-
-    # Mapping
-    yearValue = yearMap.get(yearChar)
-    monthValue = monthMap.get(monthChar)
-    dayValue = dayMap.get(dayChar)
+    yearValue = yearMap.get(dateCode[0])
+    monthValue = monthMap.get(dateCode[1])
+    dayValue = dayMap.get(dateCode[2])
 
     if not yearValue or not monthValue or not dayValue:
         print("❌ ERROR: Mapping failed! Skipping QR:", qr)
@@ -145,6 +161,7 @@ def process_record(src_conn, dst_conn):
     exists = dst_cursor.fetchone()
 
     if not exists:
+        # INSERT SQL
         dst_cursor.execute(f"""
             INSERT INTO {tableName}
             (cellqr, voltage, ir, class_grade, capacity, thickness, k_value,
@@ -158,7 +175,32 @@ def process_record(src_conn, dst_conn):
         ))
 
         dst_conn.commit()
+
         print(f"✅ INSERTED → {qr}")
+
+        # -----------------------------------
+        # INSERT INTO REDIS (NEW PART)
+        # -----------------------------------
+        row_dict = {
+            "cellqr": safe(qr),
+            "voltage": safe(row.voltage),
+            "ir": safe(row.ir),
+            "class_grade": safe(row.cell_class),
+            "capacity": safe(row.cell_capacity),
+            "thickness": "",
+            "k_value": "",
+            "negative_voltage": "",
+            "cell_status": "OK",
+            "ocv_mc_no": safe(row.machine_location),
+            "first_para_time": safe(row.today_date),
+            "last_para_time": safe(row.today_date),
+            "laser_status": "",
+            "batch": safe(dateCode),
+            "plant_code": safe(code12_13)
+        }
+
+        r.set(f"cell:{qr}", json.dumps(row_dict))
+        print(f"📦 REDIS → Stored cell:{qr}")
 
     else:
         print(f"⚠ Already exists → {qr}")
