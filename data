@@ -1,13 +1,196 @@
-IF NOT EXISTS (
-    SELECT 1 
-    FROM sys.schemas 
-    WHERE name = 'taco_treceability'
-)
-BEGIN
-    EXEC('CREATE SCHEMA taco_treceability');
-END
-GO
+const sql = require("mssql");
 
-USE master;
-ALTER DATABASE taco_treceability_OCV SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-DROP DATABASE taco_treceability_OCV;
+// -------------------------
+// DB CONFIGS
+// -------------------------
+const sqlConfig1 = {
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability",
+  server: "10.9.4.28",
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
+};
+
+const sqlConfig2 = {
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability_OVC",
+  server: "10.9.4.28",
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
+};
+
+// -------------------------
+// MAPPING TABLES
+// -------------------------
+const yearMap = {
+  B: 21, C: 22, D: 23, E: 24, F: 25, G: 26, H: 27, J: 28, K: 29, L: 30,
+  M: 31, N: 32, P: 33, R: 34, S: 35, T: 36, V: 37, W: 38, X: 39, Y: 40,
+  1: 41, 2: 42, 3: 43, 4: 44, 5: 45, 6: 46, 7: 47, 8: 48, 9: 49, A: 50
+};
+
+const monthMap = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, A: 10, B: 11, C: 12 };
+
+const dayMap = {
+  1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9,
+  A: 10, B: 11, C: 12, D: 13, E: 14, F: 15, G: 16, H: 17, J: 18, K: 19,
+  L: 20, M: 21, N: 22, P: 23, R: 24, S: 25, T: 26, V: 27, W: 28, X: 29,
+  Y: 30, 0: 31
+};
+
+const specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"];
+
+// Safe string
+function safeString(val) {
+  return val === null || val === undefined ? null : val.toString();
+}
+
+// -------------------------
+// PROCESS ONE RECORD
+// -------------------------
+async function processRecord() {
+  const src = await sql.connect(sqlConfig1);
+  const dst = await sql.connect(sqlConfig2);
+
+  const fetch = await src.request().query(`
+        SELECT TOP 1 *
+        FROM taco_treceability.ocv_machine_data_mirror
+        ORDER BY sr_no ASC
+  `);
+
+  if (fetch.recordset.length === 0) {
+    console.log("No new records...");
+    return;
+  }
+
+  const row = fetch.recordset[0];
+  const qr = row.cell_qrcode;
+
+  console.log("\n================ NEW RECORD ================");
+  console.log("QR CODE:", qr);
+
+  if (!qr || qr.length < 16) {
+    console.error("❌ ERROR: QR too short, skipping:", qr);
+    return;
+  }
+
+  const code12_13 = qr.substring(12, 14);
+  let dateCode = specialCodes.includes(code12_13) ? qr.substring(14, 17) : qr.substring(8, 11);
+
+  const yearChar = dateCode[0];
+  const monthChar = dateCode[1];
+  const dayChar = dateCode[2];
+
+  const yearValue = yearMap[yearChar];
+  const monthValue = monthMap[monthChar];
+  const dayValue = dayMap[dayChar];
+
+  if (!yearValue || !monthValue || !dayValue) {
+    console.error("❌ ERROR: Mapping failed! Skipping QR:", qr);
+    return;
+  }
+
+  const year = 2000 + yearValue;
+  const month = monthValue.toString().padStart(2, "0");
+  const day = dayValue.toString().padStart(2, "0");
+
+  const tableName = `ocvcell_inventory_data_${year}_${month}_${day}`;
+  console.log("Target Table:", tableName);
+
+  // -------------------------
+  // CREATE NEW INVENTORY TABLE
+  // -------------------------
+  await dst.request().query(`
+    IF NOT EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='${tableName}'
+    )
+    CREATE TABLE dbo.${tableName} (
+        sr_no INT IDENTITY(1,1) NOT NULL,
+        cellqr NVARCHAR(50),
+        voltage FLOAT,
+        ir FLOAT,
+        class_grade NVARCHAR(30),
+        capacity INT,
+        thickness FLOAT,
+        k_value FLOAT,
+        negative_voltage FLOAT,
+        cell_status NVARCHAR(20),
+        ocv_mc_no NVARCHAR(40),
+        first_para_time DATETIME,
+        last_para_time DATETIME,
+        laser_status VARCHAR(50),
+        batch VARCHAR(100),
+        plant_code VARCHAR(50)
+    );
+  `);
+
+  // -------------------------
+  // CHECK EXISTING RECORD
+  // -------------------------
+  const check = await dst.request()
+    .input("qr", sql.VarChar, qr)
+    .query(`SELECT * FROM ${tableName} WHERE cellqr = @qr`);
+
+  if (check.recordset.length === 0) {
+    // -------------------------
+    // INSERT NEW RECORD
+    // -------------------------
+    await dst.request()
+      .input("cellqr", sql.VarChar, qr)
+      .input("voltage", sql.Float, row.voltage)
+      .input("ir", sql.Float, row.ir)
+      .input("class_grade", sql.VarChar, row.cell_class)
+      .input("capacity", sql.Int, row.cell_capacity)
+      .input("ocv_mc_no", sql.VarChar, row.machine_location)
+      .input("first_para_time", sql.DateTime, row.today_date)
+      .input("last_para_time", sql.DateTime, row.today_date)
+      .input("batch", sql.VarChar, dateCode)
+      .input("plant_code", sql.VarChar, code12_13)
+      .query(`
+        INSERT INTO ${tableName}
+        (cellqr, voltage, ir, class_grade, capacity, thickness, k_value,
+         negative_voltage, cell_status, ocv_mc_no, first_para_time, last_para_time,
+         laser_status, batch, plant_code)
+        VALUES (
+          @cellqr, @voltage, @ir, @class_grade, @capacity,
+          NULL, NULL, NULL, 'OK',
+          @ocv_mc_no, @first_para_time, @last_para_time,
+          NULL, @batch, @plant_code
+        )
+      `);
+
+    console.log(`✅ INSERTED → ${qr}`);
+  } else {
+    console.log(`⚠ Already exists → ${qr}`);
+  }
+
+  // -------------------------
+  // DELETE SOURCE RECORD
+  // -------------------------
+  await src.request()
+    .input("qr", sql.VarChar, qr)
+    .query(`
+        DELETE FROM taco_treceability.ocv_machine_data_mirror
+        WHERE cell_qrcode = @qr
+    `);
+
+  console.log(`🗑️ DELETED SOURCE → ${qr}`);
+}
+
+// -------------------------
+// CONTINUOUS LOOP
+// -------------------------
+async function start() {
+  while (true) {
+    try {
+      await processRecord();
+    } catch (err) {
+      console.error("ERROR:", err);
+    }
+    await new Promise(res => setTimeout(res, 1000));
+  }
+}
+
+start();
