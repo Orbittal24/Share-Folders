@@ -177,7 +177,7 @@ def process_record(src_conn, dst_conn):
 
     if not exists:
 
-        # INSERT USING NEW FIELD MAPPINGS
+        # INSERT NEW SQL RECORD
         dst_cursor.execute(f"""
             INSERT INTO {tableName}
             (cellqr, voltage, ir, class_grade, capacity, thickness, k_value,
@@ -211,7 +211,43 @@ def process_record(src_conn, dst_conn):
     else:
         print(f"⚠ Already exists → {qr}")
 
-        # UPDATE Redis also
+        # UPDATE SQL RECORD
+        dst_cursor.execute(f"""
+            UPDATE {tableName}
+            SET
+                voltage = ?,
+                ir = ?,
+                class_grade = ?,
+                capacity = ?,
+                thickness = ?,
+                k_value = ?,
+                negative_voltage = ?,
+                ocv_mc_no = ?,
+                last_para_time = ?,
+                laser_status = ?,
+                batch = ?,
+                plant_code = ?
+            WHERE cellqr = ?
+        """, (
+            row.voltage,
+            row.ir,
+            row.grade,
+            row.cell_capacity,
+            row.cell_thikness,
+            row.kvalue,
+            row.cell_nigative_voltage,
+            row.used_on_line,
+            row.updated_time,
+            row.laser_status,
+            dateCode,
+            code12_13,
+            qr
+        ))
+
+        dst_conn.commit()
+        print(f"♻️ SQL UPDATED → {qr}")
+
+        # UPDATE Redis
         r.set(f"cell:{qr}", json.dumps(row_dict))
         print(f"🔄 REDIS UPDATED → cell:{qr}")
 
