@@ -1,49 +1,237 @@
-insert
+import pyodbc
+import time
+import redis
+import json
 
-CREATE TRIGGER trg_ocv_machine_data_xng_after_insert
-ON taco_treceability.ocv_machine_data_xng
-AFTER INSERT
-AS
-BEGIN
-    SET NOCOUNT ON;
+# -----------------------------------
+# REDIS CONFIG
+# -----------------------------------
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 31
 
-    INSERT INTO taco_treceability.ocv_machine_data_xng_mirrior
-    (
-        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
-        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
-        cell_thikness, cell_nigative_voltage, laser_status
+# Connect to Redis
+r = redis.StrictRedis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
+
+
+# Safe string conversion
+def safe(val):
+    return "" if val is None else str(val)
+
+
+# -----------------------------------
+# DB CONFIGS
+# -----------------------------------
+sqlConfig1 = {
+    "server": "10.9.4.28",
+    "database": "taco_treceability",
+    "user": "user_mis",
+    "password": "admin",
+}
+
+sqlConfig2 = {
+    "server": "10.9.4.28",
+    "database": "ocv_inventory_master",
+    "user": "user_mis",
+    "password": "admin",
+}
+
+
+# -----------------------------------
+# CONNECT FUNCTION
+# -----------------------------------
+def connect_db(config):
+    conn = pyodbc.connect(
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={config['server']};"
+        f"DATABASE={config['database']};"
+        f"UID={config['user']};"
+        f"PWD={config['password']};"
+        f"TrustServerCertificate=yes;"
     )
-    SELECT
-        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
-        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
-        cell_thikness, cell_nigative_voltage, laser_status
-    FROM inserted;
-END;
-GO
+    return conn
 
 
-//////////////////////////////////////////////
+# -----------------------------------
+# MAPPING TABLES
+# -----------------------------------
+yearMap = {
+    "B": 21, "C": 22, "D": 23, "E": 24, "F": 25, "G": 26, "H": 27, "J": 28, "K": 29, "L": 30,
+    "M": 31, "N": 32, "P": 33, "R": 34, "S": 35, "T": 36, "V": 37, "W": 38, "X": 39, "Y": 40,
+    "1": 41, "2": 42, "3": 43, "4": 44, "5": 45, "6": 46, "7": 47, "8": 48, "9": 49, "A": 50,
+}
 
-update
+monthMap = {"1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "A": 10, "B": 11, "C": 12}
 
-CREATE TRIGGER trg_ocv_machine_data_xng_after_update
-ON taco_treceability.ocv_machine_data_xng
-AFTER UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
+dayMap = {
+    "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
+    "A": 10, "B": 11, "C": 12, "D": 13, "E": 14, "F": 15, "G": 16, "H": 17, "J": 18, "K": 19,
+    "L": 20, "M": 21, "N": 22, "P": 23, "R": 24, "S": 25, "T": 26, "V": 27, "W": 28, "X": 29,
+    "Y": 30, "0": 31,
+}
 
-    INSERT INTO taco_treceability.ocv_machine_data_xng_mirrior
-    (
-        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
-        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
-        cell_thikness, cell_nigative_voltage, laser_status
+specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"]
+
+
+# -----------------------------------
+# PROCESS ONE RECORD
+# -----------------------------------
+def process_record(src_conn, dst_conn):
+
+    src_cursor = src_conn.cursor()
+    dst_cursor = dst_conn.cursor()
+
+    # Fetch top 1 from NEW TABLE
+    src_cursor.execute("""
+        SELECT TOP 1 *
+        FROM taco_treceability.ocv_machine_data_xng_mirrior
+        ORDER BY sr_no ASC
+    """)
+    row = src_cursor.fetchone()
+
+    if not row:
+        print("No new records...")
+        return
+
+    qr = row.cell_qrcode
+    print("\n================ NEW RECORD ================")
+    print("QR CODE:", qr)
+
+    if not qr or len(qr) < 16:
+        print("❌ ERROR: QR too short, skipping")
+        return
+
+    # Extract Plant Code & Batch Code
+    code12_13 = qr[12:14]
+    dateCode = qr[14:17] if code12_13 in specialCodes else qr[8:11]
+
+    print("Plant code:", code12_13)
+    print("Batch code:", dateCode)
+
+    yearValue = yearMap.get(dateCode[0])
+    monthValue = monthMap.get(dateCode[1])
+    dayValue = dayMap.get(dateCode[2])
+
+    if not yearValue or not monthValue or not dayValue:
+        print("❌ ERROR: Mapping failed! Skipping QR:", qr)
+        return
+
+    year = 2000 + yearValue
+    month = f"{monthValue:02d}"
+    day = f"{dayValue:02d}"
+
+    tableName = f"ocvcell_inventory_data_{year}_{month}_{day}"
+    print("Target Table:", tableName)
+
+    # CREATE TABLE IF NOT EXISTS
+    dst_cursor.execute(f"""
+        IF NOT EXISTS (
+            SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_NAME='{tableName}'
+        )
+        BEGIN
+            CREATE TABLE {tableName} (
+                sr_no INT IDENTITY(1,1) PRIMARY KEY,
+                cellqr NVARCHAR(50),
+                voltage FLOAT,
+                ir FLOAT,
+                class_grade NVARCHAR(30),
+                capacity INT,
+                thickness FLOAT,
+                k_value FLOAT,
+                negative_voltage FLOAT,
+                cell_status NVARCHAR(20),
+                ocv_mc_no NVARCHAR(40),
+                first_para_time DATETIME,
+                last_para_time DATETIME,
+                laser_status VARCHAR(50),
+                batch VARCHAR(100),
+                plant_code VARCHAR(50)
+            );
+        END
+    """)
+    dst_conn.commit()
+
+    # CHECK IF EXISTS
+    dst_cursor.execute(f"SELECT * FROM {tableName} WHERE cellqr = ?", qr)
+    exists = dst_cursor.fetchone()
+
+    if not exists:
+
+        # INSERT USING NEW FIELD MAPPINGS
+        dst_cursor.execute(f"""
+            INSERT INTO {tableName}
+            (cellqr, voltage, ir, class_grade, capacity, thickness, k_value,
+             negative_voltage, cell_status, ocv_mc_no, first_para_time, last_para_time,
+             laser_status, batch, plant_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OK', ?, ?, ?, ?, ?, ?)
+        """, (
+            qr,
+            row.voltage,
+            row.ir,
+            row.grade,
+            row.cell_capacity,
+            row.cell_thikness,
+            row.kvalue,
+            row.cell_nigative_voltage,
+            row.used_on_line,
+            row.today_date,
+            row.updated_time,
+            row.laser_status,
+            dateCode,
+            code12_13
+        ))
+
+        dst_conn.commit()
+        print(f"✅ INSERTED → {qr}")
+
+        # STORE TO REDIS USING NEW FIELD MAPPING
+        row_dict = {
+            "cellqr": safe(qr),
+            "voltage": safe(row.voltage),
+            "ir": safe(row.ir),
+            "class_grade": safe(row.grade),
+            "capacity": safe(row.cell_capacity),
+            "thickness": safe(row.cell_thikness),
+            "k_value": safe(row.kvalue),
+            "negative_voltage": safe(row.cell_nigative_voltage),
+            "cell_status": "OK",
+            "ocv_mc_no": safe(row.used_on_line),
+            "first_para_time": safe(row.today_date),
+            "last_para_time": safe(row.updated_time),
+            "laser_status": safe(row.laser_status),
+            "batch": safe(dateCode),
+            "plant_code": safe(code12_13)
+        }
+
+        r.set(f"cell:{qr}", json.dumps(row_dict))
+        print(f"📦 REDIS → Stored cell:{qr}")
+
+    else:
+        print(f"⚠ Already exists → {qr}")
+
+    # DELETE SOURCE RECORD FROM NEW TABLE
+    src_cursor.execute(
+        "DELETE FROM taco_treceability.ocv_machine_data_xng_mirrior WHERE cell_qrcode = ?",
+        qr
     )
-    SELECT
-        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
-        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
-        cell_thikness, cell_nigative_voltage, laser_status
-    FROM inserted;
-END;
-GO
+    src_conn.commit()
+    print(f"🗑️ DELETED SOURCE → {qr}")
 
+
+# -----------------------------------
+# CONTINUOUS LOOP
+# -----------------------------------
+def start():
+    src_conn = connect_db(sqlConfig1)
+    dst_conn = connect_db(sqlConfig2)
+
+    while True:
+        try:
+            process_record(src_conn, dst_conn)
+        except Exception as e:
+            print("ERROR:", e)
+        time.sleep(1)
+
+
+start()
