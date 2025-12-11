@@ -156,6 +156,25 @@ def process_record(src_conn, dst_conn):
     dst_cursor.execute(f"SELECT * FROM {tableName} WHERE cellqr = ?", qr)
     exists = dst_cursor.fetchone()
 
+    # Prepare row_dict for Redis (used in both cases)
+    row_dict = {
+        "cellqr": safe(qr),
+        "voltage": safe(row.voltage),
+        "ir": safe(row.ir),
+        "class_grade": safe(row.grade),
+        "capacity": safe(row.cell_capacity),
+        "thickness": safe(row.cell_thikness),
+        "k_value": safe(row.kvalue),
+        "negative_voltage": safe(row.cell_nigative_voltage),
+        "cell_status": "OK",
+        "ocv_mc_no": safe(row.used_on_line),
+        "first_para_time": safe(row.today_date),
+        "last_para_time": safe(row.updated_time),
+        "laser_status": safe(row.laser_status),
+        "batch": safe(dateCode),
+        "plant_code": safe(code12_13)
+    }
+
     if not exists:
 
         # INSERT USING NEW FIELD MAPPINGS
@@ -185,30 +204,16 @@ def process_record(src_conn, dst_conn):
         dst_conn.commit()
         print(f"✅ INSERTED → {qr}")
 
-        # STORE TO REDIS USING NEW FIELD MAPPING
-        row_dict = {
-            "cellqr": safe(qr),
-            "voltage": safe(row.voltage),
-            "ir": safe(row.ir),
-            "class_grade": safe(row.grade),
-            "capacity": safe(row.cell_capacity),
-            "thickness": safe(row.cell_thikness),
-            "k_value": safe(row.kvalue),
-            "negative_voltage": safe(row.cell_nigative_voltage),
-            "cell_status": "OK",
-            "ocv_mc_no": safe(row.used_on_line),
-            "first_para_time": safe(row.today_date),
-            "last_para_time": safe(row.updated_time),
-            "laser_status": safe(row.laser_status),
-            "batch": safe(dateCode),
-            "plant_code": safe(code12_13)
-        }
-
+        # Insert into Redis
         r.set(f"cell:{qr}", json.dumps(row_dict))
         print(f"📦 REDIS → Stored cell:{qr}")
 
     else:
         print(f"⚠ Already exists → {qr}")
+
+        # UPDATE Redis also
+        r.set(f"cell:{qr}", json.dumps(row_dict))
+        print(f"🔄 REDIS UPDATED → cell:{qr}")
 
     # DELETE SOURCE RECORD FROM NEW TABLE
     src_cursor.execute(
