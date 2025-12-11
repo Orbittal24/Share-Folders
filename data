@@ -7,3 +7,7 @@ BEGIN
     EXEC('CREATE SCHEMA taco_treceability');
 END
 GO
+
+USE master;
+ALTER DATABASE taco_treceability_OCV SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+DROP DATABASE taco_treceability_OCV;
