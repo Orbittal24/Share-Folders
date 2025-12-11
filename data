@@ -1,58 +1,24 @@
 insert
 
-USE [taco_treceability]
-GO
-
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-CREATE TRIGGER [taco_treceability].[trg_ocv_machine_data_xng_ai]
-ON [taco_treceability].[ocv_machine_data_xng]
+CREATE TRIGGER trg_ocv_machine_data_xng_after_insert
+ON taco_treceability.ocv_machine_data_xng
 AFTER INSERT
 AS
 BEGIN
-    INSERT INTO taco_treceability.ocv_machine_data_xng_mirror
+    SET NOCOUNT ON;
+
+    INSERT INTO taco_treceability.ocv_machine_data_xng_mirrior
     (
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class,
-        cell_thikness,
-        cell_nigative_voltage,
-        laser_status
+        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
+        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
+        cell_thikness, cell_nigative_voltage, laser_status
     )
     SELECT
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class,
-        cell_thikness,
-        cell_nigative_voltage,
-        laser_status
+        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
+        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
+        cell_thikness, cell_nigative_voltage, laser_status
     FROM inserted;
 END;
-GO
-
-ALTER TABLE [taco_treceability].[ocv_machine_data_xng] 
-DISABLE TRIGGER [trg_ocv_machine_data_xng_ai]
 GO
 
 
@@ -60,57 +26,24 @@ GO
 
 update
 
-USE [taco_treceability]
-GO
-
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-CREATE TRIGGER [taco_treceability].[trg_ocv_machine_data_xng_au]
-ON [taco_treceability].[ocv_machine_data_xng]
+CREATE TRIGGER trg_ocv_machine_data_xng_after_update
+ON taco_treceability.ocv_machine_data_xng
 AFTER UPDATE
 AS
 BEGIN
-    INSERT INTO taco_treceability.ocv_machine_data_xng_mirror
+    SET NOCOUNT ON;
+
+    INSERT INTO taco_treceability.ocv_machine_data_xng_mirrior
     (
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class,
-        cell_thikness,
-        cell_nigative_voltage,
-        laser_status
+        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
+        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
+        cell_thikness, cell_nigative_voltage, laser_status
     )
     SELECT
-        cell_qrcode,
-        voltage,
-        ir,
-        today_date,
-        updated_time,
-        machine_location,
-        shift,
-        used_on_line,
-        kvalue,
-        grade,
-        cell_capacity,
-        cell_class,
-        cell_thikness,
-        cell_nigative_voltage,
-        laser_status
-    FROM inserted;   -- new values after UPDATE
+        cell_qrcode, voltage, ir, today_date, updated_time, machine_location,
+        shift, used_on_line, kvalue, grade, cell_capacity, cell_class,
+        cell_thikness, cell_nigative_voltage, laser_status
+    FROM inserted;
 END;
 GO
 
-ALTER TABLE [taco_treceability].[ocv_machine_data_xng] 
-DISABLE TRIGGER [trg_ocv_machine_data_xng_au]
-GO
