@@ -70,19 +70,20 @@ dayMap = {
     "Y": 30, "0": 31,
 }
 
+specialCodes = ["BJ", "CJ", "CR", "GD", "AG", "DR"]
+
 
 # -----------------------------------
 # PROCESS ONE RECORD
 # -----------------------------------
 def process_record(src_conn, dst_conn):
-
     src_cursor = src_conn.cursor()
     dst_cursor = dst_conn.cursor()
 
-    # Fetch top 1 from NEW TABLE
+    # Fetch top 1
     src_cursor.execute("""
-        SELECT TOP 1 *
-        FROM taco_treceability.ocv_machine_data_xng_mirrior
+        SELECT TOP 1 * 
+        FROM taco_treceability.ocv_machine_data_mirror 
         ORDER BY sr_no ASC
     """)
     row = src_cursor.fetchone()
@@ -101,12 +102,7 @@ def process_record(src_conn, dst_conn):
 
     # Extract Plant Code & Batch Code
     code12_13 = qr[12:14]
-
-    # Dynamic logic for dateCode
-    if code12_13 == 'BV':
-        dateCode = qr[8:11]
-    else:
-        dateCode = qr[14:17]
+    dateCode = qr[14:17] if code12_13 in specialCodes else qr[8:11]
 
     print("Plant code:", code12_13)
     print("Batch code:", dateCode)
@@ -126,7 +122,9 @@ def process_record(src_conn, dst_conn):
     tableName = f"ocvcell_inventory_data_{year}_{month}_{day}"
     print("Target Table:", tableName)
 
+    # -----------------------------------
     # CREATE TABLE IF NOT EXISTS
+    # -----------------------------------
     dst_cursor.execute(f"""
         IF NOT EXISTS (
             SELECT 1 FROM INFORMATION_SCHEMA.TABLES
@@ -136,13 +134,13 @@ def process_record(src_conn, dst_conn):
             CREATE TABLE {tableName} (
                 sr_no INT IDENTITY(1,1) PRIMARY KEY,
                 cellqr NVARCHAR(50),
-                voltage NVARCHAR(50),
-                ir NVARCHAR(50),
+                voltage FLOAT,
+                ir FLOAT,
                 class_grade NVARCHAR(30),
                 capacity INT,
-                thickness NVARCHAR(50),
-                k_value NVARCHAR(50),
-                negative_voltage NVARCHAR(50),
+                thickness FLOAT,
+                k_value FLOAT,
+                negative_voltage FLOAT,
                 cell_status NVARCHAR(20),
                 ocv_mc_no NVARCHAR(40),
                 first_para_time DATETIME,
@@ -155,108 +153,71 @@ def process_record(src_conn, dst_conn):
     """)
     dst_conn.commit()
 
-    # CHECK IF EXISTS
+    # -----------------------------------
+    # UPSERT LOGIC
+    # -----------------------------------
     dst_cursor.execute(f"SELECT * FROM {tableName} WHERE cellqr = ?", qr)
     exists = dst_cursor.fetchone()
 
-    # Prepare row_dict for Redis (used in both cases)
-    row_dict = {
-        "cellqr": safe(qr),
-        "voltage": safe(row.voltage),
-        "ir": safe(row.ir),
-        "class_grade": safe(row.grade),
-        "capacity": safe(row.cell_capacity),
-        "thickness": safe(row.cell_thikness),
-        "k_value": safe(row.kvalue),
-        "negative_voltage": safe(row.cell_nigative_voltage),
-        "cell_status": "OK",
-        "ocv_mc_no": safe(row.used_on_line),
-        "first_para_time": safe(row.today_date),
-        "last_para_time": safe(row.updated_time),
-        "laser_status": safe(row.laser_status),
-        "batch": safe(dateCode),
-        "plant_code": safe(code12_13)
-    }
-
-    if not exists:
-
-        # INSERT NEW SQL RECORD
+    if exists:
+        # UPDATE existing record
+        dst_cursor.execute(f"""
+            UPDATE {tableName}
+            SET voltage = ?, ir = ?, class_grade = ?, capacity = ?,
+                ocv_mc_no = ?, first_para_time = ?, last_para_time = ?,
+                batch = ?, plant_code = ?
+            WHERE cellqr = ?
+        """, (
+            row.voltage, row.ir, row.cell_class, row.cell_capacity,
+            row.machine_location, row.today_date, row.today_date,
+            dateCode, code12_13, qr
+        ))
+        dst_conn.commit()
+        print(f"🔄 UPDATED → {qr}")
+    else:
+        # INSERT SQL
         dst_cursor.execute(f"""
             INSERT INTO {tableName}
             (cellqr, voltage, ir, class_grade, capacity, thickness, k_value,
              negative_voltage, cell_status, ocv_mc_no, first_para_time, last_para_time,
              laser_status, batch, plant_code)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OK', ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, 'OK', ?, ?, ?, NULL, ?, ?)
         """, (
-            qr,
-            row.voltage,
-            row.ir,
-            row.grade,
-            row.cell_capacity,
-            row.cell_thikness,
-            row.kvalue,
-            row.cell_nigative_voltage,
-            row.used_on_line,
-            row.today_date,
-            row.updated_time,
-            row.laser_status,
-            dateCode,
-            code12_13
+            qr, row.voltage, row.ir, row.cell_class, row.cell_capacity,
+            row.machine_location, row.today_date, row.today_date,
+            dateCode, code12_13
         ))
-
         dst_conn.commit()
         print(f"✅ INSERTED → {qr}")
 
-        # Insert into Redis
-        r.set(f"cell:{qr}", json.dumps(row_dict))
-        print(f"📦 REDIS → Stored cell:{qr}")
+    # -----------------------------------
+    # UPSERT INTO REDIS
+    # -----------------------------------
+    row_dict = {
+        "cellqr": safe(qr),
+        "voltage": safe(row.voltage),
+        "ir": safe(row.ir),
+        "class_grade": safe(row.cell_class),
+        "capacity": safe(row.cell_capacity),
+        "thickness": "",
+        "k_value": "",
+        "negative_voltage": "",
+        "cell_status": "OK",
+        "ocv_mc_no": safe(row.machine_location),
+        "first_para_time": safe(row.today_date),
+        "last_para_time": safe(row.today_date),
+        "laser_status": "",
+        "batch": safe(dateCode),
+        "plant_code": safe(code12_13)
+    }
+    r.set(f"cell:{qr}", json.dumps(row_dict))  # This will overwrite if already exists
+    print(f"📦 REDIS → Updated cell:{qr}")
 
-    else:
-        print(f"⚠ Already exists → {qr}")
-
-        # UPDATE SQL RECORD
-        dst_cursor.execute(f"""
-            UPDATE {tableName}
-            SET
-                voltage = ?,
-                ir = ?,
-                class_grade = ?,
-                capacity = ?,
-                thickness = ?,
-                k_value = ?,
-                negative_voltage = ?,
-                ocv_mc_no = ?,
-                last_para_time = ?,
-                laser_status = ?,
-                batch = ?,
-                plant_code = ?
-            WHERE cellqr = ?
-        """, (
-            row.voltage,
-            row.ir,
-            row.grade,
-            row.cell_capacity,
-            row.cell_thikness,
-            row.kvalue,
-            row.cell_nigative_voltage,
-            row.used_on_line,
-            row.updated_time,
-            row.laser_status,
-            dateCode,
-            code12_13,
-            qr
-        ))
-
-        dst_conn.commit()
-        print(f"♻️ SQL UPDATED → {qr}")
-
-        # UPDATE Redis
-        r.set(f"cell:{qr}", json.dumps(row_dict))
-        print(f"🔄 REDIS UPDATED → cell:{qr}")
-
-    # DELETE SOURCE RECORD FROM NEW TABLE
+    # -----------------------------------
+    # DELETE SOURCE
+    # -----------------------------------
     src_cursor.execute(
-        "DELETE FROM taco_treceability.ocv_machine_data_xng_mirrior WHERE cell_qrcode = ?",
+        "DELETE FROM taco_treceability.ocv_machine_data_mirror WHERE cell_qrcode = ?",
         qr
     )
     src_conn.commit()
