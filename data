@@ -1,18 +1,3 @@
-SELECT 
-    sr_no, 
-    cell_qrcode, 
-    voltage, 
-    ir, 
-    today_date, 
-    updated_time, 
-    machine_location, 
-    shift, 
-    used_on_line, 
-    kvalue, 
-    grade, 
-    cell_capacity, 
-    cell_class
-FROM 
-    taco_treceability.ocv_machine_data
-WHERE 
-    cell_qrcode NOT LIKE '%BV%';
+UPDATE your_table_name
+SET Process_Name = REPLACE(Process_Name, '(9.2 LL)', '(5.9)')
+WHERE Process_Name LIKE '%(9.2 LL)%';
