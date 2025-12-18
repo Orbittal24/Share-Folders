@@ -1,5 +1,23 @@
+UPDATE {tableName}
 SET voltage = ?, ir = ?, class_grade = ?, capacity = ?,
     thickness = ?, k_value = ?, negative_voltage = ?, laser_status = ?,
     ocv_mc_no = ?, first_para_time = ?, last_para_time = ?,
     batch = ?, plant_code = ?
 WHERE cellqr = ?
+
+(
+    row.voltage,
+    row.ir,
+    row.cell_class,
+    row.cell_capacity,
+    row.thickness,
+    row.k_value,
+    row.negative_voltage,
+    row.laser_status,
+    row.machine_location,
+    row.today_date,
+    row.today_date,
+    dateCode,
+    code12_13,
+    qr
+)
