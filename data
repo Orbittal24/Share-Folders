@@ -32,10 +32,6 @@ const sqlConfig3 = {
 let lastSeenSrNo = 0;
 let pool1, pool2, pool3;
 
-const startFetchLoop = async () => {
-  await fetchLatestRows();
-};
-
 const init = async () => {
   try {
     pool1 = await new sql.ConnectionPool(sqlConfig1).connect();
@@ -53,12 +49,14 @@ const init = async () => {
   }
 };
 
+// Normalize text for process matching
 const normalizeProcess = (text) =>
   text.toLowerCase()
       .replace(/[^a-z0-9+\/\-()& ]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
+// Common words similarity
 const getCommonWordsScore = (a, b) => {
   const setA = new Set(a.split(' '));
   const setB = new Set(b.split(' '));
@@ -66,71 +64,46 @@ const getCommonWordsScore = (a, b) => {
   return common.length / Math.max(setA.size, setB.size);
 };
 
+// List of all unique processes
 const uniqueProcesses = [
-  "BDU -ve to HV -ve busbar (18.4)",
-  "BDU -ve to HV -ve busbar (21.3)",
-  "BDU to M3 +ve busbar (18.4)",
-  "BDU to M3 +ve busbar (21.3)",
-  "BMS bracket installation (18.4)",
-  "BMS bracket installation (21.3)",
-  "BMS to BMS bracket installation (18.4)",
-  "BMS to BMS bracket installation (21.3)",
-  "Breather plug 1 (18.4)",
-  "Breather plug 1 (21.3)",
-  "C plate fixing plate installation (18.4)",
-  "C plate fixing plate installation (21.3)",
-  "Exposion proof valve (18.4)",
-  "Exposion proof valve (21.3)",
-  "HV +ve to relay busbar (18.4)",
-  "HV +ve to relay busbar (21.3)",
-  "HV -ve to BDU -ve busbar (18.4)",
-  "HV -ve to BDU -ve busbar (21.3)",
-  "L plate bracket (18.4)",
-  "L plate bracket (21.3)",
-  "LV to ground (18.4)",
-  "LV to ground (21.3)",
-  "Module fixing (18.4)",
-  "Module fixing (21.3)",
-  "Module plate tie rod assembly (18.4)",
-  "Module plate tie rod assembly (21.3)",
-  "Module side plate to L bracket (18.4)",
-  "Module side plate to L bracket (21.3)",
-  "Module to busbar install M1 +ve to shunt (18.4)",
-  "Module to busbar install M1 +ve to shunt (21.3)",
-  "Module to busbar install M1 to M2 (18.4)",
-  "Module to busbar install M1 to M2 (21.3)",
-  "Module to busbar install M2 +ve to HV MSD +ve (18.4)",
-  "Module to busbar install M2 +ve to HV MSD +ve (21.3)",
-  "Module to busbar install M3 +ve to BDU +ve (18.4)",
-  "Module to busbar install M3 +ve to BDU +ve (21.3)",
-  "Module to busbar install M3 -ve to HV MSD -ve (18.4)",
-  "Module to busbar install M3 -ve to HV MSD -ve (21.3)",
-  "MSD +ve to M2 +ve busbar (18.4)",
-  "MSD +ve to M2 +ve busbar (21.3)",
-  "MSD -ve to M3 -ve busbar (18.4)",
-  "MSD -ve to M3 -ve busbar (21.3)",
-  "Relay -ve to HV +ve and main -ve (18.4)",
-  "Relay -ve to HV +ve and main -ve (21.3)",
-  "Relay to shunt busbar (18.4)",
-  "Relay to shunt busbar (21.3)",
-  "Shunt to M1 -ve busbar (18.4)",
-  "Shunt to M1 -ve busbar (21.3)",
-  "Shunt to relay busbar (18.4)",
-  "Shunt to relay busbar (21.3)",
-  "Side bracket self tapping lower (18.4)",
-  "Side bracket self tapping lower (21.3)",
-  "Side bracket self tapping upper (18.4)",
-  "Side bracket self tapping upper (21.3)",
-  "Tray cover fitment (18.4)",
-  "Tray cover fitment (21.3)",
+  "BDU -ve to HV -ve busbar (18.4)", "BDU -ve to HV -ve busbar (21.3)",
+  "BDU to M3 +ve busbar (18.4)", "BDU to M3 +ve busbar (21.3)",
+  "BMS bracket installation (18.4)", "BMS bracket installation (21.3)",
+  "BMS to BMS bracket installation (18.4)", "BMS to BMS bracket installation (21.3)",
+  "Breather plug 1 (18.4)", "Breather plug 1 (21.3)",
+  "C plate fixing plate installation (18.4)", "C plate fixing plate installation (21.3)",
+  "Exposion proof valve (18.4)", "Exposion proof valve (21.3)",
+  "HV +ve to relay busbar (18.4)", "HV +ve to relay busbar (21.3)",
+  "HV -ve to BDU -ve busbar (18.4)", "HV -ve to BDU -ve busbar (21.3)",
+  "L plate bracket (18.4)", "L plate bracket (21.3)",
+  "LV to ground (18.4)", "LV to ground (21.3)",
+  "Module fixing (18.4)", "Module fixing (21.3)",
+  "Module plate tie rod assembly (18.4)", "Module plate tie rod assembly (21.3)",
+  "Module side plate to L bracket (18.4)", "Module side plate to L bracket (21.3)",
+  "Module to busbar install M1 +ve to shunt (18.4)", "Module to busbar install M1 +ve to shunt (21.3)",
+  "Module to busbar install M1 to M2 (18.4)", "Module to busbar install M1 to M2 (21.3)",
+  "Module to busbar install M2 +ve to HV MSD +ve (18.4)", "Module to busbar install M2 +ve to HV MSD +ve (21.3)",
+  "Module to busbar install M3 +ve to BDU +ve (18.4)", "Module to busbar install M3 +ve to BDU +ve (21.3)",
+  "Module to busbar install M3 -ve to HV MSD -ve (18.4)", "Module to busbar install M3 -ve to HV MSD -ve (21.3)",
+  "MSD +ve to M2 +ve busbar (18.4)", "MSD +ve to M2 +ve busbar (21.3)",
+  "MSD -ve to M3 -ve busbar (18.4)", "MSD -ve to M3 -ve busbar (21.3)",
+  "Relay -ve to HV +ve and main -ve (18.4)", "Relay -ve to HV +ve and main -ve (21.3)",
+  "Relay to shunt busbar (18.4)", "Relay to shunt busbar (21.3)",
+  "Shunt to M1 -ve busbar (18.4)", "Shunt to M1 -ve busbar (21.3)",
+  "Shunt to relay busbar (18.4)", "Shunt to relay busbar (21.3)",
+  "Side bracket self tapping lower (18.4)", "Side bracket self tapping lower (21.3)",
+  "Side bracket self tapping upper (18.4)", "Side bracket self tapping upper (21.3)",
+  "Tray cover fitment (18.4)", "Tray cover fitment (21.3)",
 ];
 
-const fetchLatestRows = async () => {
+// ----- Fetch loop -----
+const startFetchLoop = async () => {
   try {
     const processListSQL = uniqueProcesses.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
 
+    // Fetch multiple rows
     const result = await pool1.request().query(`
-      SELECT TOP(1) sr_no, pack_name, module_name, module_barcode, torque, angle,
+      SELECT TOP(10) sr_no, pack_name, module_name, module_barcode, torque, angle,
              process_name, date_dd, pack_no, smoke_sensor_linked_pack_no, bypass_operator
       FROM taco_treceability.torque_details_EIP_mirror
       WHERE sr_no > ${lastSeenSrNo}
@@ -139,10 +112,16 @@ const fetchLatestRows = async () => {
       ORDER BY sr_no ASC
     `);
 
-    console.log('result', result);
+    if (!result.recordset.length) {
+      return setTimeout(startFetchLoop, 3000);
+    }
 
     for (const row of result.recordset) {
+      if (row.sr_no > lastSeenSrNo) lastSeenSrNo = row.sr_no; // Update immediately
+
       const processedPackNo = row.pack_no === 'not_linked' ? 'not_linked' : row.pack_no.slice(-6);
+
+      // Fetch Pack_ID
       const packRes = await pool2.request().query(`
         SELECT Pack_ID FROM taco_treceability.master_pack
         WHERE Pack_Name='${row.pack_name}'
@@ -151,37 +130,38 @@ const fetchLatestRows = async () => {
       const packID = packRes.recordset[0].Pack_ID;
 
       let scanType, scanID, moduleName, modulebarQR;
+
+      // Determine scanType
       if (!row.smoke_sensor_linked_pack_no || row.smoke_sensor_linked_pack_no.toLowerCase() === 'null') {
         const modRes = await pool2.request().query(`
           SELECT Module_Name, Module_ID FROM taco_treceability.master_module
           WHERE moduleNumber='${row.module_name}' AND Pack_ID='${packID}'
         `);
-
         if (!modRes.recordset.length) continue;
         scanType = 'Module';
         scanID = modRes.recordset[0].Module_ID;
         moduleName = modRes.recordset[0].Module_Name;
-      } else {
-        const bomRes = await pool2.request().query(`
-          SELECT BOM_ID FROM taco_treceability.BOM_Master
-          WHERE BOM_Name='Smoke sensor' AND Pack_ID='${packID}'
-        `);
-        if (!bomRes.recordset.length) continue;
-        scanType = 'BOM';
-        scanID = bomRes.recordset[0].BOM_ID;
-      }
-
-      if (row.module_barcode.startsWith('DJ')) {
+      } else if (row.module_barcode.startsWith('DJ')) {
+        scanType = 'Pack';
         const qrRes = await pool1.request().query(`
           SELECT CustomerQRCode FROM taco_treceability.final_qrcode_details
           WHERE final_qrcode='${row.pack_no}'
         `);
         if (!qrRes.recordset.length) continue;
-        scanType = 'Pack';
         modulebarQR = qrRes.recordset[0].CustomerQRCode;
+        scanID = packID;
+      } else {
+        scanType = 'BOM';
+        const bomRes = await pool2.request().query(`
+          SELECT BOM_ID FROM taco_treceability.BOM_Master
+          WHERE BOM_Name='Smoke sensor' AND Pack_ID='${packID}'
+        `);
+        if (!bomRes.recordset.length) continue;
+        scanID = bomRes.recordset[0].BOM_ID;
       }
 
-      const [pmRes, pmResPack, pmResBom] = await Promise.all([        
+      // Fetch process master records
+      const [pmRes, pmResPack, pmResBom] = await Promise.all([
         pool3.request().query(`
           SELECT Process_Name, Process_ID, Total_Count, Scan_Name
           FROM taco_treceability.Process_Master
@@ -206,7 +186,7 @@ const fetchLatestRows = async () => {
       let best = { score:0, processID:null, totalCount:null, scanName:null, processName:'' };
       let best1 = {...best}, best2 = {...best};
 
-      // Module match logic
+      // ----- Module match -----
       if (scanType === 'Module') {
         const inputNorm = normalizeProcess(row.process_name);
         const modKey = moduleName.toLowerCase();
@@ -222,20 +202,17 @@ const fetchLatestRows = async () => {
           else if (cand.startsWith(inputNorm)) score = 0.99;
           else if (cand.includes(inputNorm)) score = 0.95;
           else if (inputNorm.includes(cand)) score = 0.9;
-          else {
-            score = 0.7 * getCommonWordsScore(inputNorm, cand) +
-                    0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
-          }
+          else score = 0.7 * getCommonWordsScore(inputNorm, cand) +
+                      0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
 
-          if (score > best.score ||
-              (score === best.score && p.Process_Name.length < best.processName.length)) {
+          if (score > best.score || (score === best.score && p.Process_Name.length < best.processName.length)) {
             best = { score, processID: p.Process_ID, totalCount: p.Total_Count, scanName: p.Scan_Name, processName: p.Process_Name };
           }
         }
         if (!best.processID || best.score < 0.5) continue;
       }
 
-      // Pack match logic
+      // ----- Pack match -----
       else if (scanType === 'Pack') {
         const inputNorm = normalizeProcess(row.process_name);
         const inputRaw = row.process_name.toLowerCase();
@@ -244,16 +221,13 @@ const fetchLatestRows = async () => {
         for (const p of pmResPack.recordset) {
           const raw = p.Process_Name.toLowerCase();
           const cand = normalizeProcess(p.Process_Name);
-
-          let score=0;
-          if (inputRaw === raw) score=1;
-          else if (raw.startsWith(inputRaw)) score=0.99;
-          else if (raw.includes(inputRaw)) score=0.95;
-          else if (inputRaw.includes(raw)) score=0.9;
-          else {
-            score = 0.7 * getCommonWordsScore(inputNorm, cand) +
-                    0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
-          }
+          let score = 0;
+          if (inputRaw === raw) score = 1;
+          else if (raw.startsWith(inputRaw)) score = 0.99;
+          else if (raw.includes(inputRaw)) score = 0.95;
+          else if (inputRaw.includes(raw)) score = 0.9;
+          else score = 0.7 * getCommonWordsScore(inputNorm, cand) +
+                      0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
 
           arr.push({ score, processID: p.Process_ID, totalCount: p.Total_Count, scanName: p.Scan_Name, processName: p.Process_Name });
         }
@@ -262,127 +236,115 @@ const fetchLatestRows = async () => {
         if (!best1.processID || best1.score < 0.5) continue;
       }
 
-      // BOM match logic
+      // ----- BOM match -----
       else if (scanType === 'BOM') {
         const inputWords = row.process_name.match(/[\w()+\-\/&]+/g);
         if (!inputWords || inputWords.length === 0) continue;
-      
+
         const matches = [];
-      
         for (const p of pmResBom.recordset) {
           const processWords = p.Process_Name.match(/[\w()+\-\/&]+/g) || [];
           const allMatch = inputWords.every(word => processWords.includes(word));
-          if (allMatch) {
-            matches.push({
-              score: 1,
-              processID: p.Process_ID,
-              totalCount: p.Total_Count,
-              scanName: p.Scan_Name,
-              processName: p.Process_Name
-            });
-          }
+          if (allMatch) matches.push({
+            score: 1,
+            processID: p.Process_ID,
+            totalCount: p.Total_Count,
+            scanName: p.Scan_Name,
+            processName: p.Process_Name
+          });
         }
-      
         matches.sort((a, b) => b.score - a.score || a.processName.length - b.processName.length);
         best2 = matches[0];
         if (!best2?.processID || best2.score < 0.5) continue;
       }
 
-      // API calls & deletions
-      const handleCompletedProcess = async (putUrl, module_barcode, row) => {
-        try {
-          const processIdMatch = putUrl.match(/Process_ID=(\d+)/);
-          const processId = processIdMatch ? processIdMatch[1] : null;
-
-          if (!processId) {
-            console.error("Process_ID not found in PUT_url:", putUrl);
-          } else {
-            const stationResult = await pool3
-              .request()
-              .query(`SELECT Station_ID FROM taco_treceability.Process_Master WHERE Process_ID = '${processId}'`);
-            if (stationResult.recordset.length === 0) {
-              console.error("No Station_ID found for Process_ID:", processId);
-            } else {
-              const stationId = stationResult.recordset[0].Station_ID;
-              const stationPayload = {
-                station_id: stationId,
-                line_id: "1",
-                customer_qrcode: module_barcode,
-                station_status: "OK",
-                checklist_name: "NA",
-                substation_id: processId
-              };
-              try {
-                const stationResponse = await axios.post(
-                  "https://mismainapp.tataautocomp.com:3241/station_status/filter",
-                  stationPayload
-                );
-                console.log("Station Status API Response:", JSON.stringify(stationResponse.data, null, 2));
-              } catch (stationErr) {
-                console.error("Error sending Station Status API:", stationErr.message);
-                if (stationErr.response) console.error("Station API Error Response:", JSON.stringify(stationErr.response.data, null, 2));
-              }
-            }
-          }
-          await pool1.request().query(
-            `DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no = ${row.sr_no}`
-          );
-          console.log(`Deleted sr_no ${row.sr_no} after successful update.`);
-          return startFetchLoop();
-        } catch (innerErr) {
-          console.error("Error in Process Completed flow:", innerErr.message);
-        }
-      };
-
-      if (scanType === 'Module') {
-        const api1Payload = {
-          pack_id: String(packID),
-          process_id: best.processID,
-          time: row.date_dd,
-          module_name: moduleName,
-          target_count: best.totalCount,
-          pack_no: processedPackNo,
-          line_id: 1,
-          Received_Data: `${row.torque},${row.angle}`,
-          module_barcode: row.module_barcode
-        };
-        console.log("API1 api1Payload:", api1Payload);
-        try {
-          const response = await axios.post('https://mismainapp.tataautocomp.com:3241/trigger_process_data', api1Payload);
-          const message = response.data?.message || '';
-          const Process_Status = response.data?.Process_Status || '';
-          const putUrl = response.data?.PUT_url || '';
-          const module_barcode = response.data?.module_barcode || '';
-
-          if (message === "Process register updated successfully" && Process_Status === "Pending") {
-            await pool1.request().query(`DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no = ${row.sr_no}`);
-            console.log(`Deleted sr_no ${row.sr_no} after successful update.`);
-            return startFetchLoop();
-          } else if (message === "Process register updated successfully" && Process_Status === "Completed") {
-            await handleCompletedProcess(putUrl, module_barcode, row);
-          } else if (message === "Process already completed. No update necessary.") {
-            await pool1.request().query(`
-              DELETE FROM taco_treceability.torque_details_EIP_mirror
-              WHERE pack_no = '${row.pack_no}'
-                AND module_barcode = '${row.module_barcode}'
-                AND process_name = '${row.process_name}'
-                AND pack_name = '${row.pack_name}'
-            `);
-            console.log(`Deleted all matching rows for already completed process: pack_name=${row.pack_name}, pack_no=${row.pack_no}, barcode=${row.module_barcode}`);
-            return startFetchLoop();
-          }
-        } catch (err) {
-          console.error('API1 send error:', err.message);
-          if (err.response) console.error('API1 Error Response:', JSON.stringify(err.response.data, null, 2));
-        }
+      // ----- API calls -----
+      try {
+        await sendApiCall(row, scanType, processedPackNo, packID, moduleName, modulebarQR, best, best1, best2, scanID);
+      } catch (err) {
+        console.error("Error in API call for sr_no", row.sr_no, err.message);
       }
-
-      // Similarly, repeat Pack and BOM API calls with handleCompletedProcess logic
-      // ... (keep same as Module section, just replace payload & best object)
-      // Due to length, they follow the same structure with `best1` for Pack and `best2` for BOM
-
-      if (row.sr_no > lastSeenSrNo) lastSeenSrNo = row.sr_no;
     }
 
-    setTimeout(startFetchLoop, 3000); 
- 
+    setTimeout(startFetchLoop, 3000);
+  } catch (err) {
+    console.error("Error fetching or processing rows:", err);
+    setTimeout(startFetchLoop, 5000);
+  }
+};
+
+// ----- Send API and delete row -----
+async function sendApiCall(row, scanType, processedPackNo, packID, moduleName, modulebarQR, best, best1, best2, scanID) {
+  if (scanType === 'Module') {
+    const api1Payload = {
+      pack_id: String(packID),
+      process_id: best.processID,
+      time: row.date_dd,
+      module_name: moduleName,
+      target_count: best.totalCount,
+      pack_no: processedPackNo,
+      line_id: 1,
+      Received_Data: `${row.torque},${row.angle}`,
+      module_barcode: row.module_barcode
+    };
+    console.log("API1 Payload:", api1Payload);
+    const response = await axios.post('https://mismainapp.tataautocomp.com:3241/trigger_process_data', api1Payload);
+    await handleApiResponse(response.data, row, module_barcode=row.module_barcode, scanType);
+  }
+  else if (scanType === 'Pack') {
+    const api1Payload = {
+      pack_id: String(packID),
+      process_id: best1.processID,
+      time: row.date_dd,
+      module_name: row.pack_name,
+      target_count: best1.totalCount,
+      pack_no: processedPackNo,
+      line_id: 1,
+      Received_Data: `${row.torque},${row.angle}`,
+      module_barcode: modulebarQR
+    };
+    console.log("API1 Payload:", api1Payload);
+    const response = await axios.post('https://mismainapp.tataautocomp.com:3241/trigger_process_data', api1Payload);
+    await handleApiResponse(response.data, row, module_barcode=modulebarQR, scanType);
+  }
+  else if (scanType === 'BOM') {
+    const apiPayload = {
+      pack_id: String(packID),
+      process_id: best2.processID,
+      time: row.date_dd,
+      bom_id: scanID,
+      Pack_Number: processedPackNo !== 'not_linked' ? processedPackNo : undefined,
+      target_count: best2.totalCount,
+      line_id: 1,
+      Received_Data: `${row.torque},${row.angle}`,
+      bom_qr: row.bypass_operator === 'na'
+        ? `${row.module_barcode},${row.module_barcode}`
+        : `${row.module_barcode},${row.bypass_operator}`
+    };
+    const url = processedPackNo !== 'not_linked'
+      ? 'https://mismainapp.tataautocomp.com:3241/trigger_tray_after_link_data'
+      : 'https://mismainapp.tataautocomp.com:3241/trigger_tray_data';
+    console.log("BOM API Payload:", apiPayload);
+    const response = await axios.post(url, apiPayload);
+    const message = response.data?.message || '';
+    if (message.includes('updated successfully') || message.includes('already completed')) {
+      await pool1.request().query(`DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no = ${row.sr_no}`);
+      console.log(`Deleted sr_no ${row.sr_no} after BOM API update.`);
+    }
+  }
+}
+
+// ----- Handle response for Module/Pack -----
+async function handleApiResponse(data, row, module_barcode, scanType) {
+  const message = data?.message || '';
+  const Process_Status = data?.Process_Status || '';
+  const putUrl = data?.PUT_url || '';
+
+  if (message === "Process register updated successfully" && Process_Status === "Pending") {
+    await pool1.request().query(`DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no = ${row.sr_no}`);
+    console.log(`Deleted sr_no ${row.sr_no} after successful update.`);
+  }
+  console.log(`API ${scanType} response for sr_no ${row.sr_no}:`, message, Process_Status, putUrl);
+}
+
+init();
