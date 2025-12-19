@@ -18,3 +18,234 @@ const handleTrayAPI = async (row, payload) => {
   console.log("handleTrayAPI called with:", payload);
   // Add your actual API call logic here
 };
+
+// ----- Your fetchLatestRows function -----
+const fetchLatestRows = async () => {
+  try {
+    const processListSQL = uniqueProcesses.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+
+    const result = await pool1.request().query(`
+      SELECT TOP(1) sr_no, pack_name, module_name, module_barcode, torque, angle,
+             process_name, date_dd, pack_no, smoke_sensor_linked_pack_no, bypass_operator
+      FROM taco_treceability.torque_details_EIP_mirror
+      WHERE sr_no > ${lastSeenSrNo}
+        AND pack_name IN ('NOVA Prismatic LR','Bajaj 6.1','Bajaj 12.2','SM eDost','SM eBada Dost','Ejeeto 18.4','Ejeeto 21.3')
+        AND process_name IN (${processListSQL})
+      ORDER BY sr_no ASC
+    `);
+
+    console.log('result', result);
+
+    for (const row of result.recordset) {
+      const processedPackNo = row.pack_no === 'not_linked' ? 'not_linked' : row.pack_no.slice(-6);
+
+      const packRes = await pool2.request().query(`
+        SELECT Pack_ID FROM taco_treceability.master_pack
+        WHERE Pack_Name='${row.pack_name}'
+      `);
+      if (!packRes.recordset.length) continue;
+      const packID = packRes.recordset[0].Pack_ID;
+
+      let scanType, scanID, moduleName, modulebarQR;
+
+      if (!row.smoke_sensor_linked_pack_no || row.smoke_sensor_linked_pack_no.toLowerCase() === 'null') {
+        const modRes = await pool2.request().query(`
+          SELECT Module_Name, Module_ID FROM taco_treceability.master_module
+          WHERE moduleNumber='${row.module_name}' AND Pack_ID='${packID}'
+        `);
+        if (!modRes.recordset.length) continue;
+
+        scanType = 'Module';
+        scanID = modRes.recordset[0].Module_ID;
+        moduleName = modRes.recordset[0].Module_Name;
+      } else {
+        const bomRes = await pool2.request().query(`
+          SELECT BOM_ID FROM taco_treceability.BOM_Master
+          WHERE BOM_Name='Smoke sensor' AND Pack_ID='${packID}'
+        `);
+        if (!bomRes.recordset.length) continue;
+
+        scanType = 'BOM';
+        scanID = bomRes.recordset[0].BOM_ID;
+      }
+
+      if (row.module_barcode.startsWith('DJ')) {
+        const qrRes = await pool1.request().query(`
+          SELECT CustomerQRCode FROM taco_treceability.final_qrcode_details
+          WHERE final_qrcode='${row.pack_no}'
+        `);
+        if (!qrRes.recordset.length) continue;
+
+        scanType = 'Pack';
+        modulebarQR = qrRes.recordset[0].CustomerQRCode;
+      }
+
+      const [pmRes, pmResPack, pmResBom] = await Promise.all([
+        pool3.request().query(`
+          SELECT Process_Name, Process_ID, Total_Count, Scan_Name
+          FROM taco_treceability.Process_Master
+          WHERE Pack_ID='${packID}' AND Scan_ID='${scanID}'
+        `),
+        pool3.request().query(`
+          SELECT Process_Name, Process_ID, Total_Count, Scan_Name
+          FROM taco_treceability.Process_Master
+          WHERE Pack_ID='${packID}' AND Scan_ID='${packID}' AND Scan_Name='Pack'
+        `),
+        pool3.request().query(`
+          SELECT Process_Name, Process_ID, Total_Count, Scan_Name
+          FROM taco_treceability.Process_Master
+          WHERE Pack_ID='${packID}' AND Scan_Name='BOM'
+        `),
+      ]);
+
+      if (!pmRes.recordset.length) continue;
+      if (scanType === 'Pack' && !pmResPack.recordset.length) continue;
+      if (scanType === 'BOM' && !pmResBom.recordset.length) continue;
+
+      let best = { score:0, processID:null, totalCount:null, scanName:null, processName:'' };
+      let best1 = {...best}, best2 = {...best};
+
+      // ----- Module match logic -----
+      if (scanType === 'Module') {
+        const inputNorm = normalizeProcess(row.process_name);
+        const modKey = `M${row.module_name}`.toLowerCase();
+
+        for (const p of pmRes.recordset) {
+          const raw = p.Process_Name.toLowerCase();
+          if (!raw.includes(modKey)) continue;
+
+          const cand = normalizeProcess(p.Process_Name);
+          let score = 0;
+
+          if (cand === inputNorm) score = 1;
+          else if (cand.startsWith(inputNorm)) score = 0.99;
+          else if (cand.includes(inputNorm)) score = 0.95;
+          else if (inputNorm.includes(cand)) score = 0.9;
+          else score = 0.7 * getCommonWordsScore(inputNorm, cand) +
+                     0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
+
+          if (raw.includes(modKey)) { score += 0.1; if (score > 1) score = 1; }
+
+          if (score > best.score || (score === best.score && p.Process_Name.length < best.processName.length)) {
+            best = { score, processID: p.Process_ID, totalCount: p.Total_Count, scanName: p.Scan_Name, processName: p.Process_Name };
+          }
+        }
+        if (!best.processID || best.score < 0.5) continue;
+      }
+
+      // ----- Pack match logic -----
+      else if (scanType === 'Pack') {
+        const inputNorm = normalizeProcess(row.process_name);
+        const inputRaw = row.process_name.toLowerCase();
+        const arr = [];
+
+        for (const p of pmResPack.recordset) {
+          const raw = p.Process_Name.toLowerCase();
+          const cand = normalizeProcess(p.Process_Name);
+          let score=0;
+
+          if (inputRaw === raw) score=1;
+          else if (raw.startsWith(inputRaw)) score=0.99;
+          else if (raw.includes(inputRaw)) score=0.95;
+          else if (inputRaw.includes(raw)) score=0.9;
+          else score = 0.7 * getCommonWordsScore(inputNorm, cand) +
+                       0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
+
+          arr.push({ score, processID: p.Process_ID, totalCount: p.Total_Count, scanName: p.Scan_Name, processName: p.Process_Name });
+        }
+        arr.sort((a,b) => b.score - a.score || a.processName.length - b.processName.length);
+        best1 = arr[0];
+        if (!best1.processID || best1.score < 0.5) continue;
+      }
+
+      // ----- BOM match logic -----
+      else if (scanType === 'BOM') {
+        const inputWords = row.process_name.match(/[\w()+\-\/&]+/g);
+        if (!inputWords || inputWords.length === 0) continue;
+
+        const matches = [];
+        for (const p of pmResBom.recordset) {
+          const processWords = p.Process_Name.match(/[\w()+\-\/&]+/g) || [];
+          const allMatch = inputWords.every(word => processWords.includes(word));
+          if (allMatch) {
+            matches.push({ score: 1, processID: p.Process_ID, totalCount: p.Total_Count, scanName: p.Scan_Name, processName: p.Process_Name });
+          }
+        }
+        matches.sort((a,b) => b.score - a.score || a.processName.length - b.processName.length);
+        best2 = matches[0];
+        if (!best2?.processID || best2.score < 0.5) continue;
+      }
+
+      // ----- API payloads and processing -----
+      if (scanType === 'Module') {
+        const api1Payload = {
+          pack_id: String(packID),
+          process_id: best.processID,
+          time: row.date_dd,
+          module_name: moduleName,
+          target_count: best.totalCount,
+          pack_no: processedPackNo,
+          line_id: 1,
+          Received_Data: `${row.torque},${row.angle}`,
+          module_barcode: row.module_barcode
+        };
+        await handleModuleAPI(row, api1Payload);
+      }
+
+      else if (scanType === 'Pack') {
+        const api1Payload = {
+          pack_id: String(packID),
+          process_id: best1.processID,
+          time: row.date_dd,
+          module_name: row.pack_name,
+          target_count: best1.totalCount,
+          pack_no: processedPackNo,
+          line_id: 1,
+          Received_Data: `${row.torque},${row.angle}`,
+          module_barcode: modulebarQR
+        };
+        await handlePackAPI(row, api1Payload);
+      }
+
+      else if (scanType === 'BOM') {
+        if (processedPackNo !== 'not_linked') {
+          const api2Payload = {
+            pack_id: String(packID),
+            process_id: best2.processID,
+            time: row.date_dd,
+            bom_id: scanID,
+            Pack_Number: processedPackNo,
+            target_count: best2.totalCount,
+            line_id: 1,
+            Received_Data: `${row.torque},${row.angle}`,
+            bom_qr: row.bypass_operator === 'na'
+              ? `${row.module_barcode},${row.module_barcode}`
+              : `${row.module_barcode},${row.bypass_operator}`
+          };
+          await handleTrayAfterLinkAPI(row, api2Payload);
+        } else {
+          const api3Payload = {
+            pack_id: String(packID),
+            process_id: best2.processID,
+            time: row.date_dd,
+            bom_id: scanID,
+            target_count: best2.totalCount,
+            line_id: 1,
+            Received_Data: `${row.torque},${row.angle}`,
+            bom_qr: row.bypass_operator === 'na'
+              ? `${row.module_barcode},${row.module_barcode}`
+              : `${row.module_barcode},${row.bypass_operator}`
+          };
+          await handleTrayAPI(row, api3Payload);
+        }
+      }
+
+      if (row.sr_no > lastSeenSrNo) lastSeenSrNo = row.sr_no;
+    }
+
+    setTimeout(startFetchLoop, 3000); // Loop continues
+  } catch (err) {
+    console.error("Error fetching or processing rows:", err);
+    setTimeout(startFetchLoop, 5000);
+  }
+};
