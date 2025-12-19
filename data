@@ -5,3 +5,8 @@ With this ✅
 const needsModuleMatch = /\bM\d+\b/i.test(raw);
 
 if (needsModuleMatch && !raw.includes(`m${modKey}`)) continue;
+
+
+/////////////////////
+ND process_name <> 'Emptyy'
+AND module_barcode NOT LIKE '01TS%'
