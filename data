@@ -8,5 +8,12 @@ if (needsModuleMatch && !raw.includes(`m${modKey}`)) continue;
 
 
 /////////////////////
-ND process_name <> 'Emptyy'
-AND module_barcode NOT LIKE '01TS%'
+WHERE pack_name IN (
+    'NOVA Prismatic LR',
+    'SM eDost',
+    'SM eBada Dost',
+    'Ejeeto 18.4',
+    'Ejeeto 21.3'
+)
+AND process_name <> 'Emptyy'
+AND module_barcode NOT LIKE '01TS%';
