@@ -1,33 +1,55 @@
+// Extract module tokens like M1, M2, M3 from process name
+const processModules = raw.match(/\bM\d+\b/gi) || [];
+
+// If process has module tokens, enforce exact module match
+if (processModules.length > 0) {
+  if (!processModules.some(m => m.toLowerCase() === modKey)) {
+    continue;
+  }
+}
+
+
+
+
 if (scanType === 'Module') {
-    console.log('Module:::::::::::::', row.process_name, moduleName);
+  const inputNorm = normalizeProcess(row.process_name);
+  const modKey = moduleName.toLowerCase(); // m1, m2, m3
 
-    // Extract the module identifier from moduleName (e.g., M1, M2)
-    const moduleKey = moduleName.toUpperCase(); // keep case as in DB
-    const inputNorm = normalizeProcess(row.process_name);
+  for (const p of pmRes.recordset) {
+    const raw = p.Process_Name.toLowerCase();
 
-    for (const p of pmRes.recordset) {
-        const dbProcess = p.Process_Name; // keep original casing
-
-        // Check if moduleKey is part of the DB process name
-        if (!dbProcess.includes(moduleKey)) continue;
-
-        const cand = normalizeProcess(dbProcess);
-
-        let score = 0;
-        if (inputNorm === cand) score = 1;                  // exact match
-        else if (cand.startsWith(inputNorm)) score = 0.99;  // starts with
-        else if (cand.includes(inputNorm)) score = 0.95;    // contains
-        else if (inputNorm.includes(cand)) score = 0.9;     // input contains
-        else {
-            score = 0.7 * getCommonWordsScore(inputNorm, cand) +
-                    0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
-        }
-
-        if (score > best.score || (score === best.score && dbProcess.length < best.processName.length)) {
-            best = { score, processID: p.Process_ID, totalCount: p.Total_Count, scanName: p.Scan_Name, processName: dbProcess };
-            console.log('best', best);
-        }
+    // ✅ Strict module matching
+    const processModules = raw.match(/\bM\d+\b/gi) || [];
+    if (processModules.length > 0) {
+      if (!processModules.some(m => m.toLowerCase() === modKey)) continue;
     }
 
-    if (!best.processID || best.score < 0.5) continue;
+    const cand = normalizeProcess(p.Process_Name);
+
+    let score = 0;
+    if (inputNorm === cand) score = 1;
+    else if (cand.startsWith(inputNorm)) score = 0.99;
+    else if (cand.includes(inputNorm)) score = 0.95;
+    else if (inputNorm.includes(cand)) score = 0.9;
+    else {
+      score =
+        0.7 * getCommonWordsScore(inputNorm, cand) +
+        0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
+    }
+
+    if (
+      score > best.score ||
+      (score === best.score && p.Process_Name.length < best.processName.length)
+    ) {
+      best = {
+        score,
+        processID: p.Process_ID,
+        totalCount: p.Total_Count,
+        scanName: p.Scan_Name,
+        processName: p.Process_Name
+      };
+    }
+  }
+
+  if (!best.processID || best.score < 0.5) continue;
 }
