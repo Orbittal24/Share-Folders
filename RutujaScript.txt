@@ -1335,4 +1335,265 @@ if __name__ == "__main__":
             print("Sync service running smoothly...")
     except KeyboardInterrupt:
         print("\n Sync service stopped by user")
+......................................................................
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+import threading
+import time
+import requests
+import json
+
+# ======================================================
+# DATABASE CONNECTION
+# ======================================================
+print(" Initializing database connection...")
+mirror_connection_string = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=10.9.4.28;"
+    "DATABASE=module_bom_register;"
+    "UID=user_mis;"
+    "PWD=admin"
+)
+
+mirror_engine = create_engine(f"mssql+pyodbc:///?odbc_connect={mirror_connection_string}")
+MirrorSession = sessionmaker(autocommit=False, autoflush=False, bind=mirror_engine)
+BaseMirror = declarative_base()
+print(" Database connected successfully!")
+
+# ======================================================
+# MIRROR TABLE MODEL
+# ======================================================
+class ModuleIbbMirror(BaseMirror):
+    __tablename__ = "moduleibb_mirror"
+    __table_args__ = {"schema": "dbo"}
+
+    sr_no = Column(Integer, primary_key=True, autoincrement=True)
+    packname = Column(String)
+    module_barcode = Column(String, nullable=False)
+    ibb_barcode = Column(String, nullable=False)
+    today_date = Column(DateTime, default=datetime.utcnow)
+    line = Column(String)
+    op_name = Column(String)
+    sup_name = Column(String)
+    status = Column(String)
+    finalqr = Column("Finalqr", String)
+    module_number = Column(String)
+    ibb_barcode2 = Column(String)
+    ibb_barcode3 = Column(String)
+    ibb_barcode4 = Column(String)
+
+# ======================================================
+# STATION STATUS API (✅ NEW ADDITION)
+# ======================================================
+def send_station_status_ok(customer_qrcode: str):
+    try:
+        url = "https://mismainapp.tataautocomp.com:3241/station_status/filter"
+
+        payload = {
+            "station_id": 30,
+            "line_id": 4,
+            "station_status": "OK",
+            "checklist_name": "NA",
+            "substation_id": "NA",
+            "customer_qrcode": customer_qrcode
+        }
+
+        print(f"  Sending Station Status OK → {customer_qrcode}")
+        response = requests.post(url, json=payload, timeout=5)
+        print(f"  Station API Response: {response.status_code} | {response.text}")
+
+    except Exception as e:
+        print(f"  Station Status API error: {e}")
+
+# ======================================================
+# TABLE NAME GENERATOR
+# ======================================================
+def get_table_name_from_date(pack_creation_date):
+    return f"Module_BOM_Register_{pack_creation_date.strftime('%d-%m-%y')}_{datetime.now().strftime('%d-%m-%y')}"
+
+# ======================================================
+# GET ALL DAILY TABLES
+# ======================================================
+def get_all_daily_tables(db: Session):
+    result = db.execute(text("""
+        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA='dbo'
+        AND TABLE_NAME LIKE 'Module_BOM_Register_%'
+    """))
+    return [row[0] for row in result.fetchall()]
+
+# ======================================================
+# DUPLICATE CHECK
+# ======================================================
+def is_module_barcode_duplicate(db: Session, module_barcode: str):
+    for table in get_all_daily_tables(db):
+        try:
+            result = db.execute(text(f"""
+                SELECT COUNT(*) FROM dbo.[{table}]
+                WHERE module_barcode=:mb
+            """), {"mb": module_barcode})
+            if result.scalar() > 0:
+                print(f"  DUPLICATE FOUND in {table}")
+                return True
+        except:
+            continue
+    return False
+
+# ======================================================
+# CREATE DAILY TABLE IF NOT EXISTS
+# ======================================================
+def create_daily_table_if_not_exists(db: Session, table_name: str):
+    db.execute(text(f"""
+    IF NOT EXISTS (
+        SELECT * FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME='{table_name}'
+    )
+    BEGIN
+        CREATE TABLE dbo.[{table_name}] (
+            srno INT IDENTITY PRIMARY KEY,
+            module_id NVARCHAR(255),
+            module_barcode NVARCHAR(255),
+            packid NVARCHAR(255),
+            pack_name NVARCHAR(255),
+            line_number NVARCHAR(50),
+            time DATETIME,
+            shift NVARCHAR(50),
+            bom_qr NVARCHAR(255),
+            pack_number NVARCHAR(50),
+            bom_name NVARCHAR(100),
+            supervisor NVARCHAR(100),
+            operator_name NVARCHAR(100),
+            status NVARCHAR(50),
+            pack_creation_date NVARCHAR(50),
+            table_date NVARCHAR(50)
+        )
+    END
+    """))
+    db.commit()
+
+    class DailyTable(BaseMirror):
+        __tablename__ = table_name
+        __table_args__ = {'extend_existing': True}
+
+        srno = Column(Integer, primary_key=True)
+        module_id = Column(String)
+        module_barcode = Column(String)
+        packid = Column(String)
+        pack_name = Column(String)
+        line_number = Column(String)
+        time = Column(DateTime)
+        shift = Column(String)
+        bom_qr = Column(String)
+        pack_number = Column(String)
+        bom_name = Column(String)
+        supervisor = Column(String)
+        operator_name = Column(String)
+        status = Column(String)
+        pack_creation_date = Column(String)
+        table_date = Column(String)
+
+    return DailyTable
+
+# ======================================================
+# FETCH NOMENCLATURE
+# ======================================================
+def fetch_nomenclature_data(module_barcode: str):
+    try:
+        url = f"https://mismainapp.tataautocomp.com:3241/fetch_nomenclature/{module_barcode}"
+        data = requests.get(url, timeout=10).json()
+        first = data[0] if data else {}
+        return str(first.get("Module_ID", "")), str(first.get("Pack_ID", ""))
+    except:
+        return "", ""
+
+# ======================================================
+# FETCH SHIFT
+# ======================================================
+def fetch_current_shift():
+    try:
+        data = requests.get(
+            "https://mismainapp.tataautocomp.com:3241/api/v1/get-current-shift",
+            verify=False, timeout=5
+        ).json()
+        return data.get("shift", "NO_SHIFT")
+    except:
+        return "NO_SHIFT"
+
+# ======================================================
+# MAIN SYNC LOOP
+# ======================================================
+def mirror_interval_sync(interval_sec=10):
+    while True:
+        db = MirrorSession()
+        try:
+            records = db.query(ModuleIbbMirror).limit(100).all()
+
+            for record in records:
+                if is_module_barcode_duplicate(db, record.module_barcode.strip()):
+                    continue
+
+                table_name = get_table_name_from_date(record.today_date.date())
+                DailyModel = create_daily_table_if_not_exists(db, table_name)
+
+                module_id, pack_id = fetch_nomenclature_data(record.module_barcode)
+                shift = fetch_current_shift()
+
+                ibbs = [b for b in [
+                    record.ibb_barcode,
+                    record.ibb_barcode2,
+                    record.ibb_barcode3,
+                    record.ibb_barcode4
+                ] if b and b != "string"]
+
+                for ibb in ibbs:
+                    entry = DailyModel(
+                        module_id=module_id,
+                        module_barcode=record.module_barcode,
+                        packid=pack_id,
+                        pack_name=record.packname,
+                        line_number=record.line,
+                        time=record.today_date,
+                        shift=shift,
+                        bom_qr=ibb,
+                        pack_number=record.finalqr[-6:] if record.finalqr else "",
+                        bom_name="IBB",
+                        supervisor=record.sup_name,
+                        operator_name=record.op_name,
+                        status="OK",
+                        pack_creation_date=record.today_date.strftime("%d-%m-%y"),
+                        table_date=datetime.now().strftime("%d-%m-%y")
+                    )
+
+                    db.add(entry)
+                    db.commit()
+
+                    # ✅ STATION STATUS API CALLED HERE
+                    send_station_status_ok(record.module_barcode.strip())
+
+                db.query(ModuleIbbMirror).filter(
+                    ModuleIbbMirror.sr_no == record.sr_no
+                ).delete()
+                db.commit()
+
+        except Exception as e:
+            print("SYNC ERROR:", e)
+            db.rollback()
+        finally:
+            db.close()
+
+        time.sleep(interval_sec)
+
+# ======================================================
+# START SERVICE
+# ======================================================
+def start_mirror_sync():
+    print(" Mirror Sync Service Started")
+    threading.Thread(target=mirror_interval_sync, daemon=True).start()
+
+if __name__ == "__main__":
+    start_mirror_sync()
+    while True:
+        time.sleep(60)
 
