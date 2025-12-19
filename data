@@ -1,1 +1,48 @@
-const moduleRegex = new RegExp(`\\bM${row.module_name}\\b`, 'i');
+if (scanType === 'Module') {
+    const inputNorm = normalizeProcess(row.process_name);
+    const modKey = `M${row.module_name}`.toLowerCase();
+
+    for (const p of pmRes.recordset) {
+        const raw = p.Process_Name.toLowerCase();
+
+        // 🚨 FLEXIBLE MODULE MATCH: allow M1 anywhere in the string
+        if (!raw.includes(modKey)) continue;
+
+        const cand = normalizeProcess(p.Process_Name);
+        let score = 0;
+
+        // ✅ Exact match
+        if (cand === inputNorm) {
+            best = {
+                score: 1,
+                processID: p.Process_ID,
+                totalCount: p.Total_Count,
+                scanName: p.Scan_Name,
+                processName: p.Process_Name
+            };
+            break;
+        }
+        // Partial match scoring
+        else if (cand.startsWith(inputNorm)) score = 0.99;
+        else if (cand.includes(inputNorm)) score = 0.95;
+        else if (inputNorm.includes(cand)) score = 0.9;
+        else {
+            score = 0.7 * getCommonWordsScore(inputNorm, cand) +
+                    0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
+        }
+
+        // ✅ Boost score if module is included in candidate process
+        if (raw.includes(modKey)) {
+            score += 0.1; // small boost for module presence
+            if (score > 1) score = 1; // cap at 1
+        }
+
+        if (score > best.score ||
+            (score === best.score && p.Process_Name.length < best.processName.length)) {
+            best = { score, processID: p.Process_ID, totalCount: p.Total_Count, scanName: p.Scan_Name, processName: p.Process_Name };
+            console.log('best', best);
+        }
+    }
+
+    if (!best.processID || best.score < 0.5) continue;
+}
