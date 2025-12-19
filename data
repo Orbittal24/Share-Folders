@@ -1,55 +1,7 @@
-// Extract module tokens like M1, M2, M3 from process name
-const processModules = raw.match(/\bM\d+\b/gi) || [];
-
-// If process has module tokens, enforce exact module match
-if (processModules.length > 0) {
-  if (!processModules.some(m => m.toLowerCase() === modKey)) {
-    continue;
-  }
-}
-
-
-
-
-if (scanType === 'Module') {
-  const inputNorm = normalizeProcess(row.process_name);
-  const modKey = moduleName.toLowerCase(); // m1, m2, m3
-
-  for (const p of pmRes.recordset) {
-    const raw = p.Process_Name.toLowerCase();
-
-    // ✅ Strict module matching
-    const processModules = raw.match(/\bM\d+\b/gi) || [];
-    if (processModules.length > 0) {
-      if (!processModules.some(m => m.toLowerCase() === modKey)) continue;
-    }
-
-    const cand = normalizeProcess(p.Process_Name);
-
-    let score = 0;
-    if (inputNorm === cand) score = 1;
-    else if (cand.startsWith(inputNorm)) score = 0.99;
-    else if (cand.includes(inputNorm)) score = 0.95;
-    else if (inputNorm.includes(cand)) score = 0.9;
-    else {
-      score =
-        0.7 * getCommonWordsScore(inputNorm, cand) +
-        0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
-    }
-
-    if (
-      score > best.score ||
-      (score === best.score && p.Process_Name.length < best.processName.length)
-    ) {
-      best = {
-        score,
-        processID: p.Process_ID,
-        totalCount: p.Total_Count,
-        scanName: p.Scan_Name,
-        processName: p.Process_Name
-      };
-    }
-  }
-
-  if (!best.processID || best.score < 0.5) continue;
-}
+process_name IN (
+  'Module to busbar install M1 to M2 (21.3)',
+  'Module to busbar install M2 +ve to HV MSD +ve (21.3)',
+  'Module to busbar install M3 +ve to BDU +ve (21.3)',
+  'Module to busbar install M3 -ve to HV MSD -ve (21.3)',
+  'Module to busbar install M1 +ve to shunt (21.3)'
+)
