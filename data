@@ -1,7 +1,7 @@
- WHERE pack_name IN (
-        'NOVA Prismatic LR',
-        'SM eDost',
-        'SM eBada Dost',
-        'Ejeeto 18.4',
-        'Ejeeto 21.3'
-    );
+Replace this 👎
+if (!raw.includes(modKey)) continue;
+
+With this ✅
+const needsModuleMatch = /\bM\d+\b/i.test(raw);
+
+if (needsModuleMatch && !raw.includes(`m${modKey}`)) continue;
