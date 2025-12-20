@@ -196,7 +196,7 @@ Do you want me to do that?
 
 Supervisor:
 
-Yash Barse – 184858
+Yash Barse – 184858   -  $2a$12$cOaBexizcph.yZcCq1XgFeNqyp9ROrD4ESeptBVeVH011zwbamjgS
 
  
 
@@ -204,7 +204,7 @@ Operator Details:
 
  
 
-EMP ID: 94900328
+EMP ID: 94900328   - $2a$12$roQNkIrIVz90pzXDFtn.BOJCqD85WerzpExFEdUyEAYJUoaNT3I0.
 
 Name: Abhishek Mishra
 
@@ -212,7 +212,7 @@ Station: Module Assembly
 
  
 
-EMP ID: 94900434
+EMP ID: 94900434  -  $2a$12$XvGo1KbFreYfeo0pXyB3KO6925KVqTd64ytEU1s34CWxgFcQlEZwm
 
 Name: Mukesh Singh
 
@@ -220,7 +220,7 @@ Station: CLW & VIR
 
  
 
-EMP ID: 179731
+EMP ID: 179731  -  $2a$12$B5.I8xIgUFA.TiJ/GUfVqei04V0VNWyssU7rVJKaSiRNu9OKf59Z2
 
 Name: Vishal Desai
 
@@ -228,7 +228,7 @@ Station: Pack Assembly
 
  
 
-EMP ID: 10012972
+EMP ID: 10012972  -  $2a$12$G65v9jLLRibraI3Du1ktKOUFdqqZh7xweMrekcVIrs/C3diLEYPrm
 
 Name: Vikram Paul
 
@@ -236,11 +236,12 @@ Station: PDU
 
  
 
-EMP ID: 180133
+EMP ID: 180133 -  $2a$12$pCinBYyyAqmXvGFnJBefJ.2/rdA/T4QlKF/I.m1COIkt735WhuUjO
 
 Name: Nilesh Kumar
 
 Station: ALT
 
  
+
 
