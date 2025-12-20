@@ -191,3 +191,56 @@ FROM sys.fn_get_audit_file('C:\SQLAudit\*.sqlaudit', DEFAULT, DEFAULT);
 If you want, I can give a version-safe query that works on all SQL Server versions to list all enabled server audits and database audit specs for your taco_treceability database. This avoids the audit_file_path error.
 
 Do you want me to do that?
+
+
+
+Supervisor:
+
+Yash Barse – 184858
+
+ 
+
+Operator Details:
+
+ 
+
+EMP ID: 94900328
+
+Name: Abhishek Mishra
+
+Station: Module Assembly
+
+ 
+
+EMP ID: 94900434
+
+Name: Mukesh Singh
+
+Station: CLW & VIR
+
+ 
+
+EMP ID: 179731
+
+Name: Vishal Desai
+
+Station: Pack Assembly
+
+ 
+
+EMP ID: 10012972
+
+Name: Vikram Paul
+
+Station: PDU
+
+ 
+
+EMP ID: 180133
+
+Name: Nilesh Kumar
+
+Station: ALT
+
+ 
+
