@@ -1,68 +1,83 @@
-const extractDirection = (text) => {
-  const m = text.toLowerCase().match(/(.+?)\s+to\s+(.+?)\s+busbar/);
-  if (!m) return null;
+# trigger_on_change.py
+import time
+import pyodbc
+import requests
 
-  return {
-    from: m[1].trim(),
-    to: m[2].trim()
-  };
-};
+SQL_CONN_STR = (
+    'DRIVER={ODBC Driver 17 for SQL Server};'
+    'SERVER=TGTCNWS904;'
+    'DATABASE=taco_treceability_ir;'
+    'UID=user_mis;'
+    'PWD=admin'
+)
 
+API_ENDPOINT = 'https://mismainapp.tataautocomp.com:3241/trigger_nomenclature_fetch'
 
-else if (scanType === 'BOM') {
+last_seen = {}
 
-  const inputNorm = normalizeProcess(row.process_name);
-  const inputDir = extractDirection(row.process_name);
+def poll_and_trigger():
+    # ✅ Reuse HTTP connection
+    session = requests.Session()
 
-  const matches = [];
+    while True:
+        try:
+            conn = pyodbc.connect(SQL_CONN_STR)
+            cursor = conn.cursor()
 
-  for (const p of pmResBom.recordset) {
+            cursor.execute("""
+                SELECT srno, station_id, controller_ip, pack_id, gun,
+                       process_id, line_id, Received_Data, Date_Time
+                FROM taco_treceability.ir_controller_configuration
+                WHERE Received_Data IS NOT NULL
+            """)
 
-    const procNorm = normalizeProcess(p.Process_Name);
-    const procDir = extractDirection(p.Process_Name);
+            rows = cursor.fetchall()
 
-    let score = 0;
+            for row in rows:
+                srno, station_id, controller_ip, pack_id, gun, process_id, line_id, Received_Data, date_time = row
 
-    // 1️⃣ Exact full match
-    if (inputNorm === procNorm) {
-      score = 1;
-    }
+                if last_seen.get(srno) == date_time:
+                    continue
 
-    // 2️⃣ Direction-aware match (MOST IMPORTANT)
-    else if (inputDir && procDir) {
-      if (
-        inputDir.from === procDir.from &&
-        inputDir.to === procDir.to
-      ) {
-        score = 0.95;
-      } else {
-        continue; // ❌ reject reversed direction
-      }
-    }
+                last_seen[srno] = date_time
 
-    // 3️⃣ Fallback similarity (only if no direction words)
-    else {
-      score =
-        0.7 * getCommonWordsScore(inputNorm, procNorm) +
-        0.3 * stringSimilarity.compareTwoStrings(inputNorm, procNorm);
-    }
+                payload = {
+                    "station_id": station_id,
+                    "controller_ip": controller_ip,
+                    "pack_id": pack_id,
+                    "gun": gun,
+                    "process_id": process_id,
+                    "line_id": line_id,
+                    "Received_Data": Received_Data
+                }
 
-    if (score >= 0.6) {
-      matches.push({
-        score,
-        processID: p.Process_ID,
-        totalCount: p.Total_Count,
-        scanName: p.Scan_Name,
-        processName: p.Process_Name
-      });
-    }
-  }
+                print("payload", payload)
 
-  matches.sort(
-    (a, b) => b.score - a.score || a.processName.length - b.processName.length
-  );
+                try:
+                    response = session.post(
+                        API_ENDPOINT,
+                        json=payload,
+                        timeout=5   # ✅ prevent hanging sockets
+                    )
 
-  best2 = matches[0];
+                    if response.status_code == 200:
+                        print(f"[OK] API triggered for srno {srno}")
+                    else:
+                        print(f"[ERROR] API failed for srno {srno}, Status: {response.status_code}")
 
-  if (!best2?.processID) continue;
-}
+                except requests.exceptions.RequestException as api_err:
+                    print(f"[ERROR] API error for srno {srno}: {api_err}")
+
+                time.sleep(0.2)  # ✅ throttle API calls
+
+            cursor.close()
+            conn.close()
+
+            time.sleep(2)  # poll interval
+
+        except Exception as e:
+            print("[ERROR] Error polling table:", e)
+            time.sleep(5)
+
+if __name__ == "__main__":
+    poll_and_trigger()
