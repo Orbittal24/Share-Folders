@@ -1,42 +1,68 @@
-const normalizeStrict = (s) =>
-  s
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/\s*\(\s*/g, '(')
-    .replace(/\s*\)\s*/g, ')')
-    .trim();
+const extractDirection = (text) => {
+  const m = text.toLowerCase().match(/(.+?)\s+to\s+(.+?)\s+busbar/);
+  if (!m) return null;
 
+  return {
+    from: m[1].trim(),
+    to: m[2].trim()
+  };
+};
 
 
 else if (scanType === 'BOM') {
-  const inputNorm = normalizeStrict(row.process_name);
 
-  let exactMatch = null;
+  const inputNorm = normalizeProcess(row.process_name);
+  const inputDir = extractDirection(row.process_name);
+
+  const matches = [];
 
   for (const p of pmResBom.recordset) {
-    const procNorm = normalizeStrict(p.Process_Name);
 
-    // 🔥 ONLY exact directional match allowed
-    if (procNorm === inputNorm) {
-      exactMatch = {
-        score: 1,
+    const procNorm = normalizeProcess(p.Process_Name);
+    const procDir = extractDirection(p.Process_Name);
+
+    let score = 0;
+
+    // 1️⃣ Exact full match
+    if (inputNorm === procNorm) {
+      score = 1;
+    }
+
+    // 2️⃣ Direction-aware match (MOST IMPORTANT)
+    else if (inputDir && procDir) {
+      if (
+        inputDir.from === procDir.from &&
+        inputDir.to === procDir.to
+      ) {
+        score = 0.95;
+      } else {
+        continue; // ❌ reject reversed direction
+      }
+    }
+
+    // 3️⃣ Fallback similarity (only if no direction words)
+    else {
+      score =
+        0.7 * getCommonWordsScore(inputNorm, procNorm) +
+        0.3 * stringSimilarity.compareTwoStrings(inputNorm, procNorm);
+    }
+
+    if (score >= 0.6) {
+      matches.push({
+        score,
         processID: p.Process_ID,
         totalCount: p.Total_Count,
         scanName: p.Scan_Name,
         processName: p.Process_Name
-      };
-      break;
+      });
     }
   }
 
-  // ❌ If no exact match → skip row
-  if (!exactMatch) {
-    console.warn(
-      "❌ BOM process skipped (no exact directional match):",
-      row.process_name
-    );
-    continue;
-  }
+  matches.sort(
+    (a, b) => b.score - a.score || a.processName.length - b.processName.length
+  );
 
-  best2 = exactMatch;
+  best2 = matches[0];
+
+  if (!best2?.processID) continue;
 }
