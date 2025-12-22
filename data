@@ -2,51 +2,41 @@ const normalizeStrict = (s) =>
   s
     .toLowerCase()
     .replace(/\s+/g, ' ')
+    .replace(/\s*\(\s*/g, '(')
+    .replace(/\s*\)\s*/g, ')')
     .trim();
+
 
 
 else if (scanType === 'BOM') {
   const inputNorm = normalizeStrict(row.process_name);
 
-  const matches = [];
+  let exactMatch = null;
 
   for (const p of pmResBom.recordset) {
     const procNorm = normalizeStrict(p.Process_Name);
 
-    // ✅ Exact directional match first
-    if (inputNorm === procNorm) {
-      matches.push({
+    // 🔥 ONLY exact directional match allowed
+    if (procNorm === inputNorm) {
+      exactMatch = {
         score: 1,
         processID: p.Process_ID,
         totalCount: p.Total_Count,
         scanName: p.Scan_Name,
         processName: p.Process_Name
-      });
-      continue;
-    }
-
-    // ⚠️ fallback ONLY if no exact match exists
-    const inputWords = inputNorm.split(' ');
-    const procWords = procNorm.split(' ');
-
-    const allMatch = inputWords.every(w => procWords.includes(w));
-
-    if (allMatch) {
-      matches.push({
-        score: 0.8, // lower than exact
-        processID: p.Process_ID,
-        totalCount: p.Total_Count,
-        scanName: p.Scan_Name,
-        processName: p.Process_Name
-      });
+      };
+      break;
     }
   }
 
-  matches.sort(
-    (a, b) => b.score - a.score
-  );
+  // ❌ If no exact match → skip row
+  if (!exactMatch) {
+    console.warn(
+      "❌ BOM process skipped (no exact directional match):",
+      row.process_name
+    );
+    continue;
+  }
 
-  best2 = matches[0];
-
-  if (!best2?.processID) continue;
+  best2 = exactMatch;
 }
