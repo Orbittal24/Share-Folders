@@ -1,2 +1,78 @@
-console.log(`Module data inserted successfully for sr_no ${row.sr_no}`);
+# trigger_on_change_redis.py
+import time
+import requests
+import redis
+import json
 
+API_ENDPOINT = 'https://mismainapp.tataautocomp.com:3241/torque_api'
+REDIS_HASH = 'controller_data'
+
+last_seen = {}
+
+def poll_and_trigger():
+    # ✅ Reuse HTTP connection
+    session = requests.Session()
+    r = redis.Redis(host='localhost', port=6379, db=0)
+
+    while True:
+        try:
+            # Fetch all IP data from Redis
+            all_data = r.hgetall(REDIS_HASH)  # returns dict of {ip: json_bytes}
+            
+            for ip_bytes, json_bytes in all_data.items():
+                ip = ip_bytes.decode()
+                try:
+                    data = json.loads(json_bytes)
+                except json.JSONDecodeError:
+                    print(f"[ERROR] Invalid JSON for IP {ip}")
+                    continue
+
+                guns = data.get('guns', {})
+                
+                for gun_id, gun_data in guns.items():
+                    # Unique key for last_seen tracking
+                    key = f"{ip}_{gun_id}"
+                    timestamp = gun_data.get('timestamp')
+
+                    if last_seen.get(key) == timestamp:
+                        continue  # skip unchanged data
+
+                    last_seen[key] = timestamp
+
+                    payload = {
+                        "station_id": None,          # Optional: set if available
+                        "controller_ip": ip,
+                        "pack_id": None,             # Optional: set if available
+                        "gun": gun_id,
+                        "process_id": None,          # Optional: set if available
+                        "line_id": None,             # Optional: set if available
+                        "Received_Data": f"{gun_data.get('torque')},{gun_data.get('angle')}"
+                    }
+
+                    print("payload", payload)
+
+                    try:
+                        response = session.post(
+                            API_ENDPOINT,
+                            json=payload,
+                            timeout=5   # ✅ prevent hanging sockets
+                        )
+
+                        if response.status_code == 200:
+                            print(f"[OK] API triggered for {key}")
+                        else:
+                            print(f"[ERROR] API failed for {key}, Status: {response.status_code}")
+
+                    except requests.exceptions.RequestException as api_err:
+                        print(f"[ERROR] API error for {key}: {api_err}")
+
+                    time.sleep(0.2)  # ✅ throttle API calls
+
+            time.sleep(2)  # poll interval
+
+        except Exception as e:
+            print("[ERROR] Error polling Redis:", e)
+            time.sleep(5)
+
+if __name__ == "__main__":
+    poll_and_trigger()
