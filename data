@@ -10,12 +10,12 @@ from multiprocessing import Process, current_process
 from get_ips_from_sql import fetch_ip_list
 import requests
 
-# Constants
+# ---------------- CONFIG ---------------- #
+
 REAL_INDICES = [1, 4, 7, 10, 13, 16]
 UINT_INDICES = [4, 10, 16, 22, 28, 34]
 REDIS_HASH = 'controller_data'
 
-# SQL connection string
 SQL_CONN_STR = (
     'DRIVER={ODBC Driver 17 for SQL Server};'
     'SERVER=TGTCNWS904;'
@@ -23,6 +23,10 @@ SQL_CONN_STR = (
     'UID=user_mis;'
     'PWD=admin'
 )
+
+API_ENDPOINT = 'https://misapp.tataautocomp.com:3241/trigger_nomenclature_fetch'
+
+# ---------------- UTILITIES ---------------- #
 
 def get_formatted_timestamp():
     utc_time = datetime.utcnow()
@@ -33,98 +37,79 @@ def get_formatted_timestamp():
 def extract_selected_values(full_list, indices):
     return [full_list[i] for i in indices if i < len(full_list)]
 
-# 🔹 FIXED PROCESS_ID LOOKUP FOR MULTIPLE GUNS
+# ---------------- PROCESS ID LOOKUP ---------------- #
+
 def get_process_ids(cursor, ip, gun_number):
-    """Return a list of Process_IDs matching the given IP and gun_number"""
+    """Returns ALL matching Process_IDs for single or multiple guns"""
     process_ids = []
+    gun_str = str(gun_number)
 
-    # First table
-    cursor.execute("""
-        SELECT Process_ID, Angle_Array
-        FROM taco_treceability.Process_Register_master
-        WHERE Torque_Array = ?
-          AND Angle_Array LIKE ?
-    """, (ip, f"%{gun_number}%"))
+    queries = [
+        "taco_treceability.Process_Register_master",
+        "taco_treceability.TrayAssemblyBoltingCount_master"
+    ]
 
-    rows = cursor.fetchall()
-    for row in rows:
-        angle_array = row[1].split(",")
-        if str(gun_number) in angle_array:
-            process_ids.append(row[0])
+    for table in queries:
+        cursor.execute(f"""
+            SELECT Process_ID, Angle_Array
+            FROM {table}
+            WHERE Torque_Array = ?
+              AND Angle_Array LIKE ?
+        """, (ip, f"%{gun_str}%"))
 
-    # Second table
-    cursor.execute("""
-        SELECT Process_ID, Angle_Array
-        FROM taco_treceability.TrayAssemblyBoltingCount_master
-        WHERE Torque_Array = ?
-          AND Angle_Array LIKE ?
-    """, (ip, f"%{gun_number}%"))
-
-    rows = cursor.fetchall()
-    for row in rows:
-        angle_array = row[1].split(",")
-        if str(gun_number) in angle_array:
-            process_ids.append(row[0])
+        for pid, angle_array in cursor.fetchall():
+            guns = [g.strip() for g in angle_array.split(",")]
+            if gun_str in guns:
+                process_ids.append(pid)
 
     return process_ids
 
-def poll_and_trigger(ip, gun_number, timestamp):
-    API_ENDPOINT = 'https://misapp.tataautocomp.com:3241/trigger_nomenclature_fetch'
-    last_seen = {}
-    session = requests.Session()
+# ---------------- API TRIGGER (NON-BLOCKING) ---------------- #
 
-    while True:
-        try:
-            conn = pyodbc.connect(SQL_CONN_STR)
-            cursor = conn.cursor()
+def trigger_api(ip, gun_number, timestamp):
+    try:
+        conn = pyodbc.connect(SQL_CONN_STR)
+        cursor = conn.cursor()
 
-            cursor.execute("""
-                SELECT srno, station_id, controller_ip, pack_id, gun,
-                       process_id, line_id, Received_Data, Date_Time
-                FROM taco_treceability.ir_controller_configuration
-                WHERE controller_ip = ?
-                  AND gun = ?
-                  AND Date_Time = ?
-            """, (ip, gun_number, timestamp))
+        cursor.execute("""
+            SELECT srno, station_id, controller_ip, pack_id, gun,
+                   process_id, line_id, Received_Data
+            FROM taco_treceability.ir_controller_configuration
+            WHERE controller_ip = ?
+              AND gun = ?
+              AND Date_Time = ?
+        """, (ip, gun_number, timestamp))
 
-            rows = cursor.fetchall()
+        rows = cursor.fetchall()
+        session = requests.Session()
 
-            for row in rows:
-                srno, station_id, controller_ip, pack_id, gun, process_id, line_id, Received_Data, date_time = row
+        for row in rows:
+            payload = {
+                "station_id": row.station_id,
+                "controller_ip": row.controller_ip,
+                "pack_id": row.pack_id,
+                "gun": row.gun,
+                "process_id": row.process_id,
+                "line_id": row.line_id,
+                "Received_Data": row.Received_Data
+            }
 
-                if last_seen.get(srno) == date_time:
-                    continue
+            try:
+                response = session.post(API_ENDPOINT, json=payload, timeout=5)
+                if response.status_code == 200:
+                    print(f"[API] Triggered for srno {row.srno}")
+                else:
+                    print(f"[API] Failed srno {row.srno} → {response.status_code}")
+            except Exception as e:
+                print("[API] Error:", e)
 
-                last_seen[srno] = date_time
+        cursor.close()
+        conn.close()
 
-                payload = {
-                    "station_id": station_id,
-                    "controller_ip": controller_ip,
-                    "pack_id": pack_id,
-                    "gun": gun,
-                    "process_id": process_id,
-                    "line_id": line_id,
-                    "Received_Data": Received_Data
-                }
+    except Exception as e:
+        print("[API] DB error:", e)
 
-                try:
-                    response = session.post(API_ENDPOINT, json=payload, timeout=5)
-                    if response.status_code == 200:
-                        print(f"[OK] API triggered for srno {srno}")
-                    else:
-                        print(f"[ERROR] API failed for srno {srno}, Status: {response.status_code}")
-                except requests.exceptions.RequestException as api_err:
-                    print(f"[ERROR] API error for srno {srno}: {api_err}")
-
-                time.sleep(0.2)
-
-            cursor.close()
-            conn.close()
-            time.sleep(2)
-
-        except Exception as e:
-            print("[ERROR] Error polling table:", e)
-            time.sleep(5)
+# ---------------- SQL UPDATE ---------------- #
 
 def update_sql(ip, gun_number, torque, angle, timestamp):
     try:
@@ -134,127 +119,107 @@ def update_sql(ip, gun_number, torque, angle, timestamp):
         process_ids = get_process_ids(cursor, ip, gun_number)
 
         if not process_ids:
-            print(f"[SQL] [WARNING] No process_id found for IP {ip}, Gun {gun_number}")
-            cursor.close()
-            conn.close()
+            print(f"[SQL] No process_id for IP {ip}, Gun {gun_number}")
             return
 
         received_data = f"{torque},{angle}"
 
-        for process_id in process_ids:
+        for pid in process_ids:
             cursor.execute("""
                 UPDATE taco_treceability.ir_controller_configuration
                 SET Received_Data = ?, Date_Time = ?
                 WHERE controller_ip = ?
                   AND gun = ?
                   AND process_id = ?
-            """, (received_data, timestamp, ip, gun_number, process_id))
-            print(f"[SQL] [OK] Updated IP {ip}, Gun {gun_number}, Process {process_id} → {received_data} at {timestamp}")
+            """, (received_data, timestamp, ip, gun_number, pid))
+
+            print(f"[SQL] Updated IP {ip}, Gun {gun_number}, PID {pid}")
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        poll_and_trigger(ip, gun_number, timestamp)
+        trigger_api(ip, gun_number, timestamp)
 
-    except Exception as sql_err:
-        print(f"[SQL] [ERROR] Error updating DB for IP {ip}, Gun {gun_number}: {sql_err}")
+    except Exception as e:
+        print("[SQL] Error:", e)
+
+# ---------------- ENIP READER ---------------- #
 
 def enip_reader(ip):
-    print(f"[{current_process().name}] [OK] Reader started for {ip}")
+    print(f"[{current_process().name}] Started for {ip}")
     last_values = {}
 
     while True:
         try:
             with proxy_simple(ip, timeout=3) as via:
-                print(f"[{ip}] [OK] Connected")
+                print(f"[{ip}] Connected")
                 r = redis.Redis(host='localhost', port=6379, db=0)
 
                 while True:
-                    try:
-                        real_value, = via.read([('@4/100/3', 'REAL')])
-                        uint_value, = via.read([('@4/100/3', 'UINT')])
+                    real_value, = via.read([('@4/100/3', 'REAL')])
+                    uint_value, = via.read([('@4/100/3', 'UINT')])
 
-                        real_selected = extract_selected_values(real_value, REAL_INDICES)
-                        uint_selected = extract_selected_values(uint_value, UINT_INDICES)
-                        timestamp = get_formatted_timestamp()
+                    real_selected = extract_selected_values(real_value, REAL_INDICES)
+                    uint_selected = extract_selected_values(uint_value, UINT_INDICES)
+                    timestamp = get_formatted_timestamp()
 
-                        gun_entries = []
-                        redis_update_needed = False
+                    gun_entries = []
+                    redis_update_needed = False
 
-                        for i in range(min(len(real_selected), len(uint_selected))):
-                            torque = real_selected[i]
-                            angle = uint_selected[i]
-                            gun_id = f"gun_{i+1}"
-                            current_pair = (torque, angle)
+                    for i in range(min(len(real_selected), len(uint_selected))):
+                        torque = real_selected[i]
+                        angle = uint_selected[i]
+                        current = (torque, angle)
 
-                            if last_values.get(i) != current_pair:
-                                last_values[i] = current_pair
-                                redis_update_needed = True
-                                update_sql(ip, i + 1, torque, angle, timestamp)
+                        if last_values.get(i) != current:
+                            last_values[i] = current
+                            redis_update_needed = True
 
-                                gun_entries.append(
-                                    f'"{gun_id}": {{"torque": {torque}, "angle": {angle}, "timestamp": "{timestamp}"}}'
-                                )
+                            update_sql(ip, i + 1, torque, angle, timestamp)
 
-                        if redis_update_needed:
-                            redis_json = f'{{"ip": "{ip}", "guns": {{{", ".join(gun_entries)}}}}}'
-                            r.hset(REDIS_HASH, ip, redis_json)
-                            print(f"[{ip}] [OK] Data updated in Redis and SQL")
-                        else:
-                            print(f"[{ip}] [INFO] No gun data changed")
+                            gun_entries.append(
+                                f'"gun_{i+1}": {{"torque": {torque}, "angle": {angle}, "timestamp": "{timestamp}"}}'
+                            )
 
-                        time.sleep(2)
+                    if redis_update_needed:
+                        redis_json = f'{{"ip": "{ip}", "guns": {{{", ".join(gun_entries)}}}}}'
+                        r.hset(REDIS_HASH, ip, redis_json)
+                        print(f"[{ip}] Redis + SQL updated")
 
-                    except Exception as read_err:
-                        print(f"[{ip}] [ERROR] Read error: {read_err}")
-                        break
+                    time.sleep(2)
 
-        except Exception as conn_err:
-            print(f"[{ip}] [ERROR] Connection error: {conn_err}")
+        except Exception as e:
+            print(f"[{ip}] Connection error:", e)
+            time.sleep(5)
 
-        print(f"[{ip}] [INFO] Reconnecting after 5 seconds...")
-        time.sleep(5)
+# ---------------- MAIN ---------------- #
 
 def main():
     processes = {}
-    print("[INFO] Monitoring IP list and managing reader processes...")
+    print("[INFO] Monitoring IP list")
 
-    try:
-        while True:
-            current_ips = set(fetch_ip_list())
-            tracked_ips = set(processes.keys())
+    while True:
+        current_ips = set(fetch_ip_list())
+        tracked_ips = set(processes.keys())
 
-            for ip in current_ips - tracked_ips:
-                print(f"[INFO] Starting ENIP reader for IP: {ip}")
+        for ip in current_ips - tracked_ips:
+            p = Process(target=enip_reader, args=(ip,), name=f"Reader-{ip}")
+            p.start()
+            processes[ip] = p
+
+        for ip in tracked_ips - current_ips:
+            processes[ip].terminate()
+            processes[ip].join()
+            del processes[ip]
+
+        for ip in list(processes):
+            if not processes[ip].is_alive():
                 p = Process(target=enip_reader, args=(ip,), name=f"Reader-{ip}")
                 p.start()
                 processes[ip] = p
 
-            for ip in tracked_ips - current_ips:
-                print(f"[STOP] IP {ip} removed from DB. Terminating process.")
-                processes[ip].terminate()
-                processes[ip].join()
-                del processes[ip]
-
-            for ip in list(processes.keys()):
-                if not processes[ip].is_alive():
-                    print(f"[WARNING] Process for IP {ip} stopped. Restarting.")
-                    p = Process(target=enip_reader, args=(ip,), name=f"Reader-{ip}")
-                    p.start()
-                    processes[ip] = p
-
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-        print("\n[STOP] Gracefully stopping all readers...")
-        for p in processes.values():
-            p.terminate()
-            p.join()
-        print("[OK] All processes terminated.")
-
-    except Exception as e:
-        print("[ERROR] Unexpected error in main process:", e)
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()
