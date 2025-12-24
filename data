@@ -1,78 +1,214 @@
-# trigger_on_change_redis.py
-import time
-import requests
-import redis
-import json
+# reader_process.py
 
-API_ENDPOINT = 'https://mismainapp.tataautocomp.com:3241/torque_api'
+import time
+import redis
+import pytz
+import pyodbc
+import requests
+from datetime import datetime
+from cpppo.server.enip.get_attribute import proxy_simple
+from multiprocessing import Process, current_process
+from get_ips_from_sql import fetch_ip_list
+
+# ---------------- CONSTANTS ----------------
+
+REAL_INDICES = [1, 4, 7, 10, 13, 16]
+UINT_INDICES = [4, 10, 16, 22, 28, 34]
 REDIS_HASH = 'controller_data'
 
-last_seen = {}
+SQL_CONN_STR = (
+    'DRIVER={ODBC Driver 17 for SQL Server};'
+    'SERVER=TGTCNWS904;'
+    'DATABASE=taco_treceability_ir;'
+    'UID=user_mis;'
+    'PWD=admin'
+)
 
-def poll_and_trigger():
-    # ✅ Reuse HTTP connection
-    session = requests.Session()
+API_ENDPOINT = 'https://misapp.tataautocomp.com:3241/trigger_nomenclature_fetch'
+api_session = requests.Session()
+
+# ---------------- HELPERS ----------------
+
+def get_formatted_timestamp():
+    utc_time = datetime.utcnow()
+    ist = pytz.timezone('Asia/Kolkata')
+    local_time = utc_time.replace(tzinfo=pytz.utc).astimezone(ist)
+    return local_time.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def extract_selected_values(full_list, indices):
+    return [full_list[i] for i in indices if i < len(full_list)]
+
+
+# ---------------- SQL UPDATE ----------------
+
+def update_sql(ip, gun_number, torque, angle, timestamp):
+    try:
+        conn = pyodbc.connect(SQL_CONN_STR)
+        cursor = conn.cursor()
+
+        received_data = f"{torque},{angle}"
+
+        cursor.execute("""
+            UPDATE taco_treceability.ir_controller_configuration
+            SET Received_Data = ?, Date_Time = ?
+            WHERE controller_ip = ? AND gun = ?
+        """, (received_data, timestamp, ip, gun_number))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print(f"[SQL] [OK] {ip} Gun {gun_number} → {received_data}")
+        return True, received_data
+
+    except Exception as e:
+        print(f"[SQL] [ERROR] {ip} Gun {gun_number}: {e}")
+        return False, None
+
+
+# ---------------- API TRIGGER ----------------
+
+def trigger_api(payload):
+    try:
+        response = api_session.post(
+            API_ENDPOINT,
+            json=payload,
+            timeout=5
+        )
+
+        if response.status_code == 200:
+            print(f"[API] [OK] Triggered → {payload['controller_ip']} Gun {payload['gun']}")
+        else:
+            print(f"[API] [ERROR] Status {response.status_code} → {payload}")
+
+    except requests.exceptions.RequestException as e:
+        print(f"[API] [ERROR] Request failed → {e}")
+
+
+# ---------------- ENIP READER ----------------
+
+def enip_reader(ip):
+    print(f"[{current_process().name}] [STARTED] {ip}")
+    last_values = {}
+
     r = redis.Redis(host='localhost', port=6379, db=0)
 
     while True:
         try:
-            # Fetch all IP data from Redis
-            all_data = r.hgetall(REDIS_HASH)  # returns dict of {ip: json_bytes}
-            
-            for ip_bytes, json_bytes in all_data.items():
-                ip = ip_bytes.decode()
-                try:
-                    data = json.loads(json_bytes)
-                except json.JSONDecodeError:
-                    print(f"[ERROR] Invalid JSON for IP {ip}")
-                    continue
+            with proxy_simple(ip, timeout=3) as via:
+                print(f"[{ip}] [CONNECTED]")
 
-                guns = data.get('guns', {})
-                
-                for gun_id, gun_data in guns.items():
-                    # Unique key for last_seen tracking
-                    key = f"{ip}_{gun_id}"
-                    timestamp = gun_data.get('timestamp')
-
-                    if last_seen.get(key) == timestamp:
-                        continue  # skip unchanged data
-
-                    last_seen[key] = timestamp
-
-                    payload = {
-                        "station_id": None,          # Optional: set if available
-                        "controller_ip": ip,
-                        "pack_id": None,             # Optional: set if available
-                        "gun": gun_id,
-                        "process_id": None,          # Optional: set if available
-                        "line_id": None,             # Optional: set if available
-                        "Received_Data": f"{gun_data.get('torque')},{gun_data.get('angle')}"
-                    }
-
-                    print("payload", payload)
-
+                while True:
                     try:
-                        response = session.post(
-                            API_ENDPOINT,
-                            json=payload,
-                            timeout=5   # ✅ prevent hanging sockets
-                        )
+                        real_value, = via.read([('@4/100/3', 'REAL')])
+                        uint_value, = via.read([('@4/100/3', 'UINT')])
 
-                        if response.status_code == 200:
-                            print(f"[OK] API triggered for {key}")
+                        real_selected = extract_selected_values(real_value, REAL_INDICES)
+                        uint_selected = extract_selected_values(uint_value, UINT_INDICES)
+                        timestamp = get_formatted_timestamp()
+
+                        gun_entries = []
+                        redis_update_needed = False
+
+                        for i in range(min(len(real_selected), len(uint_selected))):
+                            torque = real_selected[i]
+                            angle = uint_selected[i]
+                            gun_number = i + 1
+
+                            current_pair = (torque, angle)
+
+                            if last_values.get(i) != current_pair:
+                                last_values[i] = current_pair
+                                redis_update_needed = True
+
+                                # SQL Update
+                                success, received_data = update_sql(
+                                    ip, gun_number, torque, angle, timestamp
+                                )
+
+                                # API Trigger (IMMEDIATE)
+                                if success:
+                                    payload = {
+                                        "station_id": None,
+                                        "controller_ip": ip,
+                                        "pack_id": None,
+                                        "gun": gun_number,
+                                        "process_id": None,
+                                        "line_id": None,
+                                        "Received_Data": received_data
+                                    }
+                                    trigger_api(payload)
+
+                                gun_entries.append(
+                                    f'"gun_{gun_number}": '
+                                    f'{{"torque": {torque}, "angle": {angle}, "timestamp": "{timestamp}"}}'
+                                )
+
+                        # Redis Update
+                        if redis_update_needed:
+                            redis_json = f'{{"ip": "{ip}", "guns": {{{", ".join(gun_entries)}}}}}'
+                            r.hset(REDIS_HASH, ip, redis_json)
+                            print(f"[{ip}] [REDIS] Updated")
+
                         else:
-                            print(f"[ERROR] API failed for {key}, Status: {response.status_code}")
+                            print(f"[{ip}] [NO CHANGE]")
 
-                    except requests.exceptions.RequestException as api_err:
-                        print(f"[ERROR] API error for {key}: {api_err}")
+                        time.sleep(2)
 
-                    time.sleep(0.2)  # ✅ throttle API calls
+                    except Exception as read_err:
+                        print(f"[{ip}] [READ ERROR] {read_err}")
+                        break
 
-            time.sleep(2)  # poll interval
+        except Exception as conn_err:
+            print(f"[{ip}] [CONNECTION ERROR] {conn_err}")
 
-        except Exception as e:
-            print("[ERROR] Error polling Redis:", e)
-            time.sleep(5)
+        print(f"[{ip}] [RECONNECTING] in 5 seconds...")
+        time.sleep(5)
+
+
+# ---------------- MAIN PROCESS MANAGER ----------------
+
+def main():
+    processes = {}
+    print("[MAIN] Monitoring IP list...")
+
+    try:
+        while True:
+            current_ips = set(fetch_ip_list())
+            tracked_ips = set(processes.keys())
+
+            # Start new IPs
+            for ip in current_ips - tracked_ips:
+                print(f"[MAIN] Starting reader for {ip}")
+                p = Process(target=enip_reader, args=(ip,), name=f"Reader-{ip}")
+                p.start()
+                processes[ip] = p
+
+            # Stop removed IPs
+            for ip in tracked_ips - current_ips:
+                print(f"[MAIN] Stopping reader for {ip}")
+                processes[ip].terminate()
+                processes[ip].join()
+                del processes[ip]
+
+            # Restart dead processes
+            for ip in list(processes.keys()):
+                if not processes[ip].is_alive():
+                    print(f"[MAIN] Restarting reader for {ip}")
+                    p = Process(target=enip_reader, args=(ip,), name=f"Reader-{ip}")
+                    p.start()
+                    processes[ip] = p
+
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("[MAIN] Shutting down...")
+        for p in processes.values():
+            p.terminate()
+            p.join()
+        print("[MAIN] All readers stopped")
+
 
 if __name__ == "__main__":
-    poll_and_trigger()
+    main()
