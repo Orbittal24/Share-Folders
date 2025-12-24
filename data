@@ -36,13 +36,15 @@ def extract_selected_values(full_list, indices):
     return [full_list[i] for i in indices if i < len(full_list)]
 
 
-# 🔹 NEW FUNCTION TO GET PROCESS_ID
-def get_process_id(cursor):
+# 🔹 FIXED PROCESS_ID LOOKUP (BASED ON YOUR DATA)
+def get_process_id(cursor, ip, gun_number):
     cursor.execute("""
         SELECT Process_ID
         FROM taco_treceability.Process_Register_master
-        WHERE Torque_Array = '' AND Angle_Array = ''
-    """)
+        WHERE Torque_Array = ?
+          AND Angle_Array = ?
+    """, (ip, str(gun_number)))
+
     row = cursor.fetchone()
     if row:
         return row[0]
@@ -50,8 +52,10 @@ def get_process_id(cursor):
     cursor.execute("""
         SELECT Process_ID
         FROM taco_treceability.TrayAssemblyBoltingCount_master
-        WHERE Torque_Array = '' AND Angle_Array = ''
-    """)
+        WHERE Torque_Array = ?
+          AND Angle_Array = ?
+    """, (ip, str(gun_number)))
+
     row = cursor.fetchone()
     if row:
         return row[0]
@@ -98,8 +102,6 @@ def poll_and_trigger(ip, gun_number, timestamp):
                     "Received_Data": Received_Data
                 }
 
-                print("payload", payload)
-
                 try:
                     response = session.post(API_ENDPOINT, json=payload, timeout=5)
                     if response.status_code == 200:
@@ -125,8 +127,8 @@ def update_sql(ip, gun_number, torque, angle, timestamp):
         conn = pyodbc.connect(SQL_CONN_STR)
         cursor = conn.cursor()
 
-        # 🔹 Fetch process_id before update
-        process_id = get_process_id(cursor)
+        # 🔹 Correct process_id fetch
+        process_id = get_process_id(cursor, ip, gun_number)
 
         if not process_id:
             print(f"[SQL] [WARNING] No process_id found for IP {ip}, Gun {gun_number}")
@@ -190,7 +192,6 @@ def enip_reader(ip):
                             if last_values.get(i) != current_pair:
                                 last_values[i] = current_pair
                                 redis_update_needed = True
-
                                 update_sql(ip, i + 1, torque, angle, timestamp)
 
                                 gun_entries.append(
