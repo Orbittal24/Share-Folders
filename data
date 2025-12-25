@@ -1,5 +1,5 @@
 SELECT TOP 1 Process_ID, Running_Count, Pack_ID, Angle_Array
-FROM taco_treceability.Process_Register_master
-WHERE Torque_Array = '10.9.4.137'
-  AND CHARINDEX(',2,', ',' + Angle_Array + ',') > 0
-ORDER BY Process_ID DESC
+        FROM taco_treceability.Process_Register_master
+        WHERE Torque_Array = ?
+          AND CHARINDEX(',' + ?, ',' + Angle_Array + ',') > 0
+        ORDER BY Process_ID DES
