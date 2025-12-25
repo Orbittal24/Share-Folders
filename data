@@ -34,25 +34,103 @@ def extract_selected_values(full_list, indices):
     return [full_list[i] for i in indices if i < len(full_list)]
 
 
-def update_sql(ip, gun_number, torque, angle, timestamp):
+# ------------------------------------------------------------------
+# 🔍 PROCESS LOOKUP (WITH COMMA-SEPARATED Angle_Array SUPPORT)
+# ------------------------------------------------------------------
+def find_process_records(conn, controller_ip, gun):
+    cursor = conn.cursor()
+    results = []
+
+    queries = [
+        """
+        SELECT Process_ID, Running_Count, Pack_ID, Angle_Array
+        FROM taco_treceability.Process_Register_master
+        WHERE Torque_Array = ?
+        """,
+        """
+        SELECT Process_ID, Running_Count, Pack_ID, Angle_Array
+        FROM taco_treceability.TrayAssemblyBoltingCount_master
+        WHERE Torque_Array = ?
+        """
+    ]
+
+    for query in queries:
+        cursor.execute(query, controller_ip)
+        rows = cursor.fetchall()
+
+        for row in rows:
+            angle_values = str(row.Angle_Array).split(',')
+            angle_values = [a.strip() for a in angle_values]
+
+            if str(gun) in angle_values:
+                results.append({
+                    'Process_ID': row.Process_ID,
+                    'Running_Count': row.Running_Count,
+                    'Pack_ID': row.Pack_ID,
+                    'gun': gun
+                })
+
+        if results:
+            break  # ✅ stop after first matching table
+
+    cursor.close()
+    return results
+
+
+# ------------------------------------------------------------------
+# 🧾 SQL UPDATE (MULTI-ROW SAFE)
+# ------------------------------------------------------------------
+def update_sql_with_process(ip, gun, torque, angle, timestamp):
     try:
         conn = pyodbc.connect(SQL_CONN_STR)
         cursor = conn.cursor()
+
+        process_records = find_process_records(conn, ip, gun)
+
+        if not process_records:
+            print(f"[SQL] [SKIP] No process record for IP {ip}, Gun {gun}")
+            conn.close()
+            return False
+
         received_data = f"{torque},{angle}"
-        cursor.execute("""
-            UPDATE taco_treceability.ir_controller_configuration
-            SET Received_Data = ?, Date_Time = ?
-            WHERE controller_ip = ? AND gun = ?
-        """, (received_data, timestamp, ip, gun_number))
+
+        for rec in process_records:
+            cursor.execute("""
+                UPDATE taco_treceability.ir_controller_configuration
+                SET Received_Data = ?, Date_Time = ?
+                WHERE controller_ip = ?
+                  AND gun = ?
+                  AND Process_ID = ?
+                  AND Running_Count = ?
+                  AND Pack_ID = ?
+            """, (
+                received_data,
+                timestamp,
+                ip,
+                rec['gun'],
+                rec['Process_ID'],
+                rec['Running_Count'],
+                rec['Pack_ID']
+            ))
+
+            print(
+                f"[SQL] [OK] Updated IP {ip}, Gun {gun} → {received_data}"
+            )
+
         conn.commit()
         cursor.close()
         conn.close()
-        print(f"[SQL] [OK] Updated IP {ip}, Gun {gun_number} → {received_data}")
+        return True
+
     except Exception as e:
-        print(f"[SQL] [ERROR] {ip} Gun {gun_number}: {e}")
+        print(f"[SQL] [ERROR] {ip} Gun {gun}: {e}")
+        return False
 
 
-def enip_reader(ip, stop_event: Event):
+# ------------------------------------------------------------------
+# 📡 ENIP READER PROCESS
+# ------------------------------------------------------------------
+def enip_reader(ip, stop_event):
     print(f"[{current_process().name}] Reader started for {ip}")
     last_values = {}
     retry_delay = 5
@@ -63,11 +141,10 @@ def enip_reader(ip, stop_event: Event):
         try:
             with proxy_simple(ip, timeout=3) as via:
                 print(f"[{ip}] Connected")
-                retry_delay = 5  # reset on success
+                retry_delay = 5
 
                 while not stop_event.is_set():
                     try:
-                        # ✅ Combined read (same data, fewer CIP calls)
                         real_value, uint_value = via.read([
                             ('@4/100/3', 'REAL'),
                             ('@4/100/3', 'UINT'),
@@ -83,19 +160,27 @@ def enip_reader(ip, stop_event: Event):
                         for i in range(min(len(real_selected), len(uint_selected))):
                             torque = real_selected[i]
                             angle = uint_selected[i]
-                            gun_id = f"gun_{i+1}"
+                            gun_id = f"gun_{i + 1}"
                             current_pair = (torque, angle)
 
                             if last_values.get(i) != current_pair:
                                 last_values[i] = current_pair
-                                redis_update_needed = True
-                                update_sql(ip, i + 1, torque, angle, timestamp)
 
-                                gun_entries.append(
-                                    f'"{gun_id}": {{"torque": {torque}, '
-                                    f'"angle": {angle}, '
-                                    f'"timestamp": "{timestamp}"}}'
+                                sql_updated = update_sql_with_process(
+                                    ip,
+                                    i + 1,
+                                    torque,
+                                    angle,
+                                    timestamp
                                 )
+
+                                if sql_updated:
+                                    redis_update_needed = True
+                                    gun_entries.append(
+                                        f'"{gun_id}": {{"torque": {torque}, '
+                                        f'"angle": {angle}, '
+                                        f'"timestamp": "{timestamp}"}}'
+                                    )
 
                         if redis_update_needed:
                             redis_json = f'{{"ip": "{ip}", "guns": {{{", ".join(gun_entries)}}}}}'
@@ -104,11 +189,11 @@ def enip_reader(ip, stop_event: Event):
                         else:
                             print(f"[{ip}] No gun data changed")
 
-                        time.sleep(5)  # same logic, safer rate
+                        time.sleep(5)
 
                     except Exception as read_err:
                         print(f"[{ip}] Read error: {read_err}")
-                        break  # reconnect
+                        break
 
         except Exception as conn_err:
             print(f"[{ip}] Connection error: {conn_err}")
@@ -118,6 +203,9 @@ def enip_reader(ip, stop_event: Event):
     print(f"[{ip}] Reader stopped cleanly")
 
 
+# ------------------------------------------------------------------
+# 🚀 MAIN PROCESS
+# ------------------------------------------------------------------
 def main():
     processes = {}
     stop_event = Event()
