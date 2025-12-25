@@ -9,7 +9,9 @@ from cpppo.server.enip.get_attribute import proxy_simple
 from multiprocessing import Process, current_process, Event
 from get_ips_from_sql import fetch_ip_list
 
-# Constants
+# ------------------------------------------------------------------
+# CONSTANTS
+# ------------------------------------------------------------------
 REAL_INDICES = [1, 4, 7, 10, 13, 16]
 UINT_INDICES = [4, 10, 16, 22, 28, 34]
 REDIS_HASH = 'controller_data'
@@ -22,7 +24,9 @@ SQL_CONN_STR = (
     'PWD=admin'
 )
 
-
+# ------------------------------------------------------------------
+# UTILS
+# ------------------------------------------------------------------
 def get_formatted_timestamp():
     utc_time = datetime.utcnow()
     ist = pytz.timezone('Asia/Kolkata')
@@ -33,24 +37,24 @@ def get_formatted_timestamp():
 def extract_selected_values(full_list, indices):
     return [full_list[i] for i in indices if i < len(full_list)]
 
-
 # ------------------------------------------------------------------
-# 🔍 PROCESS LOOKUP (WITH COMMA-SEPARATED Angle_Array SUPPORT)
+# 🔍 PROCESS LOOKUP (STRICT – RETURNS ONLY ONE RECORD)
 # ------------------------------------------------------------------
-def find_process_records(conn, controller_ip, gun):
+def find_process_record(conn, controller_ip, gun):
     cursor = conn.cursor()
-    results = []
 
     queries = [
         """
-        SELECT Process_ID, Running_Count, Pack_ID, Angle_Array
+        SELECT TOP 1 Process_ID, Running_Count, Pack_ID, Angle_Array
         FROM taco_treceability.Process_Register_master
         WHERE Torque_Array = ?
+        ORDER BY Process_ID DESC
         """,
         """
-        SELECT Process_ID, Running_Count, Pack_ID, Angle_Array
+        SELECT TOP 1 Process_ID, Running_Count, Pack_ID, Angle_Array
         FROM taco_treceability.TrayAssemblyBoltingCount_master
         WHERE Torque_Array = ?
+        ORDER BY Process_ID DESC
         """
     ]
 
@@ -59,73 +63,63 @@ def find_process_records(conn, controller_ip, gun):
         rows = cursor.fetchall()
 
         for row in rows:
-            angle_values = str(row.Angle_Array).split(',')
-            angle_values = [a.strip() for a in angle_values]
-
-            if str(gun) in angle_values:
-                results.append({
-                    'Process_ID': row.Process_ID,
-                    'Running_Count': row.Running_Count,
-                    'Pack_ID': row.Pack_ID,
-                    'gun': gun
-                })
-
-        if results:
-            break  # ✅ stop after first matching table
+            angles = [a.strip() for a in str(row.Angle_Array).split(',')]
+            if str(gun) in angles:
+                cursor.close()
+                return {
+                    "Process_ID": row.Process_ID,
+                    "Running_Count": row.Running_Count,
+                    "Pack_ID": row.Pack_ID
+                }
 
     cursor.close()
-    return results
-
+    return None
 
 # ------------------------------------------------------------------
-# 🧾 SQL UPDATE (MULTI-ROW SAFE)
+# 🧾 SQL UPDATE (ONE ROW ONLY)
 # ------------------------------------------------------------------
 def update_sql_with_process(ip, gun, torque, angle, timestamp):
     try:
         conn = pyodbc.connect(SQL_CONN_STR)
         cursor = conn.cursor()
 
-        process_records = find_process_records(conn, ip, gun)
+        process = find_process_record(conn, ip, gun)
 
-        if not process_records:
-            print(f"[SQL] [SKIP] No process record for IP {ip}, Gun {gun}")
+        if not process:
+            print(f"[SQL] [SKIP] No process mapping for IP {ip}, Gun {gun}")
             conn.close()
             return False
 
         received_data = f"{torque},{angle}"
 
-        for rec in process_records:
-            cursor.execute("""
-                UPDATE taco_treceability.ir_controller_configuration
-                SET Received_Data = ?, Date_Time = ?
-                WHERE controller_ip = ?
-                  AND gun = ?
-                  AND Process_ID = ?
-                  AND Running_Count = ?
-                  AND Pack_ID = ?
-            """, (
-                received_data,
-                timestamp,
-                ip,
-                rec['gun'],
-                rec['Process_ID'],
-                rec['Running_Count'],
-                rec['Pack_ID']
-            ))
-
-            print(
-                f"[SQL] [OK] Updated IP {ip}, Gun {gun} → {received_data}"
-            )
+        cursor.execute("""
+            UPDATE taco_treceability.ir_controller_configuration
+            SET Received_Data = ?, Date_Time = ?
+            WHERE controller_ip = ?
+              AND gun = ?
+              AND Process_ID = ?
+              AND Running_Count = ?
+              AND Pack_ID = ?
+        """, (
+            received_data,
+            timestamp,
+            ip,
+            gun,
+            process["Process_ID"],
+            process["Running_Count"],
+            process["Pack_ID"]
+        ))
 
         conn.commit()
         cursor.close()
         conn.close()
+
+        print(f"[SQL] [OK] Updated IP {ip}, Gun {gun} → {received_data}")
         return True
 
     except Exception as e:
         print(f"[SQL] [ERROR] {ip} Gun {gun}: {e}")
         return False
-
 
 # ------------------------------------------------------------------
 # 📡 ENIP READER PROCESS
@@ -160,7 +154,8 @@ def enip_reader(ip, stop_event):
                         for i in range(min(len(real_selected), len(uint_selected))):
                             torque = real_selected[i]
                             angle = uint_selected[i]
-                            gun_id = f"gun_{i + 1}"
+                            gun_no = i + 1
+                            gun_id = f"gun_{gun_no}"
                             current_pair = (torque, angle)
 
                             if last_values.get(i) != current_pair:
@@ -168,7 +163,7 @@ def enip_reader(ip, stop_event):
 
                                 sql_updated = update_sql_with_process(
                                     ip,
-                                    i + 1,
+                                    gun_no,
                                     torque,
                                     angle,
                                     timestamp
@@ -202,9 +197,8 @@ def enip_reader(ip, stop_event):
 
     print(f"[{ip}] Reader stopped cleanly")
 
-
 # ------------------------------------------------------------------
-# 🚀 MAIN PROCESS
+# 🚀 MAIN
 # ------------------------------------------------------------------
 def main():
     processes = {}
