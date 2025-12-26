@@ -1,265 +1,159 @@
-import time
-import redis
-import pytz
-import pyodbc
-import requests
-from datetime import datetime
-from cpppo.server.enip.get_attribute import proxy_simple
-from multiprocessing import Process, Event
-from threading import Thread
-from get_ips_from_sql import fetch_ip_list
-
-# ------------------------------------------------------------------
-# CONSTANTS
-# ------------------------------------------------------------------
-REAL_INDICES = [1, 4, 7, 10, 13, 16]
-UINT_INDICES = [4, 10, 16, 22, 28, 34]
-
-REDIS_HASH = 'controller_data'
-
-SQL_CONN_STR = (
-    'DRIVER={ODBC Driver 17 for SQL Server};'
-    'SERVER=TGTCNWS904;'
-    'DATABASE=taco_treceability_ir;'
-    'UID=user_mis;'
-    'PWD=admin'
-)
-
-API_ENDPOINT = 'https://misapp.tataautocomp.com:3241/trigger_nomenclature_fetch'
-
-# ------------------------------------------------------------------
-# UTILS
-# ------------------------------------------------------------------
-def get_formatted_timestamp():
-    utc = datetime.utcnow()
-    ist = pytz.timezone('Asia/Kolkata')
-    return utc.replace(tzinfo=pytz.utc).astimezone(ist).strftime('%Y-%m-%d %H:%M:%S')
-
-def extract_selected_values(data, indices):
-    return [data[i] for i in indices if i < len(data)]
-
-# ------------------------------------------------------------------
-# API (ASYNC)
-# ------------------------------------------------------------------
-def trigger_api(payload):
-    start_time = time.time()
-    try:
-        r = requests.post(API_ENDPOINT, json=payload, timeout=5)
-        elapsed = time.time() - start_time
-        if r.status_code != 200:
-            print("[API ERROR]", r.status_code, f"Time: {elapsed:.3f}s")
-        else:
-            print("[API SUCCESS]", r.status_code, f"Time: {elapsed:.3f}s")
-            print("Response:", r.text)
-    except Exception as e:
-        elapsed = time.time() - start_time
-        print("[API FAIL]", e, f"Time: {elapsed:.3f}s")
-
-def trigger_api_async(payload):
-    Thread(target=trigger_api, args=(payload,), daemon=True).start()
-
-# ------------------------------------------------------------------
-# PROCESS LOOKUP
-# ------------------------------------------------------------------
-def find_process_record(cursor, controller_ip, gun):
-    queries = [
-        """
-        SELECT TOP 1 Process_ID, Running_Count, Pack_ID, Angle_Array, Line
-        FROM taco_treceability.Process_Register_master
-        WHERE Torque_Array = ?
-          AND CHARINDEX(',' + ?, ',' + Angle_Array + ',') > 0
-        ORDER BY Process_ID DESC
-        """,
-        """
-        SELECT TOP 1 Process_ID, Running_Count, Pack_ID, Angle_Array, Line
-        FROM taco_treceability.TrayAssemblyBoltingCount_master
-        WHERE Torque_Array = ?
-          AND Angle_Array = ?
-        ORDER BY Process_ID DESC
-        """
-    ]
-    for q in queries:
-        cursor.execute(q, controller_ip, str(gun))
-        for row in cursor.fetchall():
-            if str(gun) in str(row.Angle_Array).split(','):
-                return {
-                    "Process_ID": row.Process_ID,
-                    "Running_Count": row.Running_Count,
-                    "Pack_ID": row.Pack_ID,
-                    "Line": row.Line
-                }
-    return None
-
-# ------------------------------------------------------------------
-# SQL + REDIS + API
-# ------------------------------------------------------------------
-def update_sql_redis_api(
-    conn, redis_client,
-    ip, gun, torque, angle, timestamp,
-    last_sql_values
+@router.post("/torque_api_normal")
+async def trigger_nomenclature_fetch(
+    payload: dict = Body(...),
+    db: Session = Depends(get_ir_db),
+    master_db: Session = Depends(get_MASTER_IR_db)
 ):
-    key = f"{ip}_{gun}"
-    received_data = f"{torque},{angle}"
-
-    cursor = conn.cursor()
-    process = find_process_record(cursor, ip, gun)
-    if not process:
-        print(f"[WARN] No process found for {ip} gun {gun}")
-        return False
-
-    # --- Trigger API for every new reading ---
-    api_key = f"{ip}{gun}{process['Process_ID']}"
-    trigger_api_async({
-        "station_id": process["Running_Count"],
-        "controller_ip": ip,
-        "pack_id": process["Pack_ID"],
-        "gun": gun,
-        "process_id": process["Process_ID"],
-        "line_id": process["Line"],
-        "Received_Data": received_data
-    })
-
-    # --- SQL UPDATE ---
-    cursor.execute("""
-        UPDATE taco_treceability.ir_controller_configuration
-        SET Received_Data = ?, Date_Time = ?
-        WHERE controller_ip = ?
-          AND gun = ?
-          AND Process_ID = ?
-          AND station_id = ?
-          AND Pack_ID = ?
-          AND (Received_Data <> ? OR Received_Data IS NULL)
-    """, (
-        received_data, timestamp, ip, gun,
-        process["Process_ID"],
-        process["Running_Count"],
-        process["Pack_ID"],
-        received_data
-    ))
-
-    if cursor.rowcount > 0:
-        conn.commit()
-
-    # --- Redis UPDATE ---
-    redis_client.hset(
-        REDIS_HASH,
-        ip,
-        f'{{"ip":"{ip}","guns":{{"gun_{gun}":{{"torque":{torque},"angle":{angle},"timestamp":"{timestamp}"}}}}}}'
-    )
-
-    # --- Always update last_sql_values for tracking ---
-    last_sql_values[key] = received_data
-
-    return True
-
-# ------------------------------------------------------------------
-# ENIP READER
-# ------------------------------------------------------------------
-def enip_reader(ip, stop_event):
-    print(f"[START] {ip}")
-    conn = pyodbc.connect(SQL_CONN_STR)
-    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
-
-    last_sql_values = {}
-    pending_torque = {}
-    retry = 5
-
-    while not stop_event.is_set():
-        try:
-            with proxy_simple(ip, timeout=3) as via:
-                retry = 5
-                print(f"[CONNECTED] {ip}")
-
-                while not stop_event.is_set():
-                    real, uint = via.read([
-                        ('@4/100/3', 'REAL'),
-                        ('@4/100/3', 'UINT'),
-                    ])
-                    real_vals = extract_selected_values(real, REAL_INDICES)
-                    uint_vals = extract_selected_values(uint, UINT_INDICES)
-                    timestamp = get_formatted_timestamp()
-
-                    # Store all readings in pending buffer
-                    for i in range(min(len(real_vals), len(uint_vals))):
-                        key = f"{ip}_{i+1}"
-                        pair = (real_vals[i], uint_vals[i])
-                        pending_torque[key] = pair
-
-                    # Flush pending readings
-                    for key, pair in list(pending_torque.items()):
-                        success = update_sql_redis_api(
-                            conn, redis_client,
-                            ip, int(key.split('_')[1]),
-                            pair[0], pair[1],
-                            timestamp,
-                            last_sql_values
-                        )
-                        if success:
-                            del pending_torque[key]
-
-                    time.sleep(0.1)
-
-        except Exception as e:
-            print(f"[RECONNECT] {ip} {e}")
-            time.sleep(retry)
-            retry = min(retry * 2, 60)
-
-            # On reconnect, flush pending readings
-            for key, pair in list(pending_torque.items()):
-                timestamp = get_formatted_timestamp()
-                success = update_sql_redis_api(
-                    conn, redis_client,
-                    ip, int(key.split('_')[1]),
-                    pair[0], pair[1],
-                    timestamp,
-                    last_sql_values
-                )
-                if success:
-                    del pending_torque[key]
-
-    conn.close()
-    print(f"[STOPPED] {ip}")
-
-# ------------------------------------------------------------------
-# MAIN
-# ------------------------------------------------------------------
-def main():
-    processes = {}
-    stop_event = Event()
-    print("[INFO] Monitoring controllers...")
-
     try:
-        while not stop_event.is_set():
-            current_ips = set(fetch_ip_list())
-            tracked_ips = set(processes.keys())
+        # ---------------------------------------------------
+        # Extract & validate payload
+        # ---------------------------------------------------
+        pack_id = payload.get("pack_id")
+        process_id = payload.get("process_id")
+        line_id = payload.get("line_id")
+        station_id = payload.get("station_id")
+        received_data = payload.get("Received_Data")
+        print(f"Received Payload: {payload}")
 
-            # Start new IPs
-            for ip in current_ips - tracked_ips:
-                p = Process(target=enip_reader, args=(ip, stop_event), name=f"Reader-{ip}")
-                p.start()
-                processes[ip] = p
+        if None in (pack_id, process_id, line_id, station_id, received_data):
+            raise HTTPException(status_code=400, detail="Missing required fields")
 
-            # Remove disconnected IPs
-            for ip in tracked_ips - current_ips:
-                processes[ip].terminate()
-                del processes[ip]
+        try:
+            torque_str, angle_str = received_data.split(",")
+            torque = round(float(torque_str), 2)
+            angle = round(float(angle_str), 2)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Received_Data format")
 
-            # Restart dead processes
-            for ip, p in list(processes.items()):
-                if not p.is_alive():
-                    np = Process(target=enip_reader, args=(ip, stop_event))
-                    np.start()
-                    processes[ip] = np
+        # ---------------------------------------------------
+        # Fetch torque / angle range (DB instead of API)
+        # ---------------------------------------------------
+        process = master_db.query(ProcessMaster).filter(
+            ProcessMaster.Station_ID == station_id,
+            ProcessMaster.Pack_ID == pack_id,
+            ProcessMaster.Process_ID == process_id
+        ).first()
 
-            time.sleep(1)
+        if not process:
+            raise HTTPException(status_code=404, detail="Process not found")
 
-    except KeyboardInterrupt:
-        print("[STOP] Shutting down...")
-        stop_event.set()
-        for p in processes.values():
-            p.join()
+        def parse_range(val: str):
+            low, high = map(float, val.replace("Nm", "").replace("°", "").split("-"))
+            return low, high
 
-    print("[OK] Clean shutdown")
+        torque_min, torque_max = parse_range(process.Torque_Range)
+        angle_min, angle_max = parse_range(process.Angle_Range)
 
-if __name__ == "__main__":
-    main()
+        if not (torque_min <= torque <= torque_max and angle_min <= angle <= angle_max):
+            return {
+                "message": "Torque or angle out of range",
+                "torque": torque,
+                "angle": angle,
+                "expected_torque_range": f"{torque_min}-{torque_max}",
+                "expected_angle_range": f"{angle_min}-{angle_max}",
+                "skipped": True
+            }
+
+        # ===================================================
+        # ELSE → NORMAL PROCESS REGISTER FLOW
+        # ===================================================
+        result = db.query(ProcessRegisterMaster).filter(
+            ProcessRegisterMaster.Pack_ID == pack_id,
+            ProcessRegisterMaster.Process_ID == process_id,
+            ProcessRegisterMaster.Line == line_id,
+            ProcessRegisterMaster.Running_Count == station_id
+        ).order_by(ProcessRegisterMaster.srno.desc()).first()
+
+        if not result or not result.Module_barcode:
+            raise HTTPException(status_code=404, detail="Module barcode not found")
+
+        module_barcode = result.Module_barcode
+
+        # ---------------------------------------------------
+        # fetch_nomenclature API (UNCHANGED, AS REQUESTED)
+        # ---------------------------------------------------
+        # async with httpx.AsyncClient(verify=SSL_PATH) as client:
+        #     response = await client.get(f"{API_URL}/fetch_nomenclature/{module_barcode}")
+
+        # if response.status_code != 200:
+        #     raise HTTPException(status_code=502, detail="fetch_nomenclature failed")
+
+        # nomenclature = response.json()[0]
+        # pack_creation = nomenclature["Pack_creation_Date"].split("T")[0]
+        
+        formatted_date = datetime.strptime(result.Time, "%Y-%m-%d").strftime("%d-%m-%y")
+
+        # ---------------------------------------------------
+        # Dynamic process_register table (DB)
+        # ---------------------------------------------------
+        inspector = inspect(engine_ir)
+        tables = inspector.get_table_names(schema="taco_treceability")
+
+        table_name = next(
+            (t for t in tables if t.lower().startswith(f"process_register_{formatted_date.lower()}")),
+            None
+        )
+
+        if not table_name:
+            raise HTTPException(status_code=404, detail="Process register table not found")
+
+        Model = get_dynamic_model(
+            table_name.replace("process_register_", "")
+        )
+
+        record = db.query(Model).filter(
+            Model.Pack_ID == pack_id,
+            Model.Process_ID == process_id,
+            Model.Module_barcode == module_barcode
+        ).first()
+
+        if not record:
+            raise HTTPException(status_code=404, detail="Process record not found")
+
+        torque_arr = json.loads(record.Torque_Array or "[]")
+        angle_arr = json.loads(record.Angle_Array or "[]")
+
+        if record.Process_Status == "Completed":
+            return {
+                "message": "Process already completed",
+                "Running_Count": record.Running_Count,
+                "Target_Count": record.Target_Count
+            }
+
+        torque_arr.append(torque)
+        angle_arr.append(angle)
+
+        record.Running_Count += 1
+        if record.Running_Count == record.Target_Count:
+            record.Process_Status = "Completed"
+
+        record.Torque_Array = json.dumps(torque_arr)
+        record.Angle_Array = json.dumps(angle_arr)
+
+        db.commit()
+
+        # Delete master after completion (same logic)
+        print("Process Status",record.Process_Status)
+        if record.Process_Status == "Completed":
+            db.query(ProcessRegisterMaster).filter(
+                ProcessRegisterMaster.Pack_ID == pack_id,
+                ProcessRegisterMaster.Process_ID == process_id,
+                ProcessRegisterMaster.Line == line_id,
+                ProcessRegisterMaster.Module_barcode == module_barcode,
+                ProcessRegisterMaster.Running_Count == station_id
+                
+            ).delete(synchronize_session=False)
+            db.commit()
+
+        return {
+            "message": "Process register updated successfully",
+            "Torque_Array": torque_arr,
+            "Angle_Array": angle_arr,
+            "Running_Count": record.Running_Count,
+            "Process_Status": record.Process_Status
+        }
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
