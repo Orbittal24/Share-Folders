@@ -2,12 +2,10 @@ import time
 import redis
 import pytz
 import pyodbc
-import requests
 import json
 from datetime import datetime
 from cpppo.server.enip.get_attribute import proxy_simple
 from multiprocessing import Process, Event
-from threading import Thread
 from get_ips_from_sql import fetch_ip_list
 
 # ------------------------------------------------------------------
@@ -40,6 +38,34 @@ def extract_selected_values(data, indices):
 
 
 # ------------------------------------------------------------------
+# FIND RANGE-BASED PROCESS REGISTER TABLE
+# ------------------------------------------------------------------
+def find_process_register_table(cursor, process_time):
+    cursor.execute("""
+        SELECT TABLE_NAME
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = 'taco_treceability'
+          AND TABLE_NAME LIKE 'Process_Register_%'
+    """)
+
+    for (table_name,) in cursor.fetchall():
+        try:
+            # Example: Process_Register_24-12-25_26-12-25
+            name = table_name.replace("Process_Register_", "")
+            start_str, end_str = name.split("_")
+
+            start_date = datetime.strptime(start_str, "%d-%m-%y").date()
+            end_date = datetime.strptime(end_str, "%d-%m-%y").date()
+
+            if start_date <= process_time.date() <= end_date:
+                return table_name
+        except Exception:
+            continue
+
+    return None
+
+
+# ------------------------------------------------------------------
 # PROCESS LOOKUP (ROW → DICT)
 # ------------------------------------------------------------------
 def find_process_record(cursor, controller_ip, gun):
@@ -68,12 +94,12 @@ def find_process_record(cursor, controller_ip, gun):
     if not row:
         return None
 
-    columns = [col[0] for col in cursor.description]
+    columns = [c[0] for c in cursor.description]
     return dict(zip(columns, row))
 
 
 # ------------------------------------------------------------------
-# PROCESS REGISTER UPDATE (SYNC)
+# PROCESS REGISTER UPDATE
 # ------------------------------------------------------------------
 def trigger_nomenclature_fetch(row, received_data):
     try:
@@ -91,30 +117,18 @@ def trigger_nomenclature_fetch(row, received_data):
         if not (torque_min <= torque <= torque_max and angle_min <= angle <= angle_max):
             return
 
-        formatted_date = datetime.strptime(
-            row["Time"].strftime("%Y-%m-%d"), "%Y-%m-%d"
-        ).strftime("%d-%m-%y")
-
         conn = pyodbc.connect(SQL_CONN_STR)
         cursor = conn.cursor()
 
-        cursor.execute("""
-            SELECT TABLE_NAME
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_SCHEMA = 'taco_treceability'
-              AND LOWER(TABLE_NAME) LIKE ?
-        """, (f"process_register_{formatted_date.lower()}%",))
-
-        table = cursor.fetchone()
-        if not table:
+        table_name = find_process_register_table(cursor, row["Time"])
+        if not table_name:
+            print("No matching Process_Register table found")
             return
-
-        table_name = table[0]
 
         cursor.execute(f"""
             SELECT Running_Count, Target_Count, Process_Status,
                    Torque_Array, Angle_Array
-            FROM taco_treceability.{table_name}
+            FROM taco_treceability.[{table_name}]
             WHERE Pack_ID = ?
               AND Process_ID = ?
               AND Module_barcode = ?
@@ -139,9 +153,11 @@ def trigger_nomenclature_fetch(row, received_data):
             status = "Completed"
 
         cursor.execute(f"""
-            UPDATE taco_treceability.{table_name}
-            SET Running_Count=?, Process_Status=?,
-                Torque_Array=?, Angle_Array=?
+            UPDATE taco_treceability.[{table_name}]
+            SET Running_Count=?,
+                Process_Status=?,
+                Torque_Array=?,
+                Angle_Array=?
             WHERE Pack_ID=? AND Process_ID=? AND Module_barcode=?
         """, running, status, json.dumps(t_arr), json.dumps(a_arr),
              row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
@@ -234,6 +250,7 @@ def enip_reader(ip, stop_event):
         try:
             with proxy_simple(ip, timeout=3) as via:
                 print(f"[CONNECTED] {ip}")
+
                 while not stop_event.is_set():
                     real, uint = via.read([
                         ('@4/100/3', 'REAL'),
