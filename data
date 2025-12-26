@@ -39,17 +39,8 @@ def extract_selected_values(data, indices):
     return [data[i] for i in indices if i < len(data)]
 
 # ------------------------------------------------------------------
-# API (ASYNC + DEBOUNCE)
+# API (ASYNC)
 # ------------------------------------------------------------------
-_last_api_call = {}
-
-def should_trigger_api(key, interval=1.5):
-    now = time.time()
-    if key not in _last_api_call or now - _last_api_call[key] > interval:
-        _last_api_call[key] = now
-        return True
-    return False
-
 def trigger_api(payload):
     start_time = time.time()
     try:
@@ -110,30 +101,25 @@ def update_sql_redis_api(
     key = f"{ip}_{gun}"
     received_data = f"{torque},{angle}"
 
-    # Skip if already sent
-    if last_sql_values.get(key) == received_data:
-        return False
-
-    last_sql_values[key] = received_data
     cursor = conn.cursor()
     process = find_process_record(cursor, ip, gun)
     if not process:
+        print(f"[WARN] No process found for {ip} gun {gun}")
         return False
 
-    # Async API first
+    # --- Trigger API for every new reading ---
     api_key = f"{ip}{gun}{process['Process_ID']}"
-    if should_trigger_api(api_key):
-        trigger_api_async({
-            "station_id": process["Running_Count"],
-            "controller_ip": ip,
-            "pack_id": process["Pack_ID"],
-            "gun": gun,
-            "process_id": process["Process_ID"],
-            "line_id": process["Line"],
-            "Received_Data": received_data
-        })
+    trigger_api_async({
+        "station_id": process["Running_Count"],
+        "controller_ip": ip,
+        "pack_id": process["Pack_ID"],
+        "gun": gun,
+        "process_id": process["Process_ID"],
+        "line_id": process["Line"],
+        "Received_Data": received_data
+    })
 
-    # SQL UPDATE
+    # --- SQL UPDATE ---
     cursor.execute("""
         UPDATE taco_treceability.ir_controller_configuration
         SET Received_Data = ?, Date_Time = ?
@@ -154,12 +140,16 @@ def update_sql_redis_api(
     if cursor.rowcount > 0:
         conn.commit()
 
-        # Redis update
-        redis_client.hset(
-            REDIS_HASH,
-            ip,
-            f'{{"ip":"{ip}","guns":{{"gun_{gun}":{{"torque":{torque},"angle":{angle},"timestamp":"{timestamp}"}}}}}}'
-        )
+    # --- Redis UPDATE ---
+    redis_client.hset(
+        REDIS_HASH,
+        ip,
+        f'{{"ip":"{ip}","guns":{{"gun_{gun}":{{"torque":{torque},"angle":{angle},"timestamp":"{timestamp}"}}}}}}'
+    )
+
+    # --- Always update last_sql_values for tracking ---
+    last_sql_values[key] = received_data
+
     return True
 
 # ------------------------------------------------------------------
@@ -171,7 +161,6 @@ def enip_reader(ip, stop_event):
     redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
     last_sql_values = {}
-    last_enip_values = {}
     pending_torque = {}
     retry = 5
 
@@ -215,7 +204,7 @@ def enip_reader(ip, stop_event):
             time.sleep(retry)
             retry = min(retry * 2, 60)
 
-            # On reconnect, try to flush any pending readings
+            # On reconnect, flush pending readings
             for key, pair in list(pending_torque.items()):
                 timestamp = get_formatted_timestamp()
                 success = update_sql_redis_api(
