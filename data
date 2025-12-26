@@ -2,12 +2,13 @@ import time
 import redis
 import pytz
 import pyodbc
-import json
-import re
+import requests
 from datetime import datetime
 from cpppo.server.enip.get_attribute import proxy_simple
 from multiprocessing import Process, Event
+from threading import Thread
 from get_ips_from_sql import fetch_ip_list
+import json
 
 # ------------------------------------------------------------------
 # CONSTANTS
@@ -25,163 +26,170 @@ SQL_CONN_STR = (
     'PWD=admin'
 )
 
-# ------------------------------------------------------------------
-# UTILS
-# ------------------------------------------------------------------
-def get_formatted_timestamp():
-    utc = datetime.utcnow()
-    ist = pytz.timezone('Asia/Kolkata')
-    return utc.replace(tzinfo=pytz.utc).astimezone(ist).strftime('%Y-%m-%d %H:%M:%S')
+API_ENDPOINT = 'https://misapp.tataautocomp.com:3241/trigger_nomenclature_fetch'
 
 
-def extract_selected_values(data, indices):
-    return [data[i] for i in indices if i < len(data)]
-
-
-# ------------------------------------------------------------------
-# 🔒 FINAL, BULLETPROOF TABLE SELECTOR
-# ------------------------------------------------------------------
-def find_process_register_table(cursor, process_time):
-    process_date_str = process_time.strftime("%d-%m-%y")
-    prefix = f"Process_Register_{process_date_str}_"
-    matches = []
-
-    cursor.execute("""
-        SELECT TABLE_NAME
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_SCHEMA = 'taco_treceability'
-    """)
-
-    for (table_name,) in cursor.fetchall():
-
-        # STRICT PREFIX CHECK
-        if not table_name.startswith(prefix):
-            continue
-
-        # STRICT FORMAT CHECK
-        m = re.fullmatch(
-            rf"Process_Register_{process_date_str}_(\d{{2}}-\d{{2}}-\d{{2}})",
-            table_name
-        )
-        if not m:
-            continue
-
-        end_date = datetime.strptime(m.group(1), "%d-%m-%y").date()
-        matches.append((end_date, table_name))
-
-    if not matches:
-        return None
-
-    # PICK LATEST END DATE
-    matches.sort(key=lambda x: x[0], reverse=True)
-    return matches[0][1]
-
-
-# ------------------------------------------------------------------
-# PROCESS LOOKUP (ROW → DICT)
-# ------------------------------------------------------------------
-def find_process_record(cursor, controller_ip, gun):
-    cursor.execute("""
-        SELECT TOP 1
-            srno,
-            Process_ID,
-            Time,
-            Line,
-            Pack_temp_number,
-            Module_barcode,
-            Module_name,
-            Pack_ID,
-            Running_Count,
-            Process_Status,
-            Torque_Array,
-            Angle_Array,
-            Target_Count
-        FROM taco_treceability.Process_Register_master
-        WHERE Torque_Array = ?
-          AND CHARINDEX(',' + ?, ',' + Angle_Array + ',') > 0
-        ORDER BY srno DESC
-    """, controller_ip, str(gun))
-
-    row = cursor.fetchone()
-    if not row:
-        return None
-
-    columns = [c[0] for c in cursor.description]
-    return dict(zip(columns, row))
-
-
-# ------------------------------------------------------------------
-# PROCESS REGISTER UPDATE
-# ------------------------------------------------------------------
-def trigger_nomenclature_fetch(row, received_data):
+async def trigger_nomenclature_fetch(row, received_data):
     try:
-        torque_str, angle_str = received_data.split(",")
-        torque = round(float(torque_str), 2)
-        angle = round(float(angle_str), 2)
+        # ---------------------------------------------------
+        # Extract & validate payload
+        # ---------------------------------------------------
+        pack_id = row.Pack_ID
+        process_id = row.Process_ID
+        line_id = row.Line
+        station_id = row.Running_Count
+        received_data = row.received_data
+        print(f"Received Payload: {row}")
 
-        def parse_range(val):
+        if None in (pack_id, process_id, line_id, station_id, received_data):
+            return "Missing required fields"
+
+        try:
+            torque_str, angle_str = received_data.split(",")
+            torque = round(float(torque_str), 2)
+            angle = round(float(angle_str), 2)
+        except Exception:
+            return "Invalid Received_Data format"
+
+        def parse_range(val: str):
             low, high = map(float, val.replace("Nm", "").replace("°", "").split("-"))
             return low, high
 
-        torque_min, torque_max = parse_range(row["Module_name"])
-        angle_min, angle_max = parse_range(row["Process_Status"])
+        torque_min, torque_max = parse_range(row.Module_name)
+        angle_min, angle_max = parse_range(row.Process_Status)
 
         if not (torque_min <= torque <= torque_max and angle_min <= angle <= angle_max):
-            return
+            return {
+                "message": "Torque or angle out of range",
+                "torque": torque,
+                "angle": angle,
+                "expected_torque_range": f"{torque_min}-{torque_max}",
+                "expected_angle_range": f"{angle_min}-{angle_max}",
+                "skipped": True
+            }
 
+        formatted_date = datetime.strptime(row.Time, "%Y-%m-%d").strftime("%d-%m-%y")
+
+        # ---------------------------------------------------
+        # DB CONNECTION
+        # ---------------------------------------------------
         conn = pyodbc.connect(SQL_CONN_STR)
         cursor = conn.cursor()
 
-        table_name = find_process_register_table(cursor, row["Time"])
-        print("TABLE SELECTED:", table_name)
+        # ---------------------------------------------------
+        # Find dynamic process_register table
+        # ---------------------------------------------------
+        cursor.execute("""
+            SELECT TABLE_NAME
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = 'taco_treceability'
+              AND LOWER(TABLE_NAME) LIKE ?
+        """, (f"process_register_{formatted_date.lower()}%",))
 
-        if not table_name:
-            print("❌ No matching Process_Register table found")
-            return
+        table_row = cursor.fetchone()
+        if not table_row:
+            return "Process register table not found"
 
+        table_name = table_row[0]
+
+        # ---------------------------------------------------
+        # Fetch process record
+        # ---------------------------------------------------
         cursor.execute(f"""
-            SELECT Running_Count, Target_Count, Process_Status,
-                   Torque_Array, Angle_Array
-            FROM taco_treceability.[{table_name}]
-            WHERE Pack_ID=? AND Process_ID=? AND Module_barcode=?
-        """, row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
+            SELECT
+                Running_Count,
+                Target_Count,
+                Process_Status,
+                Torque_Array,
+                Angle_Array
+            FROM taco_treceability.{table_name}
+            WHERE Pack_ID = ?
+              AND Process_ID = ?
+              AND Module_barcode = ?
+        """, (pack_id, process_id, row.module_barcode))
 
-        rec = cursor.fetchone()
-        if not rec:
-            return
+        record = cursor.fetchone()
+        if not record:
+            return "Process record not found"
 
-        running, target, status, t_arr, a_arr = rec
-        t_arr = json.loads(t_arr or "[]")
-        a_arr = json.loads(a_arr or "[]")
+        running_count, target_count, process_status, torque_arr, angle_arr = record
 
-        if status == "Completed":
-            return
+        torque_arr = json.loads(torque_arr or "[]")
+        angle_arr = json.loads(angle_arr or "[]")
 
-        t_arr.append(torque)
-        a_arr.append(angle)
-        running += 1
+        if process_status == "Completed":
+            return {
+                "message": "Process already completed",
+                "Running_Count": running_count,
+                "Target_Count": target_count
+            }
 
-        if running == target:
-            status = "Completed"
+        torque_arr.append(torque)
+        angle_arr.append(angle)
+        running_count += 1
 
+        if running_count == target_count:
+            process_status = "Completed"
+
+        # ---------------------------------------------------
+        # Update process_register table
+        # ---------------------------------------------------
         cursor.execute(f"""
-            UPDATE taco_treceability.[{table_name}]
-            SET Running_Count=?, Process_Status=?,
-                Torque_Array=?, Angle_Array=?
-            WHERE Pack_ID=? AND Process_ID=? AND Module_barcode=?
-        """, running, status, json.dumps(t_arr), json.dumps(a_arr),
-             row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
+            UPDATE taco_treceability.{table_name}
+            SET
+                Running_Count = ?,
+                Process_Status = ?,
+                Torque_Array = ?,
+                Angle_Array = ?
+            WHERE Pack_ID = ?
+              AND Process_ID = ?
+              AND Module_barcode = ?
+        """, (
+            running_count,
+            process_status,
+            json.dumps(torque_arr),
+            json.dumps(angle_arr),
+            pack_id,
+            process_id,
+            row.module_barcode
+        ))
 
         conn.commit()
 
-        if status == "Completed":
+        # ---------------------------------------------------
+        # Delete from master if completed
+        # ---------------------------------------------------
+        print("Process Status", process_status)
+
+        if process_status == "Completed":
             cursor.execute("""
                 DELETE FROM taco_treceability.Process_Register_master
-                WHERE Pack_ID=? AND Process_ID=? AND Line=?
-                  AND Module_barcode=? AND Running_Count=?
-            """, row["Pack_ID"], row["Process_ID"], row["Line"],
-                 row["Module_barcode"], row["Running_Count"])
+                WHERE Pack_ID = ?
+                  AND Process_ID = ?
+                  AND Line = ?
+                  AND Module_barcode = ?
+                  AND Running_Count = ?
+            """, (
+                pack_id,
+                process_id,
+                line_id,
+                row.module_barcode,
+                station_id
+            ))
             conn.commit()
+
+        return {
+            "message": "Process register updated successfully",
+            "Torque_Array": torque_arr,
+            "Angle_Array": angle_arr,
+            "Running_Count": running_count,
+            "Process_Status": process_status
+        }
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return str(e)
 
     finally:
         try:
@@ -190,9 +198,76 @@ def trigger_nomenclature_fetch(row, received_data):
         except:
             pass
 
+# ------------------------------------------------------------------
+# UTILS
+# ------------------------------------------------------------------
+def get_formatted_timestamp():
+    utc = datetime.utcnow()
+    ist = pytz.timezone('Asia/Kolkata')
+    return utc.replace(tzinfo=pytz.utc).astimezone(ist).strftime('%Y-%m-%d %H:%M:%S')
+
+def extract_selected_values(data, indices):
+    return [data[i] for i in indices if i < len(data)]
 
 # ------------------------------------------------------------------
-# SQL + REDIS UPDATE
+# API (ASYNC + DEBOUNCE)
+# ------------------------------------------------------------------
+_last_api_call = {}
+
+def should_trigger_api(key, interval=1.5):
+    now = time.time()
+    if key not in _last_api_call or now - _last_api_call[key] > interval:
+        _last_api_call[key] = now
+        return True
+    return False
+
+def trigger_api(payload):
+    start_time = time.time()
+    try:
+        r = requests.post(API_ENDPOINT, json=payload, timeout=5)
+        elapsed = time.time() - start_time
+        if r.status_code != 200:
+            print("[API ERROR]", r.status_code, f"Time: {elapsed:.3f}s")
+        else:
+            print("[API SUCCESS]", r.status_code, f"Time: {elapsed:.3f}s")
+            print("Response:", r.text)
+    except Exception as e:
+        elapsed = time.time() - start_time
+        print("[API FAIL]", e, f"Time: {elapsed:.3f}s")
+
+def trigger_api_async(payload):
+    Thread(target=trigger_api, args=(payload,), daemon=True).start()
+
+# ------------------------------------------------------------------
+# PROCESS LOOKUP
+# ------------------------------------------------------------------
+def find_process_record(cursor, controller_ip, gun):
+    print("controller_ip", controller_ip,"gun", gun)
+    queries = [
+        """
+        SELECT TOP 1  srno, Process_ID, Time, Line, Pack_temp_number, Module_barcode, Module_name, Pack_ID, Running_Count, Process_Status, Torque_Array, Angle_Array, Target_Count
+        FROM taco_treceability.Process_Register_master
+        WHERE Torque_Array = ?
+          AND CHARINDEX(',' + ?, ',' + Angle_Array + ',') > 0
+        ORDER BY srno DESC
+        """,
+        """
+        SELECT TOP 1 srno, Process_ID, Running_Count, Pack_ID, Angle_Array, Line
+        FROM taco_treceability.TrayAssemblyBoltingCount_master
+        WHERE Torque_Array = ?
+          AND Angle_Array = ?
+        ORDER BY srno DESC
+        """
+    ]
+    for q in queries:
+        cursor.execute(q, controller_ip, str(gun))
+        for row in cursor.fetchall():
+            if row.Process_ID:
+                return row
+    return None
+
+# ------------------------------------------------------------------
+# SQL + REDIS + API
 # ------------------------------------------------------------------
 def update_sql_redis_api(
     conn, redis_client,
@@ -201,51 +276,66 @@ def update_sql_redis_api(
 ):
     key = f"{ip}_{gun}"
     received_data = f"{torque},{angle}"
+    # print('received_data',received_data)
 
+    # Skip if already sent
     if last_sql_values.get(key) == received_data:
+        # print('last_sql_values,received_data',last_sql_values,received_data)
         return False
 
     last_sql_values[key] = received_data
+    print('last_sql_values',last_sql_values)
     cursor = conn.cursor()
-
     process = find_process_record(cursor, ip, gun)
-    print("PROCESS:", process)
-
+    print('process',process)
     if not process:
         return False
 
-    trigger_nomenclature_fetch(process, received_data)
+    # Async API first
+    # api_key = f"{ip}{gun}{process['Process_ID']}"
+    # if should_trigger_api(api_key):
+    #     trigger_api_async({
+    #         "station_id": process["Running_Count"],
+    #         "controller_ip": ip,
+    #         "pack_id": process["Pack_ID"],
+    #         "gun": gun,
+    #         "process_id": process["Process_ID"],
+    #         "line_id": process["Line"],
+    #         "Received_Data": received_data
+    #     })
 
+
+
+    trigger_nomenclature_fetch(process, received_data)
+    print("API.............")
+    # SQL UPDATE
     cursor.execute("""
         UPDATE taco_treceability.ir_controller_configuration
-        SET Received_Data=?, Date_Time=?
-        WHERE controller_ip=? AND gun=?
-          AND Process_ID=? AND station_id=? AND Pack_ID=?
-          AND (Received_Data<>? OR Received_Data IS NULL)
-    """, received_data, timestamp, ip, gun,
-         process["Process_ID"],
-         process["Running_Count"],
-         process["Pack_ID"],
-         received_data)
+        SET Received_Data = ?, Date_Time = ?
+        WHERE controller_ip = ?
+          AND gun = ?
+          AND Process_ID = ?
+          AND station_id = ?
+          AND Pack_ID = ?
+          AND (Received_Data <> ? OR Received_Data IS NULL)
+    """, (
+        received_data, timestamp, ip, gun,
+        process["Process_ID"],
+        process["Running_Count"],
+        process["Pack_ID"],
+        received_data
+    ))
 
-    if cursor.rowcount:
+    if cursor.rowcount > 0:
         conn.commit()
+
+        # Redis update
         redis_client.hset(
             REDIS_HASH,
             ip,
-            json.dumps({
-                "ip": ip,
-                "guns": {
-                    f"gun_{gun}": {
-                        "torque": torque,
-                        "angle": angle,
-                        "timestamp": timestamp
-                    }
-                }
-            })
+            f'{{"ip":"{ip}","guns":{{"gun_{gun}":{{"torque":{torque},"angle":{angle},"timestamp":"{timestamp}"}}}}}}'
         )
     return True
-
 
 # ------------------------------------------------------------------
 # ENIP READER
@@ -256,11 +346,14 @@ def enip_reader(ip, stop_event):
     redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
     last_sql_values = {}
-    pending = {}
+    last_enip_values = {}
+    pending_torque = {}
+    retry = 5
 
     while not stop_event.is_set():
         try:
             with proxy_simple(ip, timeout=3) as via:
+                retry = 5
                 print(f"[CONNECTED] {ip}")
 
                 while not stop_event.is_set():
@@ -268,31 +361,50 @@ def enip_reader(ip, stop_event):
                         ('@4/100/3', 'REAL'),
                         ('@4/100/3', 'UINT'),
                     ])
-
                     real_vals = extract_selected_values(real, REAL_INDICES)
                     uint_vals = extract_selected_values(uint, UINT_INDICES)
                     timestamp = get_formatted_timestamp()
 
+                    # Store all readings in pending buffer
                     for i in range(min(len(real_vals), len(uint_vals))):
-                        pending[f"{ip}_{i+1}"] = (real_vals[i], uint_vals[i])
+                        key = f"{ip}_{i+1}"
+                        pair = (real_vals[i], uint_vals[i])
+                        pending_torque[key] = pair
 
-                    for key, (t, a) in list(pending.items()):
-                        if update_sql_redis_api(
+                    # Flush pending readings
+                    for key, pair in list(pending_torque.items()):
+                        success = update_sql_redis_api(
                             conn, redis_client,
                             ip, int(key.split('_')[1]),
-                            t, a, timestamp, last_sql_values
-                        ):
-                            del pending[key]
+                            pair[0], pair[1],
+                            timestamp,
+                            last_sql_values
+                        )
+                        if success:
+                            del pending_torque[key]
 
                     time.sleep(0.1)
 
         except Exception as e:
-            print("[RECONNECT]", ip, e)
-            time.sleep(3)
+            print(f"[RECONNECT] {ip} {e}")
+            time.sleep(retry)
+            retry = min(retry * 2, 60)
+
+            # On reconnect, try to flush any pending readings
+            for key, pair in list(pending_torque.items()):
+                timestamp = get_formatted_timestamp()
+                success = update_sql_redis_api(
+                    conn, redis_client,
+                    ip, int(key.split('_')[1]),
+                    pair[0], pair[1],
+                    timestamp,
+                    last_sql_values
+                )
+                if success:
+                    del pending_torque[key]
 
     conn.close()
     print(f"[STOPPED] {ip}")
-
 
 # ------------------------------------------------------------------
 # MAIN
@@ -300,30 +412,40 @@ def enip_reader(ip, stop_event):
 def main():
     processes = {}
     stop_event = Event()
-
     print("[INFO] Monitoring controllers...")
 
     try:
-        while True:
-            ips = set(fetch_ip_list())
+        while not stop_event.is_set():
+            current_ips = set(fetch_ip_list())
+            tracked_ips = set(processes.keys())
 
-            for ip in ips - processes.keys():
-                p = Process(target=enip_reader, args=(ip, stop_event))
+            # Start new IPs
+            for ip in current_ips - tracked_ips:
+                p = Process(target=enip_reader, args=(ip, stop_event), name=f"Reader-{ip}")
                 p.start()
                 processes[ip] = p
 
-            for ip in list(processes):
-                if ip not in ips or not processes[ip].is_alive():
-                    processes[ip].terminate()
-                    del processes[ip]
+            # Remove disconnected IPs
+            for ip in tracked_ips - current_ips:
+                processes[ip].terminate()
+                del processes[ip]
+
+            # Restart dead processes
+            for ip, p in list(processes.items()):
+                if not p.is_alive():
+                    np = Process(target=enip_reader, args=(ip, stop_event))
+                    np.start()
+                    processes[ip] = np
 
             time.sleep(1)
 
     except KeyboardInterrupt:
+        print("[STOP] Shutting down...")
         stop_event.set()
         for p in processes.values():
             p.join()
 
+    print("[OK] Clean shutdown")
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
