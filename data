@@ -54,37 +54,37 @@ const deleteRow = async (sr_no) => {
 
 /* -------------------- PROCESS LIST -------------------- */
 const uniqueProcesses = [
-"B+ fuse connector, +ve busbar/+HV busbar connector",
-"B+ fuse connector, +ve busbar/+HV busbar connector (Rework)",
-"B+ev HV cable to BMS",
-"B+ev HV cable to BMS (Rework)",
-"BMS bracket installation",
-"BMS on BMS bracket (12.2)",
-"bolts to fix the upper and lower panel (12.2)",
-"Breather plug",
-"busbar +ve module 4 to Module-5 -ev busbar -ev module5 to Module-5",
-"Busbar Fixing",
-"C PlateFixing Plate Installation",
-"Communication plug-in installation (12.2)",
-"Flexible HV negative busbar to BMS",
-"Flexible HV negative busbar to BMS (Rework)",
-"Flexible Negative Busbar",
-"fuse connector on the side bracket plate",
-"HV Connector",
-"HV Connector negative (Rework)",
-"HV Connector positive (Rework)",
-"L Plate Fixing(M1+M2+M3+M4)",
-"L Plate Fixing(M5+M6+M7+M8)",
-"Low Voltage Wiring Harness",
-"Modules Installation into the Tray",
-"Negative busbar (Rework)",
-"Negative busbar to BMS",
-"Negative busbar to BMS (Rework)",
-"Positive & Neg.",
-"Positive busbar (Rework)",
-"Tie Rod Fixing(M1+M2+M3+M4)",
-"Tie Rod Fixing(M5+M6+M7+M8)",
-"Top lid (Top cover)"
+  "B+ fuse connector, +ve busbar/+HV busbar connector",
+  "B+ fuse connector, +ve busbar/+HV busbar connector (Rework)",
+  "B+ev HV cable to BMS",
+  "B+ev HV cable to BMS (Rework)",
+  "BMS bracket installation",
+  "BMS on BMS bracket (12.2)",
+  "bolts to fix the upper and lower panel (12.2)",
+  "Breather plug",
+  "busbar +ve module 4 to Module-5 -ev busbar -ev module5 to Module-5",
+  "Busbar Fixing",
+  "C PlateFixing Plate Installation",
+  "Communication plug-in installation (12.2)",
+  "Flexible HV negative busbar to BMS",
+  "Flexible HV negative busbar to BMS (Rework)",
+  "Flexible Negative Busbar",
+  "fuse connector on the side bracket plate",
+  "HV Connector",
+  "HV Connector negative (Rework)",
+  "HV Connector positive (Rework)",
+  "L Plate Fixing(M1+M2+M3+M4)",
+  "L Plate Fixing(M5+M6+M7+M8)",
+  "Low Voltage Wiring Harness",
+  "Modules Installation into the Tray",
+  "Negative busbar (Rework)",
+  "Negative busbar to BMS",
+  "Negative busbar to BMS (Rework)",
+  "Positive & Neg.",
+  "Positive busbar (Rework)",
+  "Tie Rod Fixing(M1+M2+M3+M4)",
+  "Tie Rod Fixing(M5+M6+M7+M8)",
+  "Top lid (Top cover)"
 ];
 
 /* -------------------- MAIN PROCESS LOOP -------------------- */
@@ -213,35 +213,72 @@ const fetchLatestRows = async () => {
             continue;
           }
 
-          const apiRes = await axios.post(
-            'https://mismainapp.tataautocomp.com:3241/trigger_process_data',
-            {
-              pack_id: String(packID),
-              process_id: best.processID,
-              time: row.date_dd,
-              module_name: moduleName,
-              target_count: best.totalCount,
-              pack_no: processedPackNo,
-              line_id: 1,
-              Received_Data: `${row.torque},${row.angle}`,
-              module_barcode: row.module_barcode
+          const api1Payload = {
+            pack_id: String(packID),
+            process_id: best.processID,
+            time: row.date_dd,
+            module_name: moduleName,
+            target_count: best.totalCount,
+            pack_no: processedPackNo,
+            line_id: 1,
+            Received_Data: `${row.torque},${row.angle}`,
+            module_barcode: row.module_barcode
+          };
+          try {
+            const response = await axios.post('https://mismainapp.tataautocomp.com:3241/trigger_process_data', api1Payload);
+            const message = response.data?.message || '';
+            const Process_Status = response.data?.Process_Status || '';
+            const putUrl = response.data?.PUT_url || '';
+            const module_barcode = response.data?.module_barcode || '';
+
+            if (message === "Process register updated successfully" && Process_Status === "Pending") {
+              await deleteRow(row.sr_no);
+              continue;
+            } else if (message === "Process register updated successfully" && Process_Status === "Completed") {
+              // ------------------ STATION STATUS API ------------------
+              const processIdMatch = putUrl.match(/Process_ID=(\d+)/);
+              const processId = processIdMatch ? processIdMatch[1] : null;
+
+              if (processId) {
+                const stationResult = await pool3
+                  .request()
+                  .query(`SELECT Station_ID FROM taco_treceability.Process_Master WHERE Process_ID='${processId}'`);
+                
+                if (stationResult.recordset.length > 0) {
+                  const stationId = stationResult.recordset[0].Station_ID;
+                  const stationPayload = {
+                    station_id: stationId,
+                    line_id: "1",
+                    customer_qrcode: module_barcode,
+                    station_status: "OK",
+                    checklist_name: "NA",
+                    substation_id: processId
+                  };
+                  try {
+                    const stationResponse = await axios.post(
+                      "https://mismainapp.tataautocomp.com:3241/station_status/filter",
+                      stationPayload,
+                      { headers: { "Content-Type": "application/json" } }
+                    );
+                    console.log("Station Status API Response:", JSON.stringify(stationResponse.data, null, 2));
+                  } catch (stationErr) {
+                    console.error("Error sending Station Status API:", stationErr.message);
+                  }
+                }
+              }
+              await deleteRow(row.sr_no);
+              continue;
+            } else if (message === "Process already completed. No update necessary.") {
+              await pool1.request().query(`
+                DELETE FROM taco_treceability.torque_details_EIP_mirror
+                WHERE pack_no='${row.pack_no}' AND module_barcode='${row.module_barcode}' 
+                  AND process_name='${row.process_name}' AND pack_name='${row.pack_name}'
+              `);
+              continue;
             }
-          );
-
-          // ---------------- FILTER API RESPONSE ----------------
-          const { message, Process_Status } = apiRes.data;
-          if (
-            (message === "Process register updated successfully" && Process_Status === "Pending") ||
-            (message === "Process register updated successfully" && Process_Status === "Completed") ||
-            message === "Process already completed. No update necessary."
-          ) {
-            await deleteRow(row.sr_no);
-            console.log(`${Process_Status || 'Already completed'}: Deleted sr_no ${row.sr_no}`);
-          } else {
-            console.log(`Unknown API response for sr_no ${row.sr_no}:`, message, Process_Status);
+          } catch (err) {
+            console.error('API1 send error:', err.message);
           }
-
-          console.log(`Module data processed successfully for sr_no ${row.sr_no}`);
         }
 
         /* ---------------- PACK LOGIC ---------------- */
@@ -251,11 +288,9 @@ const fetchLatestRows = async () => {
 
           for (const p of pmResPack.recordset) {
             const cand = normalizeProcess(p.Process_Name);
-            const score =
-              inputNorm === cand ? 1 :
+            const score = inputNorm === cand ? 1 :
               0.7 * getCommonWordsScore(inputNorm, cand) +
               0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
-
             if (score > best1.score) {
               best1 = { score, processID: p.Process_ID, totalCount: p.Total_Count };
             }
@@ -266,34 +301,72 @@ const fetchLatestRows = async () => {
             continue;
           }
 
-          const apiRes = await axios.post(
-            'https://mismainapp.tataautocomp.com:3241/trigger_process_data',
-            {
-              pack_id: String(packID),
-              process_id: best1.processID,
-              time: row.date_dd,
-              module_name: row.pack_name,
-              target_count: best1.totalCount,
-              pack_no: processedPackNo,
-              line_id: 1,
-              Received_Data: `${row.torque},${row.angle}`,
-              module_barcode: modulebarQR
+          const api1Payload = {
+            pack_id: String(packID),
+            process_id: best1.processID,
+            time: row.date_dd,
+            module_name: row.pack_name,
+            target_count: best1.totalCount,
+            pack_no: processedPackNo,
+            line_id: 1,
+            Received_Data: `${row.torque},${row.angle}`,
+            module_barcode: modulebarQR
+          };
+          try {
+            const response = await axios.post('https://mismainapp.tataautocomp.com:3241/trigger_process_data', api1Payload);
+            const message = response.data?.message || '';
+            const Process_Status = response.data?.Process_Status || '';
+            const putUrl = response.data?.PUT_url || '';
+            const module_barcode = response.data?.module_barcode || '';
+
+            if (message === "Process register updated successfully" && Process_Status === "Pending") {
+              await deleteRow(row.sr_no);
+              continue;
+            } else if (message === "Process register updated successfully" && Process_Status === "Completed") {
+              // ------------------ STATION STATUS API ------------------
+              const processIdMatch = putUrl.match(/Process_ID=(\d+)/);
+              const processId = processIdMatch ? processIdMatch[1] : null;
+
+              if (processId) {
+                const stationResult = await pool3
+                  .request()
+                  .query(`SELECT Station_ID FROM taco_treceability.Process_Master WHERE Process_ID='${processId}'`);
+
+                if (stationResult.recordset.length > 0) {
+                  const stationId = stationResult.recordset[0].Station_ID;
+                  const stationPayload = {
+                    station_id: stationId,
+                    line_id: "1",
+                    customer_qrcode: module_barcode,
+                    station_status: "OK",
+                    checklist_name: "NA",
+                    substation_id: processId
+                  };
+                  try {
+                    const stationResponse = await axios.post(
+                      "https://mismainapp.tataautocomp.com:3241/station_status/filter",
+                      stationPayload,
+                      { headers: { "Content-Type": "application/json" } }
+                    );
+                    console.log("Station Status API Response:", JSON.stringify(stationResponse.data, null, 2));
+                  } catch (stationErr) {
+                    console.error("Error sending Station Status API:", stationErr.message);
+                  }
+                }
+              }
+              await deleteRow(row.sr_no);
+              continue;
+            } else if (message === "Process already completed. No update necessary.") {
+              await pool1.request().query(`
+                DELETE FROM taco_treceability.torque_details_EIP_mirror
+                WHERE pack_no='${row.pack_no}' AND module_barcode='${row.module_barcode}' 
+                  AND process_name='${row.process_name}' AND pack_name='${row.pack_name}'
+              `);
+              continue;
             }
-          );
-
-          const { message, Process_Status } = apiRes.data;
-          if (
-            (message === "Process register updated successfully" && Process_Status === "Pending") ||
-            (message === "Process register updated successfully" && Process_Status === "Completed") ||
-            message === "Process already completed. No update necessary."
-          ) {
-            await deleteRow(row.sr_no);
-            console.log(`${Process_Status || 'Already completed'}: Deleted sr_no ${row.sr_no}`);
-          } else {
-            console.log(`Unknown API response for sr_no ${row.sr_no}:`, message, Process_Status);
+          } catch (err) {
+            console.error('API1 send error:', err.message);
           }
-
-          console.log(`Pack data processed successfully for sr_no ${row.sr_no}`);
         }
 
         /* ---------------- BOM LOGIC ---------------- */
@@ -322,7 +395,7 @@ const fetchLatestRows = async () => {
               ? 'trigger_tray_data'
               : 'trigger_tray_after_link_data';
 
-          const apiRes = await axios.post(
+          await axios.post(
             `https://mismainapp.tataautocomp.com:3241/${apiUrl}`,
             {
               pack_id: String(packID),
@@ -337,19 +410,7 @@ const fetchLatestRows = async () => {
             }
           );
 
-          const { message, Process_Status } = apiRes.data;
-          if (
-            (message === "Process register updated successfully" && Process_Status === "Pending") ||
-            (message === "Process register updated successfully" && Process_Status === "Completed") ||
-            message === "Process already completed. No update necessary."
-          ) {
-            await deleteRow(row.sr_no);
-            console.log(`${Process_Status || 'Already completed'}: Deleted sr_no ${row.sr_no}`);
-          } else {
-            console.log(`Unknown API response for sr_no ${row.sr_no}:`, message, Process_Status);
-          }
-
-          console.log(`BOM data processed successfully for sr_no ${row.sr_no}`);
+          await deleteRow(row.sr_no);
         }
 
       } catch (rowErr) {
