@@ -52,13 +52,53 @@ const deleteRow = async (sr_no) => {
   );
 };
 
-/* -------------------- MAIN LOOP -------------------- */
+/* -------------------- PROCESS LIST -------------------- */
+const uniqueProcesses = [
+"B+ fuse connector, +ve busbar/+HV busbar connector",
+"B+ fuse connector, +ve busbar/+HV busbar connector (Rework)",
+"B+ev HV cable to BMS",
+"B+ev HV cable to BMS (Rework)",
+"BMS bracket installation",
+"BMS on BMS bracket (12.2)",
+"bolts to fix the upper and lower panel (12.2)",
+"Breather plug",
+"busbar +ve module 4 to Module-5 -ev busbar -ev module5 to Module-5",
+"Busbar Fixing",
+"C PlateFixing Plate Installation",
+"Communication plug-in installation (12.2)",
+"Flexible HV negative busbar to BMS",
+"Flexible HV negative busbar to BMS (Rework)",
+"Flexible Negative Busbar",
+"fuse connector on the side bracket plate",
+"HV Connector",
+"HV Connector negative (Rework)",
+"HV Connector positive (Rework)",
+"L Plate Fixing(M1+M2+M3+M4)",
+"L Plate Fixing(M5+M6+M7+M8)",
+"Low Voltage Wiring Harness",
+"Modules Installation into the Tray",
+"Negative busbar (Rework)",
+"Negative busbar to BMS",
+"Negative busbar to BMS (Rework)",
+"Positive & Neg.",
+"Positive busbar (Rework)",
+"Tie Rod Fixing(M1+M2+M3+M4)",
+"Tie Rod Fixing(M5+M6+M7+M8)",
+"Top lid (Top cover)"
+];
+
+/* -------------------- MAIN PROCESS LOOP -------------------- */
 const fetchLatestRows = async () => {
   try {
+    const processListSQL = uniqueProcesses.map(p => `'${p.replace(/'/g, "''")}'`).join(',');
+
     const result = await pool1.request().query(`
-      SELECT *
+      SELECT sr_no, pack_name, module_name, module_barcode, torque, angle,
+             process_name, date_dd, pack_no, smoke_sensor_linked_pack_no, bypass_operator
       FROM taco_treceability.torque_details_EIP_mirror
       WHERE sr_no > ${lastSeenSrNo}
+        AND pack_name = 'Bajaj 12.2'
+        AND process_name IN (${processListSQL})
       ORDER BY sr_no ASC
     `);
 
@@ -66,151 +106,272 @@ const fetchLatestRows = async () => {
       lastSeenSrNo = Math.max(lastSeenSrNo, row.sr_no);
 
       try {
-        /* ---------- PACK MASTER ---------- */
+        const processedPackNo =
+          row.pack_no === 'not_linked' ? 'not_linked' : row.pack_no.slice(-6);
+
         const packRes = await pool2.request().query(`
           SELECT Pack_ID FROM taco_treceability.master_pack
           WHERE Pack_Name='${row.pack_name}'
         `);
-        if (!packRes.recordset.length) continue;
+        if (!packRes.recordset.length) {
+          await deleteRow(row.sr_no);
+          continue;
+        }
         const packID = packRes.recordset[0].Pack_ID;
-
-        const processedPackNo =
-          row.pack_no === 'not_linked' ? 'not_linked' : row.pack_no.slice(-6);
 
         let scanType, scanID, moduleName, modulebarQR;
 
-        /* ---------- SCAN TYPE ---------- */
-        if (row.module_barcode?.startsWith('DJ')) {
-          scanType = 'Pack';
-          const qrRes = await pool1.request().query(`
-            SELECT CustomerQRCode
-            FROM taco_treceability.final_qrcode_details
-            WHERE final_qrcode='${row.pack_no}'
-          `);
-          if (!qrRes.recordset.length) continue;
-          modulebarQR = qrRes.recordset[0].CustomerQRCode;
-          scanID = packID;
-        } else {
-          scanType = 'Module';
+        if (!row.smoke_sensor_linked_pack_no || row.smoke_sensor_linked_pack_no === 'null') {
           const modRes = await pool2.request().query(`
-            SELECT Module_Name, Module_ID
-            FROM taco_treceability.master_module
+            SELECT Module_Name, Module_ID FROM taco_treceability.master_module
             WHERE moduleNumber='${row.module_name}' AND Pack_ID='${packID}'
           `);
-          if (!modRes.recordset.length) continue;
-          moduleName = modRes.recordset[0].Module_Name;
-          scanID = modRes.recordset[0].Module_ID;
-        }
-
-        /* ---------- PROCESS MASTER ---------- */
-        const pmRes = await pool3.request().query(`
-          SELECT Process_Name, Process_ID, Total_Count
-          FROM taco_treceability.Process_Master
-          WHERE Pack_ID='${packID}' AND Scan_ID='${scanID}'
-        `);
-
-        const inputNorm = normalizeProcess(row.process_name);
-        let best = { score: 0 };
-
-        for (const p of pmRes.recordset) {
-          const cand = normalizeProcess(p.Process_Name);
-          const score =
-            0.7 * getCommonWordsScore(inputNorm, cand) +
-            0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
-          if (score > best.score) {
-            best = { score, processID: p.Process_ID, totalCount: p.Total_Count };
+          if (!modRes.recordset.length) {
+            await deleteRow(row.sr_no);
+            continue;
           }
+          scanType = 'Module';
+          scanID = modRes.recordset[0].Module_ID;
+          moduleName = modRes.recordset[0].Module_Name;
+        } else {
+          const bomRes = await pool2.request().query(`
+            SELECT BOM_ID FROM taco_treceability.BOM_Master
+            WHERE BOM_Name='Smoke sensor' AND Pack_ID='${packID}'
+          `);
+          if (!bomRes.recordset.length) {
+            await deleteRow(row.sr_no);
+            continue;
+          }
+          scanType = 'BOM';
+          scanID = bomRes.recordset[0].BOM_ID;
         }
 
-        if (!best.processID) continue;
+        if (row.module_barcode.startsWith('DJ')) {
+          const qrRes = await pool1.request().query(`
+            SELECT CustomerQRCode FROM taco_treceability.final_qrcode_details
+            WHERE final_qrcode='${row.pack_no}'
+          `);
+          if (!qrRes.recordset.length) {
+            await deleteRow(row.sr_no);
+            continue;
+          }
+          scanType = 'Pack';
+          modulebarQR = qrRes.recordset[0].CustomerQRCode;
+        }
 
-        /* ---------- API PAYLOAD ---------- */
-        const api1Payload = {
-          pack_id: String(packID),
-          process_id: best.processID,
-          time: row.date_dd,
-          module_name: scanType === 'Pack' ? row.pack_name : moduleName,
-          target_count: best.totalCount,
-          pack_no: processedPackNo,
-          line_id: 1,
-          Received_Data: `${row.torque},${row.angle}`,
-          module_barcode: scanType === 'Pack' ? modulebarQR : row.module_barcode
-        };
+        /* ---------------- FETCH PROCESS MASTER ---------------- */
+        const [pmRes, pmResPack, pmResBom] = await Promise.all([
+          pool3.request().query(`
+            SELECT Process_Name, Process_ID, Total_Count, Scan_Name
+            FROM taco_treceability.Process_Master
+            WHERE Pack_ID='${packID}' AND Scan_ID='${scanID}'
+          `),
+          pool3.request().query(`
+            SELECT Process_Name, Process_ID, Total_Count, Scan_Name
+            FROM taco_treceability.Process_Master
+            WHERE Pack_ID='${packID}' AND Scan_ID='${packID}' AND Scan_Name='Pack'
+          `),
+          pool3.request().query(`
+            SELECT Process_Name, Process_ID, Total_Count, Scan_Name
+            FROM taco_treceability.Process_Master
+            WHERE Pack_ID='${packID}' AND Scan_Name='BOM'
+          `)
+        ]);
 
-        const api1Res = await axios.post(
-          "https://mismainapp.tataautocomp.com:3241/trigger_process_data",
-          api1Payload
-        );
+        /* ---------------- MODULE LOGIC ---------------- */
+        if (scanType === 'Module') {
+          const inputNorm = normalizeProcess(row.process_name);
+          const modKey = moduleName.toLowerCase();
+          let best = { score: 0 };
 
-        const {
-          message = '',
-          Process_Status = '',
-          PUT_url = '',
-          module_barcode = ''
-        } = api1Res.data || {};
+          for (const p of pmRes.recordset) {
+            const raw = p.Process_Name.toLowerCase();
+            const needsModuleMatch = /\bM\d+\b/i.test(raw);
+            const processModules = raw.match(/\bM\d+\b/gi) || [];
 
-        /* ---------- STATION API (MODULE + PACK) ---------- */
-        if (message === "Process register updated successfully" && Process_Status === "Completed") {
+            if (
+              needsModuleMatch &&
+              !raw.includes(modKey) &&
+              !processModules.some(m => m.toLowerCase() === modKey)
+            ) continue;
 
-          const match = PUT_url?.match(/Process_ID=(\d+)/);
-          if (match) {
-            const processId = match[1];
+            const cand = normalizeProcess(p.Process_Name);
+            const score =
+              inputNorm === cand ? 1 :
+              cand.includes(inputNorm) ? 0.95 :
+              inputNorm.includes(cand) ? 0.9 :
+              0.7 * getCommonWordsScore(inputNorm, cand) +
+              0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
 
-            const stationRes = await pool3.request().query(`
-              SELECT Station_ID
-              FROM taco_treceability.Process_Master
-              WHERE Process_ID='${processId}'
-            `);
-
-            if (stationRes.recordset.length) {
-              await axios.post(
-                "https://mismainapp.tataautocomp.com:3241/station_status/filter",
-                {
-                  station_id: stationRes.recordset[0].Station_ID,
-                  line_id: "1",
-                  customer_qrcode: module_barcode,
-                  station_status: "OK",
-                  checklist_name: "NA",
-                  substation_id: processId
-                }
-              );
+            if (score > best.score) {
+              best = { score, processID: p.Process_ID, totalCount: p.Total_Count };
             }
           }
+
+          if (!best.processID) {
+            await deleteRow(row.sr_no);
+            continue;
+          }
+
+          const apiRes = await axios.post(
+            'https://mismainapp.tataautocomp.com:3241/trigger_process_data',
+            {
+              pack_id: String(packID),
+              process_id: best.processID,
+              time: row.date_dd,
+              module_name: moduleName,
+              target_count: best.totalCount,
+              pack_no: processedPackNo,
+              line_id: 1,
+              Received_Data: `${row.torque},${row.angle}`,
+              module_barcode: row.module_barcode
+            }
+          );
+
+          // ---------------- FILTER API RESPONSE ----------------
+          const { message, Process_Status } = apiRes.data;
+          if (
+            (message === "Process register updated successfully" && Process_Status === "Pending") ||
+            (message === "Process register updated successfully" && Process_Status === "Completed") ||
+            message === "Process already completed. No update necessary."
+          ) {
+            await deleteRow(row.sr_no);
+            console.log(`${Process_Status || 'Already completed'}: Deleted sr_no ${row.sr_no}`);
+          } else {
+            console.log(`Unknown API response for sr_no ${row.sr_no}:`, message, Process_Status);
+          }
+
+          console.log(`Module data processed successfully for sr_no ${row.sr_no}`);
         }
 
-        /* ---------- ALREADY COMPLETED ---------- */
-        if (message === "Process already completed. No update necessary.") {
-          await pool1.request().query(`
-            DELETE FROM taco_treceability.torque_details_EIP_mirror
-            WHERE pack_no='${row.pack_no}'
-              AND module_barcode='${row.module_barcode}'
-              AND process_name='${row.process_name}'
-              AND pack_name='${row.pack_name}'
-          `);
-          continue;
+        /* ---------------- PACK LOGIC ---------------- */
+        else if (scanType === 'Pack') {
+          const inputNorm = normalizeProcess(row.process_name);
+          let best1 = { score: 0 };
+
+          for (const p of pmResPack.recordset) {
+            const cand = normalizeProcess(p.Process_Name);
+            const score =
+              inputNorm === cand ? 1 :
+              0.7 * getCommonWordsScore(inputNorm, cand) +
+              0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
+
+            if (score > best1.score) {
+              best1 = { score, processID: p.Process_ID, totalCount: p.Total_Count };
+            }
+          }
+
+          if (!best1.processID) {
+            await deleteRow(row.sr_no);
+            continue;
+          }
+
+          const apiRes = await axios.post(
+            'https://mismainapp.tataautocomp.com:3241/trigger_process_data',
+            {
+              pack_id: String(packID),
+              process_id: best1.processID,
+              time: row.date_dd,
+              module_name: row.pack_name,
+              target_count: best1.totalCount,
+              pack_no: processedPackNo,
+              line_id: 1,
+              Received_Data: `${row.torque},${row.angle}`,
+              module_barcode: modulebarQR
+            }
+          );
+
+          const { message, Process_Status } = apiRes.data;
+          if (
+            (message === "Process register updated successfully" && Process_Status === "Pending") ||
+            (message === "Process register updated successfully" && Process_Status === "Completed") ||
+            message === "Process already completed. No update necessary."
+          ) {
+            await deleteRow(row.sr_no);
+            console.log(`${Process_Status || 'Already completed'}: Deleted sr_no ${row.sr_no}`);
+          } else {
+            console.log(`Unknown API response for sr_no ${row.sr_no}:`, message, Process_Status);
+          }
+
+          console.log(`Pack data processed successfully for sr_no ${row.sr_no}`);
         }
 
-        /* ---------- DELETE ---------- */
-        await deleteRow(row.sr_no);
-        console.log(`Processed ${scanType} sr_no ${row.sr_no}`);
+        /* ---------------- BOM LOGIC ---------------- */
+        else if (scanType === 'BOM') {
+          const inputNorm = normalizeProcess(row.process_name);
+          let best2 = { score: 0 };
+
+          for (const p of pmResBom.recordset) {
+            const cand = normalizeProcess(p.Process_Name);
+            const score =
+              0.7 * getCommonWordsScore(inputNorm, cand) +
+              0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
+
+            if (score > best2.score) {
+              best2 = { score, processID: p.Process_ID, totalCount: p.Total_Count };
+            }
+          }
+
+          if (!best2.processID) {
+            await deleteRow(row.sr_no);
+            continue;
+          }
+
+          const apiUrl =
+            processedPackNo === 'not_linked'
+              ? 'trigger_tray_data'
+              : 'trigger_tray_after_link_data';
+
+          const apiRes = await axios.post(
+            `https://mismainapp.tataautocomp.com:3241/${apiUrl}`,
+            {
+              pack_id: String(packID),
+              process_id: best2.processID,
+              time: row.date_dd,
+              bom_id: scanID,
+              Pack_Number: processedPackNo,
+              target_count: best2.totalCount,
+              line_id: 1,
+              Received_Data: `${row.torque},${row.angle}`,
+              bom_qr: `${row.module_barcode},${row.module_barcode}`
+            }
+          );
+
+          const { message, Process_Status } = apiRes.data;
+          if (
+            (message === "Process register updated successfully" && Process_Status === "Pending") ||
+            (message === "Process register updated successfully" && Process_Status === "Completed") ||
+            message === "Process already completed. No update necessary."
+          ) {
+            await deleteRow(row.sr_no);
+            console.log(`${Process_Status || 'Already completed'}: Deleted sr_no ${row.sr_no}`);
+          } else {
+            console.log(`Unknown API response for sr_no ${row.sr_no}:`, message, Process_Status);
+          }
+
+          console.log(`BOM data processed successfully for sr_no ${row.sr_no}`);
+        }
 
       } catch (rowErr) {
-        console.error("Row Error:", rowErr.message);
+        console.error("Row error:", rowErr.message);
         await deleteRow(row.sr_no);
       }
     }
+
   } catch (err) {
-    console.error("Loop Error:", err.message);
+    console.error("Fetch loop error:", err.message);
   } finally {
     setTimeout(fetchLatestRows, 3000);
   }
 };
 
 /* -------------------- INIT -------------------- */
-(async () => {
+const init = async () => {
   pool1 = await new sql.ConnectionPool(sqlConfig1).connect();
   pool2 = await new sql.ConnectionPool(sqlConfig2).connect();
   pool3 = await new sql.ConnectionPool(sqlConfig3).connect();
   console.log("All DBs connected");
   fetchLatestRows();
-})();
+};
+
+init();
