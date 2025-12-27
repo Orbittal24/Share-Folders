@@ -5,7 +5,7 @@ import pyodbc
 import json
 from datetime import datetime
 from cpppo.server.enip.get_attribute import proxy_simple
-from multiprocessing import Process, Event
+from threading import Thread, Event
 from get_ips_from_sql import fetch_ip_list
 
 # ------------------------------------------------------------------
@@ -97,16 +97,15 @@ def find_process_record(cursor, controller_ip, gun):
 # CORE PROCESSING (UNCHANGED)
 # ------------------------------------------------------------------
 def trigger_nomenclature_fetch(row, received_data):
+    conn = pyodbc.connect(SQL_CONN_STR)
+    cursor = conn.cursor()
     try:
         torque, angle = map(float, received_data.split(","))
-        conn = pyodbc.connect(SQL_CONN_STR)
-        cursor = conn.cursor()
 
         table_name = find_process_register_table_for_record(
             cursor, row["Time"], row["Pack_ID"],
             row["Process_ID"], row["Module_barcode"]
         )
-
         if not table_name:
             return
 
@@ -118,7 +117,6 @@ def trigger_nomenclature_fetch(row, received_data):
         """, row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
 
         running, target, status, t_arr, a_arr = cursor.fetchone()
-
         if status == "Completed":
             return
 
@@ -146,10 +144,10 @@ def trigger_nomenclature_fetch(row, received_data):
 
 
 def trigger_tray_bolting_fetch(row, received_data):
+    conn = pyodbc.connect(SQL_CONN_STR)
+    cursor = conn.cursor()
     try:
         torque, angle = map(float, received_data.split(","))
-        conn = pyodbc.connect(SQL_CONN_STR)
-        cursor = conn.cursor()
 
         cursor.execute("""
             SELECT srno, Running_Count, Target_Count, Process_Status,
@@ -188,7 +186,7 @@ def trigger_tray_bolting_fetch(row, received_data):
         conn.close()
 
 # ------------------------------------------------------------------
-# SQL + REDIS UPDATE (OPTIMIZED)
+# SQL + REDIS UPDATE
 # ------------------------------------------------------------------
 def update_sql_redis_api(conn, cursor, redis_client,
                           ip, gun, torque, angle, timestamp,
@@ -197,18 +195,15 @@ def update_sql_redis_api(conn, cursor, redis_client,
     key = f"{ip}_{gun}"
     received_data = f"{torque},{angle}"
 
-    # 🔇 Noise filter
-    if key in last_sql_values:
-        lt, la = map(float, last_sql_values[key].split(","))
-        if abs(lt - torque) < 0.05 and abs(la - angle) < 0.5:
-            return False
+    if last_sql_values.get(key) == received_data:
+        return False
 
     last_sql_values[key] = received_data
 
     now = time.time()
-    cache = process_cache.get(key)
-    if cache and now - cache["ts"] < PROCESS_CACHE_TTL:
-        process = cache["data"]
+    cached = process_cache.get(key)
+    if cached and now - cached["ts"] < PROCESS_CACHE_TTL:
+        process = cached["data"]
     else:
         process = find_process_record(cursor, ip, gun)
         process_cache[key] = {"data": process, "ts": now}
@@ -234,9 +229,11 @@ def update_sql_redis_api(conn, cursor, redis_client,
     return True
 
 # ------------------------------------------------------------------
-# ENIP READER
+# ENIP READER (THREADED)
 # ------------------------------------------------------------------
 def enip_reader(ip, stop_event):
+    print(f"[START] {ip}")
+
     conn = pyodbc.connect(SQL_CONN_STR)
     cursor = conn.cursor()
     redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
@@ -247,6 +244,7 @@ def enip_reader(ip, stop_event):
     while not stop_event.is_set():
         try:
             with proxy_simple(ip, timeout=3) as via:
+                print(f"[CONNECTED] {ip}")
                 while not stop_event.is_set():
                     real, uint = via.read([
                         ('@4/100/3', 'REAL'),
@@ -262,40 +260,49 @@ def enip_reader(ip, stop_event):
                             conn, cursor, redis_client,
                             ip, i + 1,
                             real_vals[i], uint_vals[i],
-                            timestamp, last_sql_values, process_cache
+                            timestamp,
+                            last_sql_values,
+                            process_cache
                         )
 
-                    time.sleep(0.3)  # 🔥 CPU FIX
-        except Exception:
-            time.sleep(3)
+                    time.sleep(0.5)  # 🔥 CPU FIX
+        except Exception as e:
+            print("[RECONNECT]", ip, e)
+            time.sleep(5)
 
     conn.close()
+    print(f"[STOPPED] {ip}")
 
 # ------------------------------------------------------------------
-# MAIN
+# MAIN (THREAD MANAGER)
 # ------------------------------------------------------------------
 def main():
-    processes = {}
+    threads = {}
     stop_event = Event()
+
+    print("[INFO] Monitoring controllers...")
 
     try:
         while True:
             ips = set(fetch_ip_list())
-            for ip in ips - processes.keys():
-                p = Process(target=enip_reader, args=(ip, stop_event))
-                p.start()
-                processes[ip] = p
 
-            for ip in list(processes):
-                if ip not in ips:
-                    processes[ip].terminate()
-                    del processes[ip]
+            for ip in ips - threads.keys():
+                t = Thread(target=enip_reader, args=(ip, stop_event), daemon=True)
+                t.start()
+                threads[ip] = t
 
-            time.sleep(1)
+            for ip in list(threads):
+                if ip not in ips or not threads[ip].is_alive():
+                    del threads[ip]
+
+            time.sleep(2)
+
     except KeyboardInterrupt:
+        print("\n[STOPPING]")
         stop_event.set()
-        for p in processes.values():
-            p.join()
+        for t in threads.values():
+            t.join()
 
+# ------------------------------------------------------------------
 if __name__ == "__main__":
     main()
