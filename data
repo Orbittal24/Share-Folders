@@ -1,523 +1,216 @@
-''''
+const sql = require('mssql');
+const axios = require('axios');
+const stringSimilarity = require('string-similarity');
 
-import time
-import redis
-import pytz
-import pyodbc
-import json
-import re
-from datetime import datetime
-from cpppo.server.enip.get_attribute import proxy_simple
-from multiprocessing import Process, Event
-from get_ips_from_sql import fetch_ip_list
+/* -------------------- DB CONFIG -------------------- */
+const sqlConfig1 = {
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability",
+  server: '10.9.4.28',
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
+};
 
-# ------------------------------------------------------------------
-# CONSTANTS
-# ------------------------------------------------------------------
-REAL_INDICES = [1, 4, 7, 10, 13, 16]
-UINT_INDICES = [4, 10, 16, 22, 28, 34]
+const sqlConfig2 = {
+  user: "user_mis",
+  password: "admin",
+  database: "taco_treceability_master",
+  server: '10.9.4.28',
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
+};
 
-REDIS_HASH = 'controller_data'
+const sqlConfig3 = {
+  user: "user_mis",
+  password: "admin",
+  database: "master_taco_treceability_IR",
+  server: '10.9.4.28',
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+  options: { encrypt: true, trustServerCertificate: true }
+};
 
-SQL_CONN_STR = (
-    'DRIVER={ODBC Driver 17 for SQL Server};'
-    'SERVER=TGTCNWS904;'
-    'DATABASE=taco_treceability_ir;'
-    'UID=user_mis;'
-    'PWD=admin'
-)
+let pool1, pool2, pool3;
+let lastSeenSrNo = 0;
 
-# ------------------------------------------------------------------
-# UTILS
-# ------------------------------------------------------------------
-def get_formatted_timestamp():
-    utc = datetime.utcnow()
-    ist = pytz.timezone('Asia/Kolkata')
-    return utc.replace(tzinfo=pytz.utc).astimezone(ist).strftime('%Y-%m-%d %H:%M:%S')
+/* -------------------- HELPERS -------------------- */
+const normalizeProcess = (text) =>
+  text.toLowerCase()
+    .replace(/[^a-z0-9+\/\-()& ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
+const getCommonWordsScore = (a, b) => {
+  const setA = new Set(a.split(' '));
+  const setB = new Set(b.split(' '));
+  return [...setA].filter(w => setB.has(w)).length / Math.max(setA.size, setB.size);
+};
 
-def extract_selected_values(data, indices):
-    return [data[i] for i in indices if i < len(data)]
+const deleteRow = async (sr_no) => {
+  await pool1.request().query(
+    `DELETE FROM taco_treceability.torque_details_EIP_mirror WHERE sr_no=${sr_no}`
+  );
+};
 
-# ------------------------------------------------------------------
-# 🔒 FINAL, BULLETPROOF TABLE SELECTOR
-# ------------------------------------------------------------------
-def find_process_register_table_for_record(
-    cursor,
-    process_time,
-    pack_id,
-    process_id,
-    module_barcode
-):
-    process_date_str = process_time.date().strftime("%d-%m-%y")
-    prefix = f"Process_Register_{process_date_str}_"
+/* -------------------- MAIN LOOP -------------------- */
+const fetchLatestRows = async () => {
+  try {
+    const result = await pool1.request().query(`
+      SELECT *
+      FROM taco_treceability.torque_details_EIP_mirror
+      WHERE sr_no > ${lastSeenSrNo}
+      ORDER BY sr_no ASC
+    `);
 
-    cursor.execute("""
-        SELECT TABLE_NAME
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_SCHEMA = 'taco_treceability'
-          AND TABLE_NAME LIKE ?
-        ORDER BY TABLE_NAME DESC
-    """, (prefix + '%',))
+    for (const row of result.recordset) {
+      lastSeenSrNo = Math.max(lastSeenSrNo, row.sr_no);
 
-    tables = [row[0] for row in cursor.fetchall()]
+      try {
+        /* ---------- PACK MASTER ---------- */
+        const packRes = await pool2.request().query(`
+          SELECT Pack_ID FROM taco_treceability.master_pack
+          WHERE Pack_Name='${row.pack_name}'
+        `);
+        if (!packRes.recordset.length) continue;
+        const packID = packRes.recordset[0].Pack_ID;
 
-    for table_name in tables:
-        cursor.execute(f"""
-            SELECT 1
-            FROM taco_treceability.[{table_name}]
-            WHERE Pack_ID = ?
-              AND Process_ID = ?
-              AND Module_barcode = ?
-        """, (pack_id, process_id, module_barcode))
+        const processedPackNo =
+          row.pack_no === 'not_linked' ? 'not_linked' : row.pack_no.slice(-6);
 
-        if cursor.fetchone():
-            return table_name  # ✅ EXACT MATCH FOUND
+        let scanType, scanID, moduleName, modulebarQR;
 
-    return None
-
-
-def find_process_record(cursor, controller_ip, gun):
-    # -------------------------------------------------
-    # 1️⃣ Try Process_Register_master FIRST
-    # -------------------------------------------------
-    cursor.execute("""
-        SELECT TOP 1
-            srno,
-            Process_ID,
-            Time,
-            Line,
-            Pack_temp_number,
-            Module_barcode,
-            Module_name,
-            Pack_ID,
-            Running_Count,
-            Process_Status,
-            Torque_Array,
-            Angle_Array,
-            Target_Count
-        FROM taco_treceability.Process_Register_master
-        WHERE Torque_Array = ?
-          AND CHARINDEX(',' + ?, ',' + Angle_Array + ',') > 0
-        ORDER BY srno DESC
-    """, controller_ip, str(gun))
-
-    row = cursor.fetchone()
-    if row:
-        columns = [c[0] for c in cursor.description]
-        result = dict(zip(columns, row))
-
-        # 🔑 add source table info (does NOT break existing code)
-        result["source_table"] = "Process_Register_master"
-        return result
-
-    # -------------------------------------------------
-    # 2️⃣ Fallback → TrayAssemblyBoltingCount_master
-    # -------------------------------------------------
-    cursor.execute("""
-        SELECT TOP 1
-            srno,
-            Process_ID,
-            Time,
-            Line,
-            BOM_ID,
-            Running_Count,
-            Pack_Number,
-            Pack_ID,
-            Process_Status,
-            BOM_QR,
-            Torque_Array,
-            Angle_Array,
-            Target_Count
-        FROM taco_treceability.TrayAssemblyBoltingCount_master
-        WHERE Torque_Array = ?
-          AND Angle_Array = ?
-        ORDER BY Process_ID DESC
-    """, controller_ip, str(gun))
-
-    row = cursor.fetchone()
-    if row:
-        columns = [c[0] for c in cursor.description]
-        result = dict(zip(columns, row))
-
-        # 🔑 add source table info
-        result["source_table"] = "TrayAssemblyBoltingCount_master"
-        return result
-
-    # -------------------------------------------------
-    # 3️⃣ Nothing found
-    # -------------------------------------------------
-    return None
-
-# ------------------------------------------------------------------
-# PROCESS REGISTER UPDATE
-# ------------------------------------------------------------------
-def trigger_nomenclature_fetch(row, received_data):
-    try:
-        torque_str, angle_str = received_data.split(",")
-        torque = round(float(torque_str), 2)
-        angle = round(float(angle_str), 2)
-
-        def parse_range(val):
-            low, high = map(float, val.replace("Nm", "").replace("°", "").split("-"))
-            return low, high
-
-        torque_min, torque_max = parse_range(row["Module_name"])
-        angle_min, angle_max = parse_range(row["Process_Status"])
-
-        if not (torque_min <= torque <= torque_max and angle_min <= angle <= angle_max):
-            return
-
-        conn = pyodbc.connect(SQL_CONN_STR)
-        cursor = conn.cursor()
-
-        table_name = find_process_register_table_for_record(
-            cursor,
-            row["Time"],
-            row["Pack_ID"],
-            row["Process_ID"],
-            row["Module_barcode"]
-        )
-        print("TABLE SELECTED:", table_name)
-
-        if not table_name:
-            print("❌ No matching Process_Register table found")
-            return
-
-        cursor.execute(f"""
-            SELECT Running_Count, Target_Count, Process_Status,
-                   Torque_Array, Angle_Array
-            FROM taco_treceability.[{table_name}]
-            WHERE Pack_ID=? AND Process_ID=? AND Module_barcode=?
-        """, row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
-
-        rec = cursor.fetchone()
-        if not rec:
-            return
-
-        running, target, status, t_arr, a_arr = rec
-        t_arr = json.loads(t_arr or "[]")
-        a_arr = json.loads(a_arr or "[]")
-
-        if status == "Completed":
-            return
-
-        t_arr.append(torque)
-        a_arr.append(angle)
-        running += 1
-
-        if running == target:
-            status = "Completed"
-
-        cursor.execute(f"""
-            UPDATE taco_treceability.[{table_name}]
-            SET Running_Count=?, Process_Status=?,
-                Torque_Array=?, Angle_Array=?
-            WHERE Pack_ID=? AND Process_ID=? AND Module_barcode=?
-        """, running, status, json.dumps(t_arr), json.dumps(a_arr),
-             row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
-
-        conn.commit()
-
-        if status == "Completed":
-            cursor.execute("""
-                DELETE FROM taco_treceability.Process_Register_master
-                WHERE Pack_ID=? AND Process_ID=? AND Line=?
-                  AND Module_barcode=? AND Running_Count=?
-            """, row["Pack_ID"], row["Process_ID"], row["Line"],
-                 row["Module_barcode"], row["Running_Count"])
-            conn.commit()
-
-    finally:
-        try:
-            cursor.close()
-            conn.close()
-        except:
-            pass
-
-# ------------------------------------------------------------------
-# TRAY ASSEMBLY BOLTING PROCESSING
-# ------------------------------------------------------------------
-def trigger_tray_bolting_fetch(row, received_data):
-    try:
-        # ---------------------------------------------------
-        # Extract & validate payload
-        # ---------------------------------------------------
-        pack_id = row.Pack_ID
-        process_id = row.Process_ID
-        line_id = row.Line
-        station_id = row.Station_ID
-        received_data = row.Received_Data
-
-        if None in (pack_id, process_id, line_id, station_id, received_data):
-            return "Missing required fields"
-
-        try:
-            torque_str, angle_str = received_data.split(",")
-            torque = round(float(torque_str), 2)
-            angle = round(float(angle_str), 2)
-        except Exception:
-            return "Invalid Received_Data format"
-
-        conn = pyodbc.connect(SQL_CONN_STR)
-        cursor = conn.cursor()
-
-
-        def parse_range(val: str):
-            low, high = map(float, val.replace("Nm", "").replace("°", "").split("-"))
-            return low, high
-
-        torque_min, torque_max = parse_range(row.Pack_Number)
-        angle_min, angle_max = parse_range(row.Process_Status)
-
-        if not (torque_min <= torque <= torque_max and angle_min <= angle <= angle_max):
-            return {
-                "message": "Torque or angle out of range",
-                "torque": torque,
-                "angle": angle,
-                "expected_torque_range": f"{torque_min}-{torque_max}",
-                "expected_angle_range": f"{angle_min}-{angle_max}",
-                "skipped": True
-            }
-
-        # ---------------------------------------------------
-        # BOM RESULT CHECK (TrayAssemblyBoltingCountMaster)
-        # ---------------------------------------------------
-     
-        bom_qr = row.BOM_QR
-
-        # ===================================================
-        # TRAY ASSEMBLY FLOW
-        # ===================================================
-        cursor.execute("""
-            SELECT srno, Running_Count, Target_Count, Process_Status,
-                   Torque_Array, Angle_Array
-            FROM taco_treceability.TrayAssemblyBoltingCount
-            WHERE Pack_ID = ?
-              AND Process_ID = ?
-              AND Line = ?
-              AND BOM_QR = ?
-        """, (pack_id, process_id, line_id, bom_qr))
-
-        tray = cursor.fetchone()
-        if not tray:
-            return "Tray bolting record not found"
-
-        (
-            srno,
-            running_count,
-            target_count,
-            process_status,
-            torque_arr_db,
-            angle_arr_db
-        ) = tray
-
-        torque_arr = json.loads(torque_arr_db or "[]")
-        angle_arr = json.loads(angle_arr_db or "[]")
-
-        if process_status == "Completed":
-            return {
-                "message": "Process already completed",
-                "Running_Count": running_count,
-                "Target_Count": target_count
-            }
-
-        torque_arr.append(torque)
-        angle_arr.append(angle)
-
-        running_count += 1
-        if running_count == target_count:
-            process_status = "Completed"
-
-        cursor.execute("""
-            UPDATE taco_treceability.TrayAssemblyBoltingCount
-            SET Running_Count = ?,
-                Process_Status = ?,
-                Torque_Array = ?,
-                Angle_Array = ?
-            WHERE srno = ?
-        """, (
-            running_count,
-            process_status,
-            json.dumps(torque_arr),
-            json.dumps(angle_arr),
-            srno
-        ))
-
-        conn.commit()
-
-        # ---------------------------------------------------
-        # Delete master entry after completion
-        # ---------------------------------------------------
-        print("tray Status", process_status)
-        if process_status == "Completed":
-            cursor.execute("""
-                DELETE FROM taco_treceability.TrayAssemblyBoltingCountMaster
-                WHERE Pack_ID = ?
-                  AND Process_ID = ?
-                  AND Line = ?
-                  AND BOM_QR = ?
-                  AND Running_Count = ?
-            """, (
-                pack_id,
-                process_id,
-                line_id,
-                bom_qr,
-                station_id
-            ))
-            conn.commit()
-
-        conn.close()
-
-        return {
-            "message": "Tray bolting updated successfully",
-            "Torque_Array": torque_arr,
-            "Angle_Array": angle_arr,
-            "Running_Count": running_count,
-            "Process_Status": process_status
+        /* ---------- SCAN TYPE ---------- */
+        if (row.module_barcode?.startsWith('DJ')) {
+          scanType = 'Pack';
+          const qrRes = await pool1.request().query(`
+            SELECT CustomerQRCode
+            FROM taco_treceability.final_qrcode_details
+            WHERE final_qrcode='${row.pack_no}'
+          `);
+          if (!qrRes.recordset.length) continue;
+          modulebarQR = qrRes.recordset[0].CustomerQRCode;
+          scanID = packID;
+        } else {
+          scanType = 'Module';
+          const modRes = await pool2.request().query(`
+            SELECT Module_Name, Module_ID
+            FROM taco_treceability.master_module
+            WHERE moduleNumber='${row.module_name}' AND Pack_ID='${packID}'
+          `);
+          if (!modRes.recordset.length) continue;
+          moduleName = modRes.recordset[0].Module_Name;
+          scanID = modRes.recordset[0].Module_ID;
         }
 
-    except Exception as e:
-        import traceback
-        print(traceback.format_exc())
-        return str(e)
+        /* ---------- PROCESS MASTER ---------- */
+        const pmRes = await pool3.request().query(`
+          SELECT Process_Name, Process_ID, Total_Count
+          FROM taco_treceability.Process_Master
+          WHERE Pack_ID='${packID}' AND Scan_ID='${scanID}'
+        `);
 
-# ------------------------------------------------------------------
-# SQL + REDIS UPDATE
-# ------------------------------------------------------------------
-def update_sql_redis_api(
-    conn, redis_client,
-    ip, gun, torque, angle, timestamp,
-    last_sql_values
-):
-    key = f"{ip}_{gun}"
-    received_data = f"{torque},{angle}"
+        const inputNorm = normalizeProcess(row.process_name);
+        let best = { score: 0 };
 
-    if last_sql_values.get(key) == received_data:
-        return False
+        for (const p of pmRes.recordset) {
+          const cand = normalizeProcess(p.Process_Name);
+          const score =
+            0.7 * getCommonWordsScore(inputNorm, cand) +
+            0.3 * stringSimilarity.compareTwoStrings(inputNorm, cand);
+          if (score > best.score) {
+            best = { score, processID: p.Process_ID, totalCount: p.Total_Count };
+          }
+        }
 
-    last_sql_values[key] = received_data
-    cursor = conn.cursor()
+        if (!best.processID) continue;
 
-    process = find_process_record(cursor, ip, gun)
-    print("PROCESS:", process)
+        /* ---------- API PAYLOAD ---------- */
+        const api1Payload = {
+          pack_id: String(packID),
+          process_id: best.processID,
+          time: row.date_dd,
+          module_name: scanType === 'Pack' ? row.pack_name : moduleName,
+          target_count: best.totalCount,
+          pack_no: processedPackNo,
+          line_id: 1,
+          Received_Data: `${row.torque},${row.angle}`,
+          module_barcode: scanType === 'Pack' ? modulebarQR : row.module_barcode
+        };
 
-    if not process:
-        return False
+        const api1Res = await axios.post(
+          "https://mismainapp.tataautocomp.com:3241/trigger_process_data",
+          api1Payload
+        );
 
-    if(process.source_table == 'TrayAssemblyBoltingCount_master'):
-        trigger_tray_bolting_fetch(process, received_data)
-    else:
-        trigger_nomenclature_fetch(process, received_data)
+        const {
+          message = '',
+          Process_Status = '',
+          PUT_url = '',
+          module_barcode = ''
+        } = api1Res.data || {};
 
-    cursor.execute("""
-        UPDATE taco_treceability.ir_controller_configuration
-        SET Received_Data=?, Date_Time=?
-        WHERE controller_ip=? AND gun=?
-          AND Process_ID=? AND station_id=? AND Pack_ID=?
-          AND (Received_Data<>? OR Received_Data IS NULL)
-    """, received_data, timestamp, ip, gun,
-         process["Process_ID"],
-         process["Running_Count"],
-         process["Pack_ID"],
-         received_data)
+        /* ---------- STATION API (MODULE + PACK) ---------- */
+        if (message === "Process register updated successfully" && Process_Status === "Completed") {
 
-    if cursor.rowcount:
-        conn.commit()
-        redis_client.hset(
-            REDIS_HASH,
-            ip,
-            json.dumps({
-                "ip": ip,
-                "guns": {
-                    f"gun_{gun}": {
-                        "torque": torque,
-                        "angle": angle,
-                        "timestamp": timestamp
-                    }
+          const match = PUT_url?.match(/Process_ID=(\d+)/);
+          if (match) {
+            const processId = match[1];
+
+            const stationRes = await pool3.request().query(`
+              SELECT Station_ID
+              FROM taco_treceability.Process_Master
+              WHERE Process_ID='${processId}'
+            `);
+
+            if (stationRes.recordset.length) {
+              await axios.post(
+                "https://mismainapp.tataautocomp.com:3241/station_status/filter",
+                {
+                  station_id: stationRes.recordset[0].Station_ID,
+                  line_id: "1",
+                  customer_qrcode: module_barcode,
+                  station_status: "OK",
+                  checklist_name: "NA",
+                  substation_id: processId
                 }
-            })
-        )
-    return True
+              );
+            }
+          }
+        }
 
+        /* ---------- ALREADY COMPLETED ---------- */
+        if (message === "Process already completed. No update necessary.") {
+          await pool1.request().query(`
+            DELETE FROM taco_treceability.torque_details_EIP_mirror
+            WHERE pack_no='${row.pack_no}'
+              AND module_barcode='${row.module_barcode}'
+              AND process_name='${row.process_name}'
+              AND pack_name='${row.pack_name}'
+          `);
+          continue;
+        }
 
-# ------------------------------------------------------------------
-# ENIP READER
-# ------------------------------------------------------------------
-def enip_reader(ip, stop_event):
-    print(f"[START] {ip}")
-    conn = pyodbc.connect(SQL_CONN_STR)
-    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+        /* ---------- DELETE ---------- */
+        await deleteRow(row.sr_no);
+        console.log(`Processed ${scanType} sr_no ${row.sr_no}`);
 
-    last_sql_values = {}
-    pending = {}
+      } catch (rowErr) {
+        console.error("Row Error:", rowErr.message);
+        await deleteRow(row.sr_no);
+      }
+    }
+  } catch (err) {
+    console.error("Loop Error:", err.message);
+  } finally {
+    setTimeout(fetchLatestRows, 3000);
+  }
+};
 
-    while not stop_event.is_set():
-        try:
-            with proxy_simple(ip, timeout=3) as via:
-                print(f"[CONNECTED] {ip}")
-
-                while not stop_event.is_set():
-                    real, uint = via.read([
-                        ('@4/100/3', 'REAL'),
-                        ('@4/100/3', 'UINT'),
-                    ])
-
-                    real_vals = extract_selected_values(real, REAL_INDICES)
-                    uint_vals = extract_selected_values(uint, UINT_INDICES)
-                    timestamp = get_formatted_timestamp()
-
-                    for i in range(min(len(real_vals), len(uint_vals))):
-                        pending[f"{ip}_{i+1}"] = (real_vals[i], uint_vals[i])
-
-                    for key, (t, a) in list(pending.items()):
-                        if update_sql_redis_api(
-                            conn, redis_client,
-                            ip, int(key.split('_')[1]),
-                            t, a, timestamp, last_sql_values
-                        ):
-                            del pending[key]
-
-                    time.sleep(0.1)
-
-        except Exception as e:
-            print("[RECONNECT]", ip, e)
-            time.sleep(3)
-
-    conn.close()
-    print(f"[STOPPED] {ip}")
-
-
-# ------------------------------------------------------------------
-# MAIN
-# ------------------------------------------------------------------
-def main():
-    processes = {}
-    stop_event = Event()
-
-    print("[INFO] Monitoring controllers...")
-
-    try:
-        while True:
-            ips = set(fetch_ip_list())
-
-            for ip in ips - processes.keys():
-                p = Process(target=enip_reader, args=(ip, stop_event))
-                p.start()
-                processes[ip] = p
-
-            for ip in list(processes):
-                if ip not in ips or not processes[ip].is_alive():
-                    processes[ip].terminate()
-                    del processes[ip]
-
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-        stop_event.set()
-        for p in processes.values():
-            p.join()
-
-
-if _name_ == "_main_":
-    main()
+/* -------------------- INIT -------------------- */
+(async () => {
+  pool1 = await new sql.ConnectionPool(sqlConfig1).connect();
+  pool2 = await new sql.ConnectionPool(sqlConfig2).connect();
+  pool3 = await new sql.ConnectionPool(sqlConfig3).connect();
+  console.log("All DBs connected");
+  fetchLatestRows();
+})();
