@@ -3,9 +3,10 @@ import redis
 import pytz
 import pyodbc
 import json
+import re
 from datetime import datetime
 from cpppo.server.enip.get_attribute import proxy_simple
-from threading import Thread, Event
+from multiprocessing import Process, Event
 from get_ips_from_sql import fetch_ip_list
 
 # ------------------------------------------------------------------
@@ -24,8 +25,6 @@ SQL_CONN_STR = (
     'PWD=admin'
 )
 
-PROCESS_CACHE_TTL = 2  # seconds
-
 # ------------------------------------------------------------------
 # UTILS
 # ------------------------------------------------------------------
@@ -39,7 +38,7 @@ def extract_selected_values(data, indices):
     return [data[i] for i in indices if i < len(data)]
 
 # ------------------------------------------------------------------
-# SQL HELPERS (UNCHANGED LOGIC)
+# FINAL, BULLETPROOF TABLE SELECTOR
 # ------------------------------------------------------------------
 def find_process_register_table_for_record(cursor, process_time, pack_id, process_id, module_barcode):
     process_date_str = process_time.date().strftime("%d-%m-%y")
@@ -53,59 +52,104 @@ def find_process_register_table_for_record(cursor, process_time, pack_id, proces
         ORDER BY TABLE_NAME DESC
     """, (prefix + '%',))
 
-    for (table_name,) in cursor.fetchall():
+    tables = [row[0] for row in cursor.fetchall()]
+
+    for table_name in tables:
         cursor.execute(f"""
-            SELECT 1 FROM taco_treceability.[{table_name}]
-            WHERE Pack_ID=? AND Process_ID=? AND Module_barcode=?
-        """, pack_id, process_id, module_barcode)
+            SELECT 1
+            FROM taco_treceability.[{table_name}]
+            WHERE Pack_ID = ?
+              AND Process_ID = ?
+              AND Module_barcode = ?
+        """, (pack_id, process_id, module_barcode))
 
         if cursor.fetchone():
-            return table_name
+            return table_name  # EXACT MATCH FOUND
+
     return None
 
 
 def find_process_record(cursor, controller_ip, gun):
+    # Try Process_Register_master first
     cursor.execute("""
-        SELECT TOP 1 *
+        SELECT TOP 1
+            srno,
+            Process_ID,
+            Time,
+            Line,
+            Pack_temp_number,
+            Module_barcode,
+            Module_name,
+            Pack_ID,
+            Running_Count,
+            Process_Status,
+            Torque_Array,
+            Angle_Array,
+            Target_Count
         FROM taco_treceability.Process_Register_master
-        WHERE Torque_Array=? AND CHARINDEX(','+?, ','+Angle_Array+',')>0
+        WHERE Torque_Array = ?
+          AND CHARINDEX(',' + ?, ',' + Angle_Array + ',') > 0
         ORDER BY srno DESC
     """, controller_ip, str(gun))
 
     row = cursor.fetchone()
     if row:
-        data = dict(zip([c[0] for c in cursor.description], row))
-        data["source_table"] = "Process_Register_master"
-        return data
+        columns = [c[0] for c in cursor.description]
+        result = dict(zip(columns, row))
+        result["source_table"] = "Process_Register_master"
+        return result
 
+    # Fallback to TrayAssemblyBoltingCount_master
     cursor.execute("""
-        SELECT TOP 1 *
+        SELECT TOP 1
+            srno,
+            Process_ID,
+            Time,
+            Line,
+            BOM_ID,
+            Running_Count,
+            Pack_Number,
+            Pack_ID,
+            Process_Status,
+            BOM_QR,
+            Torque_Array,
+            Angle_Array,
+            Target_Count
         FROM taco_treceability.TrayAssemblyBoltingCount_master
-        WHERE Torque_Array=? AND Angle_Array=?
+        WHERE Torque_Array = ?
+          AND Angle_Array = ?
         ORDER BY Process_ID DESC
     """, controller_ip, str(gun))
 
     row = cursor.fetchone()
     if row:
-        data = dict(zip([c[0] for c in cursor.description], row))
-        data["source_table"] = "TrayAssemblyBoltingCount_master"
-        return data
+        columns = [c[0] for c in cursor.description]
+        result = dict(zip(columns, row))
+        result["source_table"] = "TrayAssemblyBoltingCount_master"
+        return result
 
     return None
 
 # ------------------------------------------------------------------
-# CORE PROCESSING (UNCHANGED)
+# PROCESS REGISTER UPDATE
 # ------------------------------------------------------------------
 def trigger_nomenclature_fetch(row, received_data):
-    conn = pyodbc.connect(SQL_CONN_STR)
-    cursor = conn.cursor()
     try:
-        torque, angle = map(float, received_data.split(","))
+        torque_str, angle_str = received_data.split(",")
+        torque = round(float(torque_str), 2)
+        angle = round(float(angle_str), 2)
+
+        conn = pyodbc.connect(SQL_CONN_STR)
+        cursor = conn.cursor()
 
         table_name = find_process_register_table_for_record(
-            cursor, row["Time"], row["Pack_ID"],
-            row["Process_ID"], row["Module_barcode"]
+            cursor,
+            row["Time"],
+            row["Pack_ID"],
+            row["Process_ID"],
+            row["Module_barcode"]
         )
+
         if not table_name:
             return
 
@@ -116,12 +160,16 @@ def trigger_nomenclature_fetch(row, received_data):
             WHERE Pack_ID=? AND Process_ID=? AND Module_barcode=?
         """, row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
 
-        running, target, status, t_arr, a_arr = cursor.fetchone()
-        if status == "Completed":
+        rec = cursor.fetchone()
+        if not rec:
             return
 
+        running, target, status, t_arr, a_arr = rec
         t_arr = json.loads(t_arr or "[]")
         a_arr = json.loads(a_arr or "[]")
+
+        if status == "Completed":
+            return
 
         t_arr.append(torque)
         a_arr.append(angle)
@@ -139,59 +187,96 @@ def trigger_nomenclature_fetch(row, received_data):
              row["Pack_ID"], row["Process_ID"], row["Module_barcode"])
 
         conn.commit()
+
+        if status == "Completed":
+            cursor.execute("""
+                DELETE FROM taco_treceability.Process_Register_master
+                WHERE Pack_ID=? AND Process_ID=? AND Line=?
+                  AND Module_barcode=? AND Running_Count=?
+            """, row["Pack_ID"], row["Process_ID"], row["Line"],
+                 row["Module_barcode"], row["Running_Count"])
+            conn.commit()
+
     finally:
-        conn.close()
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
 
-
+# ------------------------------------------------------------------
+# TRAY ASSEMBLY BOLTING PROCESSING
+# ------------------------------------------------------------------
 def trigger_tray_bolting_fetch(row, received_data):
-    conn = pyodbc.connect(SQL_CONN_STR)
-    cursor = conn.cursor()
     try:
-        torque, angle = map(float, received_data.split(","))
+        pack_id = row['Pack_ID']
+        process_id = row['Process_ID']
+        line_id = row['Line']
+        station_id = row['Running_Count']
+
+        torque_str, angle_str = received_data.split(",")
+        torque = round(float(torque_str), 2)
+        angle = round(float(angle_str), 2)
+
+        conn = pyodbc.connect(SQL_CONN_STR)
+        cursor = conn.cursor()
 
         cursor.execute("""
             SELECT srno, Running_Count, Target_Count, Process_Status,
                    Torque_Array, Angle_Array
             FROM taco_treceability.TrayAssemblyBoltingCount
-            WHERE Pack_ID=? AND Process_ID=? AND Line=? AND BOM_QR=?
-        """, row["Pack_ID"], row["Process_ID"], row["Line"], row["BOM_QR"])
+            WHERE Pack_ID = ?
+              AND Process_ID = ?
+              AND Line = ?
+              AND BOM_QR = ?
+        """, (pack_id, process_id, line_id, row['BOM_QR']))
 
-        rec = cursor.fetchone()
-        if not rec:
+        tray = cursor.fetchone()
+        if not tray:
             return
 
-        srno, running, target, status, t_arr, a_arr = rec
-        if status == "Completed":
+        srno, running_count, target_count, process_status, torque_arr_db, angle_arr_db = tray
+        torque_arr = json.loads(torque_arr_db or "[]")
+        angle_arr = json.loads(angle_arr_db or "[]")
+
+        if process_status == "Completed":
             return
 
-        t_arr = json.loads(t_arr or "[]")
-        a_arr = json.loads(a_arr or "[]")
+        torque_arr.append(torque)
+        angle_arr.append(angle)
+        running_count += 1
 
-        t_arr.append(torque)
-        a_arr.append(angle)
-        running += 1
-
-        if running == target:
-            status = "Completed"
+        if running_count == target_count:
+            process_status = "Completed"
 
         cursor.execute("""
             UPDATE taco_treceability.TrayAssemblyBoltingCount
-            SET Running_Count=?, Process_Status=?,
-                Torque_Array=?, Angle_Array=?
-            WHERE srno=?
-        """, running, status, json.dumps(t_arr), json.dumps(a_arr), srno)
-
+            SET Running_Count = ?,
+                Process_Status = ?,
+                Torque_Array = ?,
+                Angle_Array = ?
+            WHERE srno = ?
+        """, (running_count, process_status, json.dumps(torque_arr),
+              json.dumps(angle_arr), srno))
         conn.commit()
-    finally:
+
+        if process_status == "Completed":
+            cursor.execute("""
+                DELETE FROM taco_treceability.TrayAssemblyBoltingCount_master
+                WHERE Pack_ID = ? AND Process_ID = ? AND Line = ?
+                  AND BOM_QR = ? AND Running_Count = ?
+            """, (pack_id, process_id, line_id, row['BOM_QR'], station_id))
+            conn.commit()
+
         conn.close()
+
+    except Exception as e:
+        print(e)
 
 # ------------------------------------------------------------------
 # SQL + REDIS UPDATE
 # ------------------------------------------------------------------
-def update_sql_redis_api(conn, cursor, redis_client,
-                          ip, gun, torque, angle, timestamp,
-                          last_sql_values, process_cache):
-
+def update_sql_redis_api(conn, redis_client, ip, gun, torque, angle, timestamp, last_sql_values):
     key = f"{ip}_{gun}"
     received_data = f"{torque},{angle}"
 
@@ -199,19 +284,13 @@ def update_sql_redis_api(conn, cursor, redis_client,
         return False
 
     last_sql_values[key] = received_data
+    cursor = conn.cursor()
 
-    now = time.time()
-    cached = process_cache.get(key)
-    if cached and now - cached["ts"] < PROCESS_CACHE_TTL:
-        process = cached["data"]
-    else:
-        process = find_process_record(cursor, ip, gun)
-        process_cache[key] = {"data": process, "ts": now}
-
+    process = find_process_record(cursor, ip, gun)
     if not process:
         return False
 
-    if process["source_table"] == "TrayAssemblyBoltingCount_master":
+    if process['source_table'] == 'TrayAssemblyBoltingCount_master':
         trigger_tray_bolting_fetch(process, received_data)
     else:
         trigger_nomenclature_fetch(process, received_data)
@@ -219,65 +298,76 @@ def update_sql_redis_api(conn, cursor, redis_client,
     cursor.execute("""
         UPDATE taco_treceability.ir_controller_configuration
         SET Received_Data=?, Date_Time=?
-        WHERE controller_ip=? AND gun=? AND Process_ID=? AND station_id=? AND Pack_ID=?
+        WHERE controller_ip=? AND gun=?
+          AND Process_ID=? AND station_id=? AND Pack_ID=?
+          AND (Received_Data<>? OR Received_Data IS NULL)
     """, received_data, timestamp, ip, gun,
-         process["Process_ID"], process["Running_Count"], process["Pack_ID"])
+         process["Process_ID"], process["Running_Count"],
+         process["Pack_ID"], received_data)
 
     if cursor.rowcount:
         conn.commit()
-
+        redis_client.hset(
+            REDIS_HASH,
+            ip,
+            json.dumps({
+                "ip": ip,
+                "guns": {
+                    f"gun_{gun}": {
+                        "torque": torque,
+                        "angle": angle,
+                        "timestamp": timestamp
+                    }
+                }
+            })
+        )
     return True
 
 # ------------------------------------------------------------------
-# ENIP READER (THREADED)
+# ENIP READER
 # ------------------------------------------------------------------
 def enip_reader(ip, stop_event):
     print(f"[START] {ip}")
-
     conn = pyodbc.connect(SQL_CONN_STR)
-    cursor = conn.cursor()
     redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
     last_sql_values = {}
-    process_cache = {}
+    pending = {}
 
     while not stop_event.is_set():
         try:
             with proxy_simple(ip, timeout=3) as via:
                 print(f"[CONNECTED] {ip}")
-                while not stop_event.is_set():
-                    real, uint = via.read([
-                        ('@4/100/3', 'REAL'),
-                        ('@4/100/3', 'UINT'),
-                    ])
 
+                while not stop_event.is_set():
+                    real, uint = via.read([('@4/100/3', 'REAL'), ('@4/100/3', 'UINT')])
                     real_vals = extract_selected_values(real, REAL_INDICES)
                     uint_vals = extract_selected_values(uint, UINT_INDICES)
                     timestamp = get_formatted_timestamp()
 
                     for i in range(min(len(real_vals), len(uint_vals))):
-                        update_sql_redis_api(
-                            conn, cursor, redis_client,
-                            ip, i + 1,
-                            real_vals[i], uint_vals[i],
-                            timestamp,
-                            last_sql_values,
-                            process_cache
-                        )
+                        pending[f"{ip}_{i+1}"] = (real_vals[i], uint_vals[i])
 
-                    time.sleep(0.5)  # 🔥 CPU FIX
+                    for key, (t, a) in list(pending.items()):
+                        if update_sql_redis_api(conn, redis_client,
+                                                ip, int(key.split('_')[1]),
+                                                t, a, timestamp, last_sql_values):
+                            del pending[key]
+
+                    time.sleep(0.5)  # 🔹 CPU reduced from 0.1 → 0.5s
+
         except Exception as e:
             print("[RECONNECT]", ip, e)
-            time.sleep(5)
+            time.sleep(2)  # 🔹 Avoid tight reconnect loop
 
     conn.close()
     print(f"[STOPPED] {ip}")
 
 # ------------------------------------------------------------------
-# MAIN (THREAD MANAGER)
+# MAIN
 # ------------------------------------------------------------------
 def main():
-    threads = {}
+    processes = {}
     stop_event = Event()
 
     print("[INFO] Monitoring controllers...")
@@ -286,23 +376,23 @@ def main():
         while True:
             ips = set(fetch_ip_list())
 
-            for ip in ips - threads.keys():
-                t = Thread(target=enip_reader, args=(ip, stop_event), daemon=True)
-                t.start()
-                threads[ip] = t
+            for ip in ips - processes.keys():
+                p = Process(target=enip_reader, args=(ip, stop_event))
+                p.start()
+                processes[ip] = p
 
-            for ip in list(threads):
-                if ip not in ips or not threads[ip].is_alive():
-                    del threads[ip]
+            for ip in list(processes):
+                if ip not in ips or not processes[ip].is_alive():
+                    processes[ip].terminate()
+                    del processes[ip]
 
-            time.sleep(2)
+            time.sleep(1)
 
     except KeyboardInterrupt:
-        print("\n[STOPPING]")
         stop_event.set()
-        for t in threads.values():
-            t.join()
+        for p in processes.values():
+            p.join()
 
-# ------------------------------------------------------------------
+
 if __name__ == "__main__":
     main()
