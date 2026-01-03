@@ -798,3 +798,42 @@ GROUP BY
     b.pack_name, b.module_group;
 
 ------------------------------------------------------------------------------------
+
+
+USE [master_taco_treceability_VIR]
+GO
+
+/****** Object:  Table [dbo].[test_cell_table]    Script Date: 1/3/2026 10:36:35 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[test_cell_table](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[line_no] [int] NOT NULL,
+	[pack_no] [varchar](50) NOT NULL,
+	[pack_id] [int] NOT NULL,
+	[module_id] [int] NOT NULL,
+	[voltage_points] [decimal](10, 2) NULL,
+	[ir_points] [decimal](10, 2) NULL,
+	[created_at] [datetime] NULL,
+	[output_voltage] [decimal](10, 2) NULL,
+	[made_by] [varchar](100) NULL,
+	[quality_checked_by] [varchar](100) NULL,
+	[insulation] [decimal](10, 2) NULL,
+	[module_barcode] [varchar](100) NULL,
+	[data_name] [nvarchar](max) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+ALTER TABLE [dbo].[test_cell_table] ADD  DEFAULT (getdate()) FOR [created_at]
+GO
+
+
+
