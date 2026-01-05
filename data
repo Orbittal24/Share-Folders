@@ -1,6 +1,4 @@
-const fetch = require("node-fetch");
-
-const fetch = require("node-fetch");
+const axios = require("axios");
 
 socket.on("getIBB_status", async (battery_qrcode) => {
     try {
@@ -12,34 +10,28 @@ socket.on("getIBB_status", async (battery_qrcode) => {
 
         console.log("requestData:::::::", requestData);
 
-        const response = await fetch(
+        // Call API using axios GET
+        const response = await axios.get(
             "https://mismainapp.tataautocomp.com:3241/station_interlock",
             {
-                method: "POST",
+                params: requestData,
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify(requestData),
             }
         );
 
-        if (!response.ok) {
-            console.error(
-                "Interlock API error:",
-                response.status,
-                response.statusText
-            );
-            socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
-            return;
-        }
+        console.log("API result:", JSON.stringify(response.data, null, 2));
 
-        const result = await response.json();
-        console.log("API result:", JSON.stringify(result, null, 2));
-
-        socket.emit("setFinalQRCodeStatus", result, battery_qrcode);
+        // Send API response back to frontend
+        socket.emit("setIBB_status", response.data, battery_qrcode);
 
     } catch (error) {
-        console.error("API error:", error);
-        socket.emit("setFinalQRCodeStatus", { error: true }, battery_qrcode);
+        console.error(
+            "Interlock API error:",
+            error.response?.status,
+            error.response?.statusText || error.message
+        );
+        socket.emit("setIBB_status", { error: true }, battery_qrcode);
     }
 });
