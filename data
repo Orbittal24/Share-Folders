@@ -1,82 +1,18 @@
-const axios = require("axios");
+socket.on("setIBB_status", (data, battery_qrcode) => {
+    console.log("setIBB_status:", data);
 
-socket.on("getIBB_status", async (battery_qrcode) => {
-    try {
-        // 1️⃣ Prepare request payload
-        const requestData = {
-            station_id: 30,
-            line_id: 3,
-            customer_qrcode: battery_qrcode
-        };
+    // Safety checks
+    if (
+        Array.isArray(data) &&
+        data.length > 0 &&
+        data[0].rows &&
+        data[0].rows.length > 0
+    ) {
+        const ibbStatus = data[0].rows[0].ibb_status;
 
-        console.log("requestData:::::::", requestData);
-
-        // 2️⃣ Call Interlock API (POST)
-        const response = await axios.post(
-            "https://mismainapp.tataautocomp.com:3241/station_interlock",
-            requestData,
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                timeout: 10000
-            }
-        );
-
-        console.log("RAW API RESPONSE:", JSON.stringify(response.data, null, 2));
-
-        // 3️⃣ Initialize full response structure
-        let fullData = {
-            id: null,
-            pack_id: null,
-            module_id: null,
-            pack_no: null,
-            today_date: null,
-            module_print_status: "NA",
-            compression_status: "NA",
-            ibb_status: "NA",
-            QA_gate1: "NA",
-            welding_status: "NA",
-            voltage_ir_status: "NA",
-            QA_gate2: "NA",
-            bom_status: "NA",
-            compression_status2: "NA",
-            Welding_Inspection: "NA",
-            Module_Vision: "NA",
-            audit_status: "NA"
-        };
-
-        // 4️⃣ Parse API response safely
-        if (Array.isArray(response.data) && response.data.length > 0) {
-            const apiObj = response.data[0];
-
-            // Set audit status
-            fullData.audit_status = apiObj.audit_status || "NA";
-
-            // Extract rows data
-            if (Array.isArray(apiObj.rows)) {
-                apiObj.rows.forEach(row => {
-                    Object.keys(row).forEach(key => {
-                        if (fullData.hasOwnProperty(key)) {
-                            fullData[key] = row[key];
-                        }
-                    });
-                });
-            }
+        if (ibbStatus === "NOT OK") {
+            alert("The IBB Is Not Linked");
+            location.reload();
         }
-
-        console.log("FINAL PARSED DATA:", fullData);
-
-        // 5️⃣ Send structured data to frontend
-        socket.emit("setIBB_status", fullData, battery_qrcode);
-
-    } catch (error) {
-        console.error(
-            "Interlock API error:",
-            error.response?.status,
-            error.response?.data || error.message
-        );
-
-        socket.emit("setIBB_status", { error: true }, battery_qrcode);
     }
 });
