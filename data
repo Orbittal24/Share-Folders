@@ -2,6 +2,7 @@ const axios = require("axios");
 
 socket.on("getIBB_status", async (battery_qrcode) => {
     try {
+        // 1️⃣ Prepare request payload
         const requestData = {
             station_id: 30,
             line_id: 3,
@@ -10,6 +11,7 @@ socket.on("getIBB_status", async (battery_qrcode) => {
 
         console.log("requestData:::::::", requestData);
 
+        // 2️⃣ Call Interlock API (POST)
         const response = await axios.post(
             "https://mismainapp.tataautocomp.com:3241/station_interlock",
             requestData,
@@ -17,12 +19,56 @@ socket.on("getIBB_status", async (battery_qrcode) => {
                 headers: {
                     "Content-Type": "application/json",
                 },
+                timeout: 10000
             }
         );
 
-        console.log("API result:", JSON.stringify(response.data, null, 2));
+        console.log("RAW API RESPONSE:", JSON.stringify(response.data, null, 2));
 
-        socket.emit("setIBB_status", response.data, battery_qrcode);
+        // 3️⃣ Initialize full response structure
+        let fullData = {
+            id: null,
+            pack_id: null,
+            module_id: null,
+            pack_no: null,
+            today_date: null,
+            module_print_status: "NA",
+            compression_status: "NA",
+            ibb_status: "NA",
+            QA_gate1: "NA",
+            welding_status: "NA",
+            voltage_ir_status: "NA",
+            QA_gate2: "NA",
+            bom_status: "NA",
+            compression_status2: "NA",
+            Welding_Inspection: "NA",
+            Module_Vision: "NA",
+            audit_status: "NA"
+        };
+
+        // 4️⃣ Parse API response safely
+        if (Array.isArray(response.data) && response.data.length > 0) {
+            const apiObj = response.data[0];
+
+            // Set audit status
+            fullData.audit_status = apiObj.audit_status || "NA";
+
+            // Extract rows data
+            if (Array.isArray(apiObj.rows)) {
+                apiObj.rows.forEach(row => {
+                    Object.keys(row).forEach(key => {
+                        if (fullData.hasOwnProperty(key)) {
+                            fullData[key] = row[key];
+                        }
+                    });
+                });
+            }
+        }
+
+        console.log("FINAL PARSED DATA:", fullData);
+
+        // 5️⃣ Send structured data to frontend
+        socket.emit("setIBB_status", fullData, battery_qrcode);
 
     } catch (error) {
         console.error(
@@ -30,6 +76,7 @@ socket.on("getIBB_status", async (battery_qrcode) => {
             error.response?.status,
             error.response?.data || error.message
         );
+
         socket.emit("setIBB_status", { error: true }, battery_qrcode);
     }
 });
