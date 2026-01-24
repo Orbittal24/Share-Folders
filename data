@@ -10,3 +10,9 @@ Copy code
 SELECT name, is_state_enabled
 FROM sys.server_audits
 WHERE name = 'Audit_TacoDB1';
+
+SELECT
+    name,
+    audit_file_path
+FROM sys.server_audits
+WHERE name = 'Audit_TacoDB1';
