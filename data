@@ -1,3 +1,8 @@
 SELECT name, audit_guid, is_state_enabled
 
 FROM sys.server_audits;
+
+
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = ON);
+GO
