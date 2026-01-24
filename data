@@ -62,6 +62,9 @@ GO
 DROP SERVER AUDIT Audit_TacoDB1;
 GO
 
+DROP SERVER AUDIT Audit_TacoDB1;
+GO
+
 //////////////////////////////////////////////////////////
 SELECT name, status_desc, last_error, is_state_enabled
 FROM sys.server_audits;
