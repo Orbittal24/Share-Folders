@@ -33,3 +33,16 @@ SELECT
     audit_file_path
 FROM sys.server_audits
 WHERE name = 'Audit_TacoDB1';
+
+/////////////////delete
+
+USE taco_treceability;
+GO
+
+ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables1
+WITH (STATE = OFF);
+GO
+
+DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
+GO
+
