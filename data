@@ -91,108 +91,24 @@ SELECT
 FROM sys.dm_exec_requests r
 WHERE r.command LIKE '%AUDIT%' OR r.session_id > 50;
 
-If you see a wait type like:
+DECLARE @sql NVARCHAR(MAX) = N'';
 
+SELECT @sql = @sql + 'KILL ' + CAST(session_id AS VARCHAR(10)) + ';' + CHAR(13)
+FROM sys.dm_exec_sessions
+WHERE session_id > 50          -- ignore system sessions
+  AND is_user_process = 1
+  AND status = 'sleeping';
 
-IO_COMPLETION
+PRINT @sql;
+EXEC sp_executesql @sql;
 
-
-AUDIT_QUEUE
-
-
-LCK_M_X
-
-
-WRITELOG
-
-
-then that explains the delay.
-
-2️⃣ Proper way to drop a Server Audit (important)
-If the audit is enabled, SQL Server may hang while dropping.
-Do this instead:
-ALTER SERVER AUDIT Audit_TacoDB1
-WITH (STATE = OFF);
-GO
-
-DROP SERVER AUDIT Audit_TacoDB1;
-GO
-
-⚠️ If you already ran DROP and it’s hanging, continue below.
-
-3️⃣ Find and kill the blocking session (if any)
-Run:
-SELECT session_id, blocking_session_id, wait_type, command
-FROM sys.dm_exec_requests
-WHERE command LIKE '%DROP SERVER AUDIT%';
-
-Note the session_id.
-Then:
-KILL <session_id>;
-
-Example:
-KILL 72;
-
-Then retry using Step 2 (disable first, then drop).
-
-4️⃣ If still hanging – check audit file location
-Audits write to disk. If disk/network path is slow or unreachable, SQL Server will freeze.
-Check:
-SELECT name, log_file_path
-FROM sys.server_audits
-WHERE name = 'Audit_TacoDB1';
-
-If the path is on:
-
-
-Network drive
-
-
-Disconnected drive
-
-
-Full disk
-
-
-→ that is the root cause.
-
-5️⃣ Last option (safe approach)
-Restart SQL Server service (only if allowed in your environment):
-
-
-This clears the stuck audit handle
-
-
-Then immediately:
+SELECT session_id, status, command
+FROM sys.dm_exec_requests;
 
 
 ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
 DROP SERVER AUDIT Audit_TacoDB1;
 
-
-Quick recommendation for you
-Since you work with SQL & Node systems regularly, I’d suggest:
-
-
-Cancel the running query
-
-
-Run:
-
-
-ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
-DROP SERVER AUDIT Audit_TacoDB1;
-
-
-
-If it still hangs → check wait type using step #1.
-
-
-
-If you want, you can paste:
-
-
-Output of sys.dm_exec_requests
 
 
 Or the audit file path
