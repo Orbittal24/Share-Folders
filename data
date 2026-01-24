@@ -4,6 +4,13 @@ GO
 ALTER SERVER AUDIT Audit_TacoDB1
 WITH (STATE = ON);
 GO
+
+USE master;
+GO
+
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = OFF);
+GO
 ✅ Verify after enabling
 sql
 Copy code
