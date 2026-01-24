@@ -76,3 +76,126 @@ SELECT *
 FROM sys.dm_os_file_handles
 WHERE file_handle LIKE '%SQLAudit%';
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+1️⃣ First check what it is waiting on
+Open a new query window and run:
+SELECT 
+    r.session_id,
+    r.status,
+    r.command,
+    r.wait_type,
+    r.wait_time,
+    r.blocking_session_id,
+    r.cpu_time,
+    r.total_elapsed_time
+FROM sys.dm_exec_requests r
+WHERE r.command LIKE '%AUDIT%' OR r.session_id > 50;
+
+If you see a wait type like:
+
+
+IO_COMPLETION
+
+
+AUDIT_QUEUE
+
+
+LCK_M_X
+
+
+WRITELOG
+
+
+then that explains the delay.
+
+2️⃣ Proper way to drop a Server Audit (important)
+If the audit is enabled, SQL Server may hang while dropping.
+Do this instead:
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = OFF);
+GO
+
+DROP SERVER AUDIT Audit_TacoDB1;
+GO
+
+⚠️ If you already ran DROP and it’s hanging, continue below.
+
+3️⃣ Find and kill the blocking session (if any)
+Run:
+SELECT session_id, blocking_session_id, wait_type, command
+FROM sys.dm_exec_requests
+WHERE command LIKE '%DROP SERVER AUDIT%';
+
+Note the session_id.
+Then:
+KILL <session_id>;
+
+Example:
+KILL 72;
+
+Then retry using Step 2 (disable first, then drop).
+
+4️⃣ If still hanging – check audit file location
+Audits write to disk. If disk/network path is slow or unreachable, SQL Server will freeze.
+Check:
+SELECT name, log_file_path
+FROM sys.server_audits
+WHERE name = 'Audit_TacoDB1';
+
+If the path is on:
+
+
+Network drive
+
+
+Disconnected drive
+
+
+Full disk
+
+
+→ that is the root cause.
+
+5️⃣ Last option (safe approach)
+Restart SQL Server service (only if allowed in your environment):
+
+
+This clears the stuck audit handle
+
+
+Then immediately:
+
+
+ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
+DROP SERVER AUDIT Audit_TacoDB1;
+
+
+Quick recommendation for you
+Since you work with SQL & Node systems regularly, I’d suggest:
+
+
+Cancel the running query
+
+
+Run:
+
+
+ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
+DROP SERVER AUDIT Audit_TacoDB1;
+
+
+
+If it still hangs → check wait type using step #1.
+
+
+
+If you want, you can paste:
+
+
+Output of sys.dm_exec_requests
+
+
+Or the audit file path
+
+
+and I can tell you exactly why it’s slow and how to fix it permanently 👍
