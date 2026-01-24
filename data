@@ -45,10 +45,21 @@ GO
 
 DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
 GO
-
+////////////////////////////////////
 USE taco_treceability;
 GO
 
 SELECT name, is_state_enabled
 FROM sys.database_audit_specifications;
+
+USE master;
+GO
+
+ALTER SERVER AUDIT Audit_TacoDB1
+WITH (STATE = OFF);
+GO
+
+DROP SERVER AUDIT Audit_TacoDB1;
+GO
+
 
