@@ -18,6 +18,16 @@ SELECT name, is_state_enabled
 FROM sys.server_audits
 WHERE name = 'Audit_TacoDB1';
 
+
+SELECT
+    r.session_id,
+    r.status,
+    r.wait_type,
+    r.wait_time,
+    r.command
+FROM sys.dm_exec_requests r
+WHERE r.command LIKE '%AUDIT%';
+
 SELECT
     name,
     audit_file_path
