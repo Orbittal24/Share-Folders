@@ -62,4 +62,14 @@ GO
 DROP SERVER AUDIT Audit_TacoDB1;
 GO
 
+//////////////////////////////////////////////////////////
+SELECT name, status_desc, last_error, is_state_enabled
+FROM sys.server_audits;
+
+SELECT *
+FROM sys.dm_server_audit_status;
+
+SELECT *
+FROM sys.dm_os_file_handles
+WHERE file_handle LIKE '%SQLAudit%';
 
