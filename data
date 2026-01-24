@@ -46,3 +46,9 @@ GO
 DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
 GO
 
+USE taco_treceability;
+GO
+
+SELECT name, is_state_enabled
+FROM sys.database_audit_specifications;
+
