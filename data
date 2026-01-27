@@ -1,10 +1,7 @@
-
-1️⃣ Create an Extended Event session for FAILED QUERIES
-🔹 Step 1: Run this in SSMS (once)
-
-CREATE EVENT SESSION Failed_SQL_Queries
+✅ STEP 1: Create Extended Event Session (Run Once)
+CREATE EVENT SESSION Capture_Delete_Queries
 ON SERVER
-ADD EVENT sqlserver.error_reported
+ADD EVENT sqlserver.sql_statement_completed
 (
     ACTION
     (
@@ -14,56 +11,58 @@ ADD EVENT sqlserver.error_reported
         sqlserver.database_name,
         sqlserver.session_id
     )
-    WHERE severity >= 11   -- captures real errors only
+    WHERE
+        UPPER(LTRIM(sqlserver.sql_text)) LIKE 'DELETE %'
 )
 ADD TARGET package0.event_file
 (
-    SET filename = 'C:\SQLLogsQueries\FailedQueries.xel',
-        max_file_size = 50,
+    SET filename = 'C:\SQLLogsQueries\DeleteQueries.xel',
+        max_file_size = 50,        -- MB
         max_rollover_files = 10
 );
 GO
 
-📌 This captures:
+📌 What this does
 
-All failed SQL statements
+Captures every DELETE statement
 
-From any application (Node, SSMS, jobs, etc.)
+Case-insensitive (DELETE, delete, Delete, etc.)
+
+From all applications & services
 
 Across all databases
 
-2️⃣ Start the Event Session
+Low performance impact
 
-ALTER EVENT SESSION Failed_SQL_Queries
+▶️ STEP 2: Start the Event Session
+ALTER EVENT SESSION Capture_Delete_Queries
 ON SERVER
 STATE = START;
 GO
 
-From this moment → every failed query is logged automatically 🎯
 
-3️⃣ View Failed Queries in SSMS
+📍 From this moment onward → all DELETE queries are logged automatically
 
-Run this query anytime:
+👀 STEP 3: View Captured DELETE Queries Anytime
 SELECT
     event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
     event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
     event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
     event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
-    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS failed_query,
-    event_data.value('(event/data[@name="message"]/value)[1]', 'nvarchar(max)') AS error_message
+    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS delete_query,
+    event_data.value('(event/data[@name="row_count"]/value)[1]', 'int') AS rows_deleted
 FROM
 (
     SELECT CAST(event_data AS XML) AS event_data
     FROM sys.fn_xe_file_target_read_file(
-        'C:\SQLLogsQueries\FailedQueries*.xel',
+        'C:\SQLLogsQueries\DeleteQueries*.xel',
         NULL, NULL, NULL
     )
 ) t
 ORDER BY event_time DESC;
 
-2️⃣ Stop the Event Session
-
-ALTER EVENT SESSION Failed_SQL_Queries
+⏹️ STEP 4: Stop the Event Session (If Required)
+ALTER EVENT SESSION Capture_Delete_Queries
 ON SERVER
 STATE = STOP;
 GO
