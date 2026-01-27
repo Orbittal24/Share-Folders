@@ -9,9 +9,9 @@ GO
 
 
 
-✅ 1) Create Extended Event Session for DELETE Queries
+✅ Step 1: Create the Event Session (Corrected)
 
-Run this once in SSMS:
+Run once in SSMS:
 
 CREATE EVENT SESSION Delete_SQL_Queries
 ON SERVER
@@ -25,7 +25,19 @@ ADD EVENT sqlserver.sql_statement_completed
         sqlserver.database_name,
         sqlserver.session_id
     )
-    WHERE sqlserver.like_i_sql_unicode_string(sql_text, N'DELETE%')
+    WHERE sqlserver.like_i_sql_unicode_string(sql_text, N'%DELETE%')
+),
+ADD EVENT sqlserver.sp_statement_completed
+(
+    ACTION
+    (
+        sqlserver.sql_text,
+        sqlserver.client_hostname,
+        sqlserver.username,
+        sqlserver.database_name,
+        sqlserver.session_id
+    )
+    WHERE sqlserver.like_i_sql_unicode_string(sql_text, N'%DELETE%')
 )
 ADD TARGET package0.event_file
 (
@@ -35,21 +47,28 @@ ADD TARGET package0.event_file
 );
 GO
 
-✅ What This Captures
-
-✔ All DELETE statements executed
-✔ From any application (Node, SSMS, jobs, etc.)
-✔ Across all databases
-
-✅ 2) Start the Event Session
+✅ Step 2: Start the Event Session
 ALTER EVENT SESSION Delete_SQL_Queries
 ON SERVER
 STATE = START;
 GO
 
-✅ 3) View DELETE Queries in SSMS
+✅ Step 3: Confirm Session is Running
+SELECT name, is_running
+FROM sys.server_event_sessions
+WHERE name = 'Delete_SQL_Queries';
+GO
 
-Use this query anytime:
+✅ Step 4: Generate a Test DELETE (Manual)
+
+Run this in SSMS:
+
+DELETE TOP (1) FROM sys.objects;
+GO
+
+✅ Step 5: View Captured DELETE Queries
+
+Run anytime:
 
 SELECT
     event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
@@ -66,9 +85,9 @@ FROM
     )
 ) t
 ORDER BY event_time DESC;
+GO
 
-
-✅ 4) Stop the Event Session (Optional)
+✅ Step 6: Stop the Session (Optional)
 ALTER EVENT SESSION Delete_SQL_Queries
 ON SERVER
 STATE = STOP;
