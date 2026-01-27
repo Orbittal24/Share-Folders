@@ -1,45 +1,7 @@
-✅ STEP 1: Create the XE Session (No predicate)
-CREATE EVENT SESSION Capture_Delete_Queries
-ON SERVER
-ADD EVENT sqlserver.sql_statement_completed
-(
-    ACTION
-    (
-        sqlserver.sql_text,
-        sqlserver.client_hostname,
-        sqlserver.username,
-        sqlserver.database_name,
-        sqlserver.session_id
-    )
-)
-ADD TARGET package0.event_file
-(
-    SET filename = 'C:\SQLLogsQueries\DeleteQueries.xel',
-        max_file_size = 50,
-        max_rollover_files = 10
-);
+DROP EVENT SESSION Capture_Delete_Queries
+ON SERVER;
 GO
 
-▶️ STEP 2: Start the Session
-ALTER EVENT SESSION Capture_Delete_Queries
-ON SERVER
-STATE = START;
-GO
-
-👀 STEP 3: View only DELETE Queries (Filter in SELECT)
-SELECT
-    event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
-    event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
-    event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
-    event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
-    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS sql_text
-FROM
-(
-    SELECT CAST(event_data AS XML) AS event_data
-    FROM sys.fn_xe_file_target_read_file(
-        'C:\SQLLogsQueries\DeleteQueries*.xel',
-        NULL, NULL, NULL
-    )
-) t
-WHERE UPPER(event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)')) LIKE 'DELETE %'
-ORDER BY event_time DESC;
+SELECT name, is_started
+FROM sys.server_event_sessions
+WHERE name = 'Capture_Delete_Queries';
