@@ -20,7 +20,7 @@ ADD TARGET package0.event_file
 (
     SET filename = 'C:\SQLLogsQueries\DeleteQueries.xel',
         max_file_size = 50,
-        max_rollover_files = 10
+        max_rollover_files = 1
 );
 GO
 
