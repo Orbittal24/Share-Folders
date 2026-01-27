@@ -1,4 +1,4 @@
-🔹 STEP 1: Create Event Session (Run Once)
+✅ STEP 1: Create the XE Session (No predicate)
 CREATE EVENT SESSION Capture_Delete_Queries
 ON SERVER
 ADD EVENT sqlserver.sql_statement_completed
@@ -11,8 +11,6 @@ ADD EVENT sqlserver.sql_statement_completed
         sqlserver.database_name,
         sqlserver.session_id
     )
-    WHERE
-        package0.like_i_sql_unicode_string(sqlserver.sql_text, N'DELETE %')
 )
 ADD TARGET package0.event_file
 (
@@ -22,28 +20,19 @@ ADD TARGET package0.event_file
 );
 GO
 
-📌 What this captures
-
-✔ DELETE, delete, Delete, DeLeTe
-✔ From services, APIs, jobs, SSMS
-✔ Stored procedures & dynamic SQL
-✔ Case-insensitive ✔
-✔ Production-safe ✔
-
 ▶️ STEP 2: Start the Session
 ALTER EVENT SESSION Capture_Delete_Queries
 ON SERVER
 STATE = START;
 GO
 
-👀 STEP 3: View DELETE Queries
+👀 STEP 3: View only DELETE Queries (Filter in SELECT)
 SELECT
     event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
     event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
     event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
     event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
-    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS delete_query,
-    event_data.value('(event/data[@name="row_count"]/value)[1]', 'int') AS rows_deleted
+    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS sql_text
 FROM
 (
     SELECT CAST(event_data AS XML) AS event_data
@@ -52,10 +41,5 @@ FROM
         NULL, NULL, NULL
     )
 ) t
+WHERE UPPER(event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)')) LIKE 'DELETE %'
 ORDER BY event_time DESC;
-
-⏹️ STEP 4: Stop Session (If Needed)
-ALTER EVENT SESSION Capture_Delete_Queries
-ON SERVER
-STATE = STOP;
-GO
