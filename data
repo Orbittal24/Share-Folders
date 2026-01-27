@@ -1,94 +1,183 @@
-IF EXISTS (SELECT 1
-           FROM sys.server_event_sessions
-           WHERE name = 'Delete_SQL_Queries')
-BEGIN
-    DROP EVENT SESSION Delete_SQL_Queries
-    ON SERVER;
-END
-GO
+socket.on('getGlobalIngersollData_alt', (pack_name, pack_no, cust_no, station_alt) => {
+    console.log("ingdata_pack:", pack_name, pack_no, station_alt);
+    var ingwholeData = [];
+    var ingpackDAta = [];
+    var query_GLOBALDATA;
 
+    // ---------- GLOBAL QUERY ----------
+    if (pack_name == 'NOVA Prismatic LR') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT_NOVA_Prismatic_LR' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
+    } else if (pack_name == 'UPP 39.9' || pack_name == 'UPP 27.8') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT_UPP' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-✅ Step 1: Create the Event Session (Corrected)
+    } else if (pack_name == 'Tamor' || pack_name == 'TAMOR') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT_Tamor' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-Run once in SSMS:
+    } else if (pack_name == 'SM eBada Dost') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT' AND process_name= 'Lid tightening eBada' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-CREATE EVENT SESSION Delete_SQL_Queries
-ON SERVER
-ADD EVENT sqlserver.sql_statement_completed
-(
-    ACTION
-    (
-        sqlserver.sql_text,
-        sqlserver.client_hostname,
-        sqlserver.username,
-        sqlserver.database_name,
-        sqlserver.session_id
-    )
-    WHERE sqlserver.like_i_sql_unicode_string(sql_text, N'%DELETE%')
-),
-ADD EVENT sqlserver.sp_statement_completed
-(
-    ACTION
-    (
-        sqlserver.sql_text,
-        sqlserver.client_hostname,
-        sqlserver.username,
-        sqlserver.database_name,
-        sqlserver.session_id
-    )
-    WHERE sqlserver.like_i_sql_unicode_string(sql_text, N'%DELETE%')
-)
-ADD TARGET package0.event_file
-(
-    SET filename = 'C:\SQLLogsQueries\DeleteQueries.xel',
-        max_file_size = 500,
-        max_rollover_files = 1
-);
-GO
+    } else if (pack_name == 'SM eDost') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT' AND process_name='Lid tightening eDost' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-✅ Step 2: Start the Event Session
-ALTER EVENT SESSION Delete_SQL_Queries
-ON SERVER
-STATE = START;
-GO
+    } else if (pack_name == 'Kanger 1' || pack_name == 'Kanger 1 AIO') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-✅ Step 3: Confirm Session is Running
-SELECT name, is_running
-FROM sys.server_event_sessions
-WHERE name = 'Delete_SQL_Queries';
-GO
+    } else if (pack_name == 'Kanger 2') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-✅ Step 4: Generate a Test DELETE (Manual)
+    } else if (pack_name == 'Ejeeto 21.3' || pack_name == 'Ejeeto 18.4') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT_Ejeeto' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-Run this in SSMS:
+    } else if (pack_name == 'Bajaj 8.9') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 8.9' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-DELETE TOP (1) FROM sys.objects;
-GO
+    } else if (pack_name == 'Bajaj 9.2') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 9.2' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-✅ Step 5: View Captured DELETE Queries
+    } else if (pack_name == 'Bajaj 9.2 LL') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 9.2 LL' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-Run anytime:
+    } else if (pack_name == 'Bajaj 5.9') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 5.9' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-SELECT
-    event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
-    event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
-    event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
-    event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
-    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS delete_query
-FROM
-(
-    SELECT CAST(event_data AS XML) AS event_data
-    FROM sys.fn_xe_file_target_read_file(
-        'C:\SQLLogsQueries\DeleteQueries*.xel',
-        NULL, NULL, NULL
-    )
-) t
-ORDER BY event_time DESC;
-GO
+    } else if (pack_name == 'Bajaj 6.1') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 6.1' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
 
-✅ Step 6: Stop the Session (Optional)
-ALTER EVENT SESSION Delete_SQL_Queries
-ON SERVER
-STATE = STOP;
-GO
+    } else if (pack_name == 'Bajaj 11.8') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 11.8' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
+
+    } else if (pack_name == 'Bajaj 12.2') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 12.2' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
+
+    } else if (pack_name == 'Bajaj 12.1') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 12.1' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
+
+    } else if (pack_name == 'Bajaj 12.1 LL') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT 12.1 LL' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
+
+    } else if (pack_name == 'TVS 9') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT_TVS' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
+
+    } else if (pack_name == 'CORAL SR') {
+        query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                            FROM taco_treceability.taco_treceability.torque_masterEIP 
+                            WHERE pack_name='${pack_name}' AND Station_name = 'ALT' 
+                            GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
+    }
+
+    // Use station_alt ALWAYS
+    query_GLOBALDATA = `SELECT module_name, pack_name, Station_name, process_name, COUNT(process_name) as processcount, SUM(total_screw) as tot_screw_count 
+                        FROM taco_treceability.taco_treceability.torque_masterEIP 
+                        WHERE pack_name='${pack_name}' AND Station_name = '${station_alt}' 
+                        GROUP BY process_name, Station_name, pack_name, total_screw, module_name`;
+
+    console.log("query_GLOBALDATA pdi:", query_GLOBALDATA);
+
+    sql.connect(sqlConfig, function(err) {
+        request = new sql.Request();
+        request.query(query_GLOBALDATA, function(err, recordset) {
+            if (err) console.log(err);
+
+            var result = recordset.recordset;
+
+            if (result.length != 0) {
+                result.forEach(row => {
+                    ingwholeData.push(row.module_name);
+                    ingwholeData.push(row.Station_name);
+                    ingwholeData.push(row.process_name);
+                    ingwholeData.push(row.processcount);
+                    ingwholeData.push(row.tot_screw_count);
+                });
+            }
+
+            // ---------------- PACK QUERY (MERGE BOTH TABLES) ----------------
+            const dbQueryPack1 = `
+              SELECT module_name, pack_name, pack_no, station_name, process_name, COUNT(process_name) AS total_bolts
+              FROM taco_treceability.taco_treceability.torque_details_EIP
+              WHERE pack_name='${pack_name}' AND pack_no='${pack_no}'
+              GROUP BY process_name, station_name, pack_name, pack_no, module_name
+            `;
+
+            const dbQueryPack2 = `
+              SELECT module_name, pack_name, pack_no, station_name, process_name, COUNT(process_name) AS total_bolts
+              FROM taco_treceability.taco_treceability.torque_details_EIP_import2
+              WHERE pack_name='${pack_name}' AND pack_no='${pack_no}'
+              GROUP BY process_name, station_name, pack_name, pack_no, module_name
+            `;
+
+            Promise.all([
+                request.query(dbQueryPack1),
+                request.query(dbQueryPack2)
+            ]).then(([res1, res2]) => {
+
+                const merged = [...res1.recordset, ...res2.recordset];
+
+                merged.forEach(row => {
+                    ingpackDAta.push(row.module_name);
+                    ingpackDAta.push(row.station_name);
+                    ingpackDAta.push(row.process_name);
+                    ingpackDAta.push(row.total_bolts);
+                });
+
+                socket.emit("setcustomerqrcode_alt_prismatic", ingwholeData, ingpackDAta, pack_no, cust_no);
+
+            }).catch(err => console.log(err));
+
+        });
+    });
+});
