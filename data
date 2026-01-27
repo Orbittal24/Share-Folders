@@ -1,5 +1,7 @@
+
 1️⃣ Create an Extended Event session for FAILED QUERIES
 🔹 Step 1: Run this in SSMS (once)
+
 CREATE EVENT SESSION Failed_SQL_Queries
 ON SERVER
 ADD EVENT sqlserver.error_reported
@@ -16,12 +18,11 @@ ADD EVENT sqlserver.error_reported
 )
 ADD TARGET package0.event_file
 (
-    SET filename = 'C:\SQLLogs\FailedQueries.xel',
+    SET filename = 'C:\SQLLogsQueries\FailedQueries.xel',
         max_file_size = 50,
         max_rollover_files = 10
 );
 GO
-
 
 📌 This captures:
 
@@ -32,18 +33,17 @@ From any application (Node, SSMS, jobs, etc.)
 Across all databases
 
 2️⃣ Start the Event Session
+
 ALTER EVENT SESSION Failed_SQL_Queries
 ON SERVER
 STATE = START;
 GO
-
 
 From this moment → every failed query is logged automatically 🎯
 
 3️⃣ View Failed Queries in SSMS
 
 Run this query anytime:
-
 SELECT
     event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
     event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
@@ -55,29 +55,15 @@ FROM
 (
     SELECT CAST(event_data AS XML) AS event_data
     FROM sys.fn_xe_file_target_read_file(
-        'C:\SQLLogs\FailedQueries*.xel',
+        'C:\SQLLogsQueries\FailedQueries*.xel',
         NULL, NULL, NULL
     )
 ) t
 ORDER BY event_time DESC;
 
+2️⃣ Stop the Event Session
 
-
-///////////////////////////////////////////////////////////////
-1️⃣ Stop the event session (if it’s running)
 ALTER EVENT SESSION Failed_SQL_Queries
 ON SERVER
 STATE = STOP;
 GO
-
-2️⃣ Drop (delete) the event session
-DROP EVENT SESSION Failed_SQL_Queries
-ON SERVER;
-GO
-
-3️⃣ (Optional) Verify it’s gone
-SELECT name
-FROM sys.server_event_sessions
-
-
-👉 You’ll see exact SQL queries that failed, error messages, time, DB name, etc.
