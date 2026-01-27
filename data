@@ -2,6 +2,6 @@ DROP EVENT SESSION Capture_Delete_Queries
 ON SERVER;
 GO
 
-SELECT name, is_started
+SELECT name, CAST(is_running AS INT) AS is_running
 FROM sys.server_event_sessions
 WHERE name = 'Capture_Delete_Queries';
