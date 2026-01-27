@@ -1,3 +1,14 @@
+IF EXISTS (SELECT 1
+           FROM sys.server_event_sessions
+           WHERE name = 'Delete_SQL_Queries')
+BEGIN
+    DROP EVENT SESSION Delete_SQL_Queries
+    ON SERVER;
+END
+GO
+
+
+
 ✅ 1) Create Extended Event Session for DELETE Queries
 
 Run this once in SSMS:
