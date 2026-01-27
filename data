@@ -1,117 +1,65 @@
-USE master;
+1️⃣ Create an Extended Event session for FAILED QUERIES
+🔹 Step 1: Run this in SSMS (once)
+CREATE EVENT SESSION Failed_SQL_Queries
+ON SERVER
+ADD EVENT sqlserver.error_reported
+(
+    ACTION
+    (
+        sqlserver.sql_text,
+        sqlserver.client_hostname,
+        sqlserver.username,
+        sqlserver.database_name,
+        sqlserver.session_id
+    )
+    WHERE severity >= 11   -- captures real errors only
+)
+ADD TARGET package0.event_file
+(
+    SET filename = 'C:\SQLLogs\FailedQueries.xel',
+        max_file_size = 50,
+        max_rollover_files = 10
+);
 GO
 
-ALTER SERVER AUDIT Audit_TacoDB1
-WITH (STATE = ON);
+
+📌 This captures:
+
+All failed SQL statements
+
+From any application (Node, SSMS, jobs, etc.)
+
+Across all databases
+
+2️⃣ Start the Event Session
+ALTER EVENT SESSION Failed_SQL_Queries
+ON SERVER
+STATE = START;
 GO
 
-USE master;
-GO
 
-ALTER SERVER AUDIT Audit_TacoDB1
-WITH (STATE = OFF);
-GO
-✅ Verify after enabling
-sql
-Copy code
-SELECT name, is_state_enabled
-FROM sys.server_audits
-WHERE name = 'Audit_TacoDB1';
+From this moment → every failed query is logged automatically 🎯
 
+3️⃣ View Failed Queries in SSMS
+
+Run this query anytime:
 
 SELECT
-    r.session_id,
-    r.status,
-    r.wait_type,
-    r.wait_time,
-    r.command
-FROM sys.dm_exec_requests r
-WHERE r.command LIKE '%AUDIT%';
-
-SELECT
-    name,
-    audit_file_path
-FROM sys.server_audits
-WHERE name = 'Audit_TacoDB1';
-
-/////////////////delete
-
-USE taco_treceability;
-GO
-
-ALTER DATABASE AUDIT SPECIFICATION Audit_AllTables1
-WITH (STATE = OFF);
-GO
-
-DROP DATABASE AUDIT SPECIFICATION Audit_AllTables1;
-GO
-////////////////////////////////////
-USE taco_treceability;
-GO
-
-SELECT name, is_state_enabled
-FROM sys.database_audit_specifications;
-
-USE master;
-GO
-
-ALTER SERVER AUDIT Audit_TacoDB1
-WITH (STATE = OFF);
-GO
-
-DROP SERVER AUDIT Audit_TacoDB1;
-GO
-
-DROP SERVER AUDIT Audit_TacoDB1;
-GO
-
-//////////////////////////////////////////////////////////
-SELECT name, status_desc, last_error, is_state_enabled
-FROM sys.server_audits;
-
-SELECT *
-FROM sys.dm_server_audit_status;
-
-SELECT *
-FROM sys.dm_os_file_handles
-WHERE file_handle LIKE '%SQLAudit%';
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-1️⃣ First check what it is waiting on
-Open a new query window and run:
-SELECT 
-    r.session_id,
-    r.status,
-    r.command,
-    r.wait_type,
-    r.wait_time,
-    r.blocking_session_id,
-    r.cpu_time,
-    r.total_elapsed_time
-FROM sys.dm_exec_requests r
-WHERE r.command LIKE '%AUDIT%' OR r.session_id > 50;
-
-DECLARE @sql NVARCHAR(MAX) = N'';
-
-SELECT @sql = @sql + 'KILL ' + CAST(session_id AS VARCHAR(10)) + ';' + CHAR(13)
-FROM sys.dm_exec_sessions
-WHERE session_id > 50          -- ignore system sessions
-  AND is_user_process = 1
-  AND status = 'sleeping';
-
-PRINT @sql;
-EXEC sp_executesql @sql;
-
-SELECT session_id, status, command
-FROM sys.dm_exec_requests;
+    event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
+    event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
+    event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
+    event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
+    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS failed_query,
+    event_data.value('(event/data[@name="message"]/value)[1]', 'nvarchar(max)') AS error_message
+FROM
+(
+    SELECT CAST(event_data AS XML) AS event_data
+    FROM sys.fn_xe_file_target_read_file(
+        'C:\SQLLogs\FailedQueries*.xel',
+        NULL, NULL, NULL
+    )
+) t
+ORDER BY event_time DESC;
 
 
-ALTER SERVER AUDIT Audit_TacoDB1 WITH (STATE = OFF);
-DROP SERVER AUDIT Audit_TacoDB1;
-
-
-
-Or the audit file path
-
-
-and I can tell you exactly why it’s slow and how to fix it permanently 👍
+👉 You’ll see exact SQL queries that failed, error messages, time, DB name, etc.
