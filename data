@@ -62,4 +62,22 @@ FROM
 ORDER BY event_time DESC;
 
 
+
+///////////////////////////////////////////////////////////////
+1️⃣ Stop the event session (if it’s running)
+ALTER EVENT SESSION Failed_SQL_Queries
+ON SERVER
+STATE = STOP;
+GO
+
+2️⃣ Drop (delete) the event session
+DROP EVENT SESSION Failed_SQL_Queries
+ON SERVER;
+GO
+
+3️⃣ (Optional) Verify it’s gone
+SELECT name
+FROM sys.server_event_sessions
+
+
 👉 You’ll see exact SQL queries that failed, error messages, time, DB name, etc.
