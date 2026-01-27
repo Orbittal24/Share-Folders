@@ -1,7 +1,63 @@
-DROP EVENT SESSION Capture_Delete_Queries
-ON SERVER;
+✅ 1) Create Extended Event Session for DELETE Queries
+
+Run this once in SSMS:
+
+CREATE EVENT SESSION Delete_SQL_Queries
+ON SERVER
+ADD EVENT sqlserver.sql_statement_completed
+(
+    ACTION
+    (
+        sqlserver.sql_text,
+        sqlserver.client_hostname,
+        sqlserver.username,
+        sqlserver.database_name,
+        sqlserver.session_id
+    )
+    WHERE sqlserver.like_i_sql_unicode_string(sql_text, N'%DELETE%')
+)
+ADD TARGET package0.event_file
+(
+    SET filename = 'C:\SQLLogsQueries\DeleteQueries.xel',
+        max_file_size = 50,
+        max_rollover_files = 10
+);
 GO
 
-SELECT name, CAST(is_running AS INT) AS is_running
-FROM sys.server_event_sessions
-WHERE name = 'Capture_Delete_Queries';
+✅ What This Captures
+
+✔ All DELETE statements executed
+✔ From any application (Node, SSMS, jobs, etc.)
+✔ Across all databases
+
+✅ 2) Start the Event Session
+ALTER EVENT SESSION Delete_SQL_Queries
+ON SERVER
+STATE = START;
+GO
+
+✅ 3) View DELETE Queries in SSMS
+
+Use this query anytime:
+
+SELECT
+    event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
+    event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
+    event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
+    event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
+    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS delete_query
+FROM
+(
+    SELECT CAST(event_data AS XML) AS event_data
+    FROM sys.fn_xe_file_target_read_file(
+        'C:\SQLLogsQueries\DeleteQueries*.xel',
+        NULL, NULL, NULL
+    )
+) t
+ORDER BY event_time DESC;
+
+✅ 4) Stop the Event Session (Optional)
+ALTER EVENT SESSION Delete_SQL_Queries
+ON SERVER
+STATE = STOP;
+GO
