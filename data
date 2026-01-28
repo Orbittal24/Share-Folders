@@ -1,31 +1,37 @@
-<div class="row" style="margin-top:4%;">
-    <div style="display: inline-flex; gap:20px; align-items:center;">
+<div class="container-fluid">
+    <div class="row mt-4">
+        <div class="col-md-12">
+            <div class="card card_shadow p-3">
+                <div class="d-flex flex-wrap align-items-center gap-3">
 
-        <!-- Station Name Dropdown -->
-        <select id="stationName" class="form-control"
-            style="width:280px;height:5vh;font-size:2vh;">
-            <option value="">Select Station</option>
-        </select>
+                    <!-- Station Name -->
+                    <select id="stationName" class="form-control"
+                        style="width:260px;height:5vh;font-size:2vh;">
+                        <option value="">Select Station</option>
+                    </select>
 
-        <!-- Line Dropdown (Static) -->
-        <select id="line" class="form-control"
-            style="width:280px;height:5vh;font-size:2vh;">
-            <option value="1">1</option>
-        </select>
+                    <!-- Line (Static) -->
+                    <select id="line" class="form-control"
+                        style="width:180px;height:5vh;font-size:2vh;">
+                        <option value="1">Line 1</option>
+                    </select>
 
-        <!-- Barcode Scan Input -->
-        <input type="text" id="barcode"
-            class="form-control"
-            placeholder="Scan Barcode"
-            style="width:280px;height:5vh;font-size:2vh;"
-            onkeypress="if(event.key === 'Enter') submitData();" />
+                    <!-- Barcode Scan -->
+                    <input type="text" id="barcode"
+                        class="form-control"
+                        placeholder="Scan Barcode"
+                        style="width:320px;height:5vh;font-size:2vh;"
+                        autocomplete="off" />
 
-        <!-- Submit Button -->
-        <button class="btn btn-primary btn-sm"
-            style="width:200px;height:5vh;font-size:2vh;"
-            onclick="submitData()">
-            Submit
-        </button>
+                    <!-- Submit -->
+                    <button class="btn btn-success"
+                        style="height:5vh;font-size:2vh;"
+                        onclick="submitScan()">
+                        Submit
+                    </button>
 
+                </div>
+            </div>
+        </div>
     </div>
 </div>
