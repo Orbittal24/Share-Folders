@@ -1,5 +1,18 @@
+const express = require("express");
+const app = express();
+const http = require("http").Server(app);
+const io = require("socket.io")(http);
+const path = require("path");
+const fs = require("fs");
 const sql = require("mssql");
+const moment = require("moment");
 
+/* ===================== STATIC + JSON ===================== */
+app.use(express.static(__dirname));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+/* ===================== DB CONFIG ===================== */
 const sqlConfig = {
     user: "user_mis",
     password: "admin",
@@ -16,14 +29,30 @@ const sqlConfig = {
     }
 };
 
-// Create connection pool
+/* ===================== DB CONNECT LOG ===================== */
 var dbConn = new sql.ConnectionPool(sqlConfig);
-
-// Connect and log status
 dbConn.connect()
-    .then(() => {
-        console.log("Connected to taco_treceability_master....");
-    })
-    .catch(err => {
-        console.error("Database Connection Failed:", err);
-    });
+    .then(() => console.log("Connected to taco_treceability_master...."))
+    .catch(err => console.error("DB Connection Error:", err));
+
+/* ===================== SERVER ===================== */
+http.listen(5400, "0.0.0.0", () => {
+    console.log("Connected to :5400");
+});
+
+/* ===================== UI ===================== */
+app.get("/station_status", (req, res) => {
+    res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
+});
+
+/* ===================== SOCKET.IO ===================== */
+io.sockets.on("connection", (socket) => {
+
+    /* 🔵 ALL YOUR EXISTING SOCKET EVENTS */
+    /* OK DATA */
+    /* NOT OK DATA */
+    /* SHIFTING LOGIC */
+    /* INSERT / DELETE LOGIC */
+
+    /* ⚠️ NOTHING REMOVED HERE */
+});
