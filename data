@@ -1,15 +1,137 @@
-} else if (message === "Process already completed. No update necessary.") {
-  await pool1.request().query(`
-    DELETE FROM taco_treceability.torque_details_EIP_mirror
-    WHERE pack_no='${row.pack_no}' AND module_barcode='${row.module_barcode}' 
-      AND process_name='${row.process_name}' AND pack_name='${row.pack_name}'
-  `);
-  continue;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Station Barcode Scan</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- Bootstrap 4 -->
+    <link rel="stylesheet"
+          href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+
+    <style>
+        body {
+            background: #f4f6f9;
+        }
+
+        .scan-card {
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+            padding: 30px;
+        }
+
+        .scan-title {
+            font-weight: 600;
+            color: #2d8f2d;
+            margin-bottom: 25px;
+        }
+
+        .form-control {
+            height: 48px;
+            font-size: 16px;
+        }
+
+        #barcode {
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+
+        .btn-submit {
+            height: 48px;
+            font-size: 16px;
+            font-weight: 600;
+            padding: 0 30px;
+        }
+
+        @media (max-width: 768px) {
+            .action-row {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-10 col-md-12">
+
+            <div class="scan-card">
+                <h4 class="scan-title">
+                    <i class="fa fa-qrcode"></i> Station Barcode Scanning
+                </h4>
+
+                <div class="d-flex action-row align-items-center" style="gap:20px;">
+
+                    <!-- Station -->
+                    <div class="flex-fill">
+                        <label class="font-weight-bold">Station Name</label>
+                        <select id="stationName" class="form-control">
+                            <option value="">Select Station</option>
+                        </select>
+                    </div>
+
+                    <!-- Line -->
+                    <div style="width:150px;">
+                        <label class="font-weight-bold">Line</label>
+                        <select id="line" class="form-control">
+                            <option value="1">1</option>
+                        </select>
+                    </div>
+
+                    <!-- Barcode -->
+                    <div class="flex-fill">
+                        <label class="font-weight-bold">Barcode</label>
+                        <input type="text"
+                               id="barcode"
+                               class="form-control"
+                               placeholder="Scan barcode here"
+                               autofocus
+                               onkeypress="if(event.key==='Enter') submitData()">
+                    </div>
+
+                    <!-- Button -->
+                    <div style="margin-top:30px;">
+                        <button class="btn btn-success btn-submit"
+                                onclick="submitData()">
+                            <i class="fa fa-check"></i> Submit
+                        </button>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+function submitData() {
+    const station = document.getElementById('stationName').value;
+    const barcode = document.getElementById('barcode').value.trim();
+
+    if (!station || !barcode) {
+        alert('Please select station and scan barcode');
+        return;
+    }
+
+    console.log({
+        station,
+        line: '1',
+        barcode
+    });
+
+    document.getElementById('barcode').value = '';
 }
-✅ With THIS:
-js
-Copy code
-} else if (message === "Process already completed. No update necessary.") {
-  await deleteRow(row.sr_no);
-  continue;
-}
+</script>
+
+</body>
+</html>
