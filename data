@@ -1,107 +1,175 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Station Barcode Scan</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+<title>Station Barcode Scan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <!-- Bootstrap 4 -->
-    <link rel="stylesheet"
-          href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+<style>
+/* ====== BASIC RESET ====== */
+* {
+    box-sizing: border-box;
+    font-family: "Segoe UI", Arial, sans-serif;
+}
 
-    <!-- Font Awesome -->
-    <link rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+body {
+    margin: 0;
+    background: #f4f6f9;
+}
 
-    <style>
-        body {
-            background: #f4f6f9;
-        }
+/* ====== GRID SYSTEM (Bootstrap-like) ====== */
+.container {
+    width: 100%;
+    padding: 20px;
+}
 
-        .scan-card {
-            background: #ffffff;
-            border-radius: 10px;
-            box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-            padding: 30px;
-        }
+.row {
+    display: flex;
+    justify-content: center;
+}
 
-        .scan-title {
-            font-weight: 600;
-            color: #2d8f2d;
-            margin-bottom: 25px;
-        }
+.col {
+    width: 100%;
+    max-width: 1100px;
+}
 
-        .form-control {
-            height: 48px;
-            font-size: 16px;
-        }
+/* ====== CARD ====== */
+.card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 30px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+}
 
-        #barcode {
-            font-size: 18px;
-            font-weight: 600;
-            letter-spacing: 1px;
-        }
+/* ====== TITLE ====== */
+.card-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: #2e7d32;
+    margin-bottom: 25px;
+}
 
-        .btn-submit {
-            height: 48px;
-            font-size: 16px;
-            font-weight: 600;
-            padding: 0 30px;
-        }
+/* ====== FORM LAYOUT ====== */
+.form-row {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
 
-        @media (max-width: 768px) {
-            .action-row {
-                flex-direction: column;
-            }
-        }
-    </style>
+.form-group {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 200px;
+}
+
+label {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #333;
+}
+
+/* ====== INPUTS ====== */
+input, select {
+    height: 48px;
+    padding: 8px 12px;
+    font-size: 16px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    outline: none;
+}
+
+input:focus, select:focus {
+    border-color: #4caf50;
+}
+
+/* ====== BARCODE INPUT SPECIAL ====== */
+#barcode {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+/* ====== BUTTON ====== */
+.btn {
+    height: 48px;
+    padding: 0 28px;
+    border: none;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-success {
+    background: #28a745;
+    color: #fff;
+}
+
+.btn-success:hover {
+    background: #218838;
+}
+
+/* ====== ICON (FontAwesome-like) ====== */
+.icon {
+    margin-right: 8px;
+}
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 768px) {
+    .form-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+</style>
 </head>
 
 <body>
 
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-lg-10 col-md-12">
+<div class="container">
+    <div class="row">
+        <div class="col">
 
-            <div class="scan-card">
-                <h4 class="scan-title">
-                    <i class="fa fa-qrcode"></i> Station Barcode Scanning
-                </h4>
+            <div class="card">
+                <div class="card-title">
+                    &#128273; Station Barcode Scanning
+                </div>
 
-                <div class="d-flex action-row align-items-center" style="gap:20px;">
+                <div class="form-row">
 
                     <!-- Station -->
-                    <div class="flex-fill">
-                        <label class="font-weight-bold">Station Name</label>
-                        <select id="stationName" class="form-control">
+                    <div class="form-group">
+                        <label>Station Name</label>
+                        <select id="stationName">
                             <option value="">Select Station</option>
                         </select>
                     </div>
 
                     <!-- Line -->
-                    <div style="width:150px;">
-                        <label class="font-weight-bold">Line</label>
-                        <select id="line" class="form-control">
+                    <div class="form-group" style="max-width:150px;">
+                        <label>Line</label>
+                        <select id="line">
                             <option value="1">1</option>
                         </select>
                     </div>
 
                     <!-- Barcode -->
-                    <div class="flex-fill">
-                        <label class="font-weight-bold">Barcode</label>
+                    <div class="form-group">
+                        <label>Barcode</label>
                         <input type="text"
                                id="barcode"
-                               class="form-control"
                                placeholder="Scan barcode here"
                                autofocus
                                onkeypress="if(event.key==='Enter') submitData()">
                     </div>
 
                     <!-- Button -->
-                    <div style="margin-top:30px;">
-                        <button class="btn btn-success btn-submit"
-                                onclick="submitData()">
-                            <i class="fa fa-check"></i> Submit
+                    <div class="form-group" style="flex:0;">
+                        <button class="btn btn-success" onclick="submitData()">
+                            ✔ Submit
                         </button>
                     </div>
 
@@ -119,7 +187,7 @@ function submitData() {
     const barcode = document.getElementById('barcode').value.trim();
 
     if (!station || !barcode) {
-        alert('Please select station and scan barcode');
+        alert("Please select station and scan barcode");
         return;
     }
 
