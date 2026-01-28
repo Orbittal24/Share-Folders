@@ -1,37 +1,171 @@
-<div class="container-fluid">
-    <div class="row mt-4">
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>:: TACO :: EV-Battery MIS</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="/app/assets/vendor/themify-icons/themify-icons.css">
+    <link rel="stylesheet" href="/app/assets/vendor/fontawesome/css/font-awesome.min.css">
+    <link rel="stylesheet" href="/app/assets/css/main.css">
+    <link rel="stylesheet" href="/app/assets/vendor/select2/select2.css">
+    <link rel="stylesheet" href="/app/assets/js/sweetalert2.min.css">
+
+    <style>
+        ::placeholder { color:red; }
+        .card_shadow {
+            box-shadow: 0 4px 8px rgba(0,0,0,.2);
+            padding: 20px;
+        }
+    </style>
+</head>
+
+<body class="theme-blue">
+
+<!-- Loader -->
+<div class="page-loader-wrapper">
+    <div class="loader">
+        <div class="m-t-30">
+            <img src="/app/assets/images/brand/icon.gif" width="68">
+        </div>
+        <p>Please wait...</p>
+    </div>
+</div>
+
+<!-- Navbar -->
+<nav class="navbar custom-navbar">
+    <div class="nav_top">
+        <a class="navbar-brand" href="#"><img src="/app/assets/images/brand/icon.gif"></a>
+    </div>
+    <div id="navbar_main">
+        <ul class="navbar-nav ml-auto">
+            <li class="nav-item dropdown">
+                <a class="nav-link nav-link-icon" data-toggle="dropdown"><i class="fa fa-user"></i></a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <a class="dropdown-item" href="/"><i class="fa fa-sign-out-alt"></i> Sign out</a>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link nav-link-icon menu_toggle"><i class="fa fa-align-left"></i></a>
+            </li>
+        </ul>
+    </div>
+</nav>
+
+<div class="main_content">
+
+<!-- Sidebar (unchanged) -->
+<div class="left_sidebar">
+    <a class="brand-text">EV - Battery MIS</a>
+    <nav class="sidebar main_dashboard open">
+        <ul class="metismenu">
+            <li><a href="/production_count"><i class="fa fa-battery-three-quarters"></i> OCV & Cell Scanning</a></li>
+            <li><a href="/welding_station"><i class="fa fa-battery-three-quarters"></i> Welding Station</a></li>
+            <li><a href="/voltage_ir_testing_start"><i class="fa fa-bolt"></i> Voltage & IR Testing</a></li>
+        </ul>
+    </nav>
+</div>
+
+<!-- ================= MAIN UI ================= -->
+<div class="container-fluid mt-4">
+
+    <div class="row">
         <div class="col-md-12">
-            <div class="card card_shadow p-3">
+            <div class="card card_shadow">
+
+                <h4 class="mb-4 text-success">Station Scan</h4>
+
                 <div class="d-flex flex-wrap align-items-center gap-3">
 
-                    <!-- Station Name -->
-                    <select id="stationName" class="form-control"
-                        style="width:260px;height:5vh;font-size:2vh;">
+                    <!-- Station -->
+                    <select id="stationName" class="form-control" style="width:260px">
                         <option value="">Select Station</option>
                     </select>
 
-                    <!-- Line (Static) -->
-                    <select id="line" class="form-control"
-                        style="width:180px;height:5vh;font-size:2vh;">
+                    <!-- Line -->
+                    <select id="line" class="form-control" style="width:160px">
                         <option value="1">Line 1</option>
                     </select>
 
-                    <!-- Barcode Scan -->
+                    <!-- Barcode -->
                     <input type="text" id="barcode"
-                        class="form-control"
-                        placeholder="Scan Barcode"
-                        style="width:320px;height:5vh;font-size:2vh;"
-                        autocomplete="off" />
+                           class="form-control"
+                           placeholder="Scan Barcode"
+                           style="width:320px"
+                           autocomplete="off">
 
                     <!-- Submit -->
-                    <button class="btn btn-success"
-                        style="height:5vh;font-size:2vh;"
-                        onclick="submitScan()">
+                    <button class="btn btn-success" onclick="submitScan()">
                         Submit
                     </button>
 
                 </div>
+
             </div>
         </div>
     </div>
+
 </div>
+</div>
+
+<!-- JS -->
+<script src="/socket.io/socket.io.js"></script>
+<script src="/app/assets/js/jquery.min.js"></script>
+<script src="/app/assets/js/bootstrap.min.js"></script>
+<script src="/app/assets/js/sweetalert2.all.min.js"></script>
+
+<script>
+const socket = io();
+
+/* ================= STATION DROPDOWN ================= */
+socket.emit('getStationDropdownList');
+
+socket.on('setStationDropdownList', (stations) => {
+    const ddl = document.getElementById('stationName');
+    ddl.innerHTML = '<option value="">Select Station</option>';
+
+    stations.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.station_id;
+        opt.textContent = s.station_name;
+        ddl.appendChild(opt);
+    });
+});
+
+/* ================= BARCODE SCAN ================= */
+document.getElementById('barcode').addEventListener('keypress', e => {
+    if (e.key === 'Enter') submitScan();
+});
+
+function submitScan() {
+    const station = stationName.value;
+    const barcode = barcode.value.trim();
+
+    if (!station) {
+        Swal.fire('Error', 'Select Station', 'error');
+        return;
+    }
+    if (!barcode) {
+        Swal.fire('Error', 'Scan Barcode', 'error');
+        return;
+    }
+
+    socket.emit('barcode_scanned', {
+        station,
+        line: '1',
+        barcode
+    });
+
+    barcode.value = '';
+}
+
+/* ================= RESPONSE ================= */
+socket.on('data_inserted_and_deleted', data => {
+    Swal.fire('Success', data.message, 'success')
+        .then(() => location.reload());
+});
+</script>
+
+</body>
+</html>
