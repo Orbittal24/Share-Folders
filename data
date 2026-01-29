@@ -103,11 +103,12 @@ button:hover {
     <h2>Station Status OK</h2>
 
     <div class="row">
+
         <div class="group">
             <label><b>Station Name</b></label>
-            <select id="stationName">
-                <option value="">Select Station</option>
-            </select>
+            <!-- 🔍 Searchable station input -->
+            <input list="stations" id="stationName" placeholder="Search Station">
+            <datalist id="stations"></datalist>
         </div>
 
         <div class="group" style="max-width:150px;">
@@ -121,6 +122,7 @@ button:hover {
             <label><b>Barcode</b></label>
             <input type="text" id="barcode" placeholder="Scan Barcode" autofocus>
         </div>
+
     </div>
 
     <div class="row" style="justify-content:center; margin-top:25px;">
@@ -137,27 +139,33 @@ button:hover {
 </div>
 
 <script>
+/* ========= STATION MAP ========= */
+let stationMap = {};
+
 /* ========= LOAD STATIONS ========= */
 fetch('/api/stations')
     .then(res => res.json())
     .then(data => {
-        const ddl = document.getElementById('stationName');
+        const list = document.getElementById('stations');
+
         data.forEach(r => {
+            stationMap[r.Station_Name] = r.Station_ID;
+
             const opt = document.createElement('option');
-            opt.value = r.Station_ID;
-            opt.textContent = r.Station_Name;
-            ddl.appendChild(opt);
+            opt.value = r.Station_Name;
+            list.appendChild(opt);
         });
     });
 
 /* ========= SUBMIT ========= */
 function submitData() {
-    const stationId = document.getElementById('stationName').value;
+    const stationName = document.getElementById('stationName').value.trim();
+    const stationId = stationMap[stationName];
     const line = document.getElementById('line').value;
     const barcode = document.getElementById('barcode').value.trim();
 
     if (!stationId || !barcode) {
-        showPopup("Select station and scan barcode");
+        showPopup("Select valid station and scan barcode");
         return;
     }
 
@@ -189,7 +197,7 @@ function showPopup(msg) {
 
 function closePopup() {
     document.getElementById('popup').style.display = "none";
-    location.reload();   // ✅ ALWAYS reload
+    location.reload();   // 🔁 Always reload
 }
 </script>
 
