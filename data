@@ -1,155 +1,118 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Station Status</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+/******************** MODULES ********************/
+const express = require("express");
+const app = express();
+const http = require("http").Server(app);
+const io = require("socket.io")(http);
+const path = require("path");
+const sql = require("mssql");
+const axios = require("axios");   // ✅ NEW
 
-<style>
-body {
-    background: #f4f6f9;
-    font-family: Arial, sans-serif;
-}
+/******************** MIDDLEWARE ********************/
+app.use(express.static(__dirname));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-.card {
-    background: #fff;
-    max-width: 1000px;
-    margin: 40px auto;
-    padding: 30px;
-    border-radius: 10px;
-    box-shadow: 0 6px 18px rgba(0,0,0,.15);
-}
-
-h2 {
-    color: #2e7d32;
-    margin-bottom: 25px;
-}
-
-.row {
-    display: flex;
-    gap: 20px;
-    align-items: flex-end;
-    flex-wrap: wrap;
-}
-
-.group {
-    flex: 1;
-    min-width: 200px;
-}
-
-label {
-    margin-bottom: 5px;
-    display: block;
-}
-
-input, select {
-    width: 100%;
-    height: 45px;
-    font-size: 16px;
-    padding: 6px 10px;
-}
-
-/* Barcode bold */
-#barcode {
-    font-size: 18px;
-    letter-spacing: 1px;
-}
-
-button {
-    height: 45px;
-    width: 160px;
-    font-size: 16px;
-    font-weight: bold;
-    background: #28a745;
-    border: none;
-    color: white;
-    border-radius: 6px;
-    cursor: pointer;
-}
-
-button:hover {
-    background: #218838;
-}
-</style>
-</head>
-
-<body>
-
-<div class="card">
-    <h2>Station Barcode Scanning</h2>
-
-    <!-- ===== ROW 1 ===== -->
-    <div class="row">
-
-        <div class="group">
-            <label>Station Name</label>
-            <select id="stationName">
-                <option value="">Select Station</option>
-            </select>
-        </div>
-
-        <div class="group" style="max-width:150px;">
-            <label>Line</label>
-            <select id="line">
-                <option value="1">1</option>
-            </select>
-        </div>
-
-        <div class="group">
-            <label>Barcode</label>
-            <input type="text"
-                   id="barcode"
-                   placeholder="Scan Barcode"
-                   autofocus>
-        </div>
-
-    </div>
-
-    <!-- ===== ROW 2 ===== -->
-    <div class="row" style="justify-content:center; margin-top:25px;">
-        <button onclick="submitData()">Submit</button>
-    </div>
-
-</div>
-
-<script>
-/* ========= LOAD STATIONS ========= */
-fetch('/api/stations')
-    .then(res => res.json())
-    .then(data => {
-        const ddl = document.getElementById('stationName');
-        data.forEach(r => {
-            const opt = document.createElement('option');
-            opt.value = r.Station_ID;
-            opt.textContent = r.Station_Name;
-            ddl.appendChild(opt);
-        });
-    });
-
-/* ========= SUBMIT ========= */
-function submitData() {
-    const stationId = document.getElementById('stationName').value;
-    const line = document.getElementById('line').value;
-    const barcodeInput = document.getElementById('barcode');
-    const barcode = barcodeInput.value.trim();
-
-    if (!stationId || !barcode) {
-        alert('Select station and scan barcode');
-        return;
+/******************** DB CONFIG ********************/
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin",
+    database: "taco_treceability_master",
+    server: "localhost\\MSSQLSERVER",
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    },
+    options: {
+        encrypt: true,
+        trustServerCertificate: true
     }
+};
 
-    fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stationId, line, barcode })
-    })
-    .then(res => res.json())
-    .then(resp => {
-        // ❌ ALERT REMOVED
-        barcodeInput.focus();
+/******************** DB CONNECTION ********************/
+const dbConn = new sql.ConnectionPool(sqlConfig);
+dbConn.connect()
+    .then(() => console.log("✅ Connected to taco_treceability_master"))
+    .catch(err => console.error("❌ DB Connection Error:", err));
+
+/******************** SERVER ********************/
+http.listen(5400, "0.0.0.0", () => {
+    console.log("🚀 Server running on port 5400");
+});
+
+/******************** UI ROUTE ********************/
+app.get("/station_status", (req, res) => {
+    res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
+});
+
+/******************** API: LOAD STATIONS ********************/
+app.get("/api/stations", async (req, res) => {
+    try {
+        const result = await dbConn.request().query(`
+            SELECT Station_ID, Station_Name
+            FROM taco_treceability.master_station
+            ORDER BY Station_Name
+        `);
+        res.json(result.recordset);
+    } catch (err) {
+        console.error("❌ Station fetch error:", err);
+        res.status(500).json({ error: "Failed to load stations" });
+    }
+});
+
+/******************** API: BARCODE SCAN ********************/
+app.post("/api/scan", async (req, res) => {
+    try {
+        const { stationId, line, barcode } = req.body;
+
+        if (!stationId || !barcode) {
+            return res.status(400).json({ message: "Station & barcode required" });
+        }
+
+        console.log("📥 SCAN RECEIVED");
+        console.log("Station ID:", stationId);
+        console.log("Line:", line);
+        console.log("Barcode:", barcode);
+
+        /* ========= FORWARD DATA TO EXTERNAL API ========= */
+        const apiPayload = {
+            station_id: stationId,
+            line_id: line,
+            customer_qrcode: barcode,
+            station_status: "OK",
+            checklist_name: "NA",
+            substation_id: "NA"
+        };
+
+        try {
+            const apiResponse = await axios.post(
+                "https://localhost:5555/station_status/filter",
+                apiPayload,
+                {
+                    httpsAgent: new (require("https").Agent)({
+                        rejectUnauthorized: false // ⚠️ needed for localhost HTTPS
+                    })
+                }
+            );
+
+            console.log("✅ External API Response:", apiResponse.data);
+        } catch (apiErr) {
+            console.error("❌ External API Error:", apiErr.message);
+        }
+
+        res.json({ message: "Barcode processed successfully" });
+
+    } catch (err) {
+        console.error("❌ Scan error:", err);
+        res.status(500).json({ message: "Scan failed" });
+    }
+});
+
+/******************** SOCKET.IO ********************/
+io.on("connection", (socket) => {
+    console.log("🔌 Client connected");
+
+    socket.on("disconnect", () => {
+        console.log("❌ Client disconnected");
     });
-}
-</script>
-
-</body>
-</html>
+});
