@@ -38,7 +38,6 @@ h2 {
 }
 
 label {
-    font-weight: bold;
     margin-bottom: 5px;
     display: block;
 }
@@ -53,7 +52,6 @@ input, select {
 /* Barcode bold */
 #barcode {
     font-size: 18px;
-    font-weight: bold;
     letter-spacing: 1px;
 }
 
@@ -148,8 +146,8 @@ function submitData() {
     })
     .then(res => res.json())
     .then(resp => {
-        alert(resp.message);   // ✅ alert shown
-        barcodeInput.focus();  // ✅ barcode NOT cleared
+        // ✅ ALERT REMOVED
+        barcodeInput.focus();  // keep focus for next scan
     });
 }
 </script>
