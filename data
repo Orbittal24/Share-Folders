@@ -1,170 +1,157 @@
-/******************** MODULES ********************/
-const express = require("express");
-const app = express();
-const http = require("http").Server(app);
-const io = require("socket.io")(http);
-const path = require("path");
-const fs = require("fs");
-const sql = require("mssql");
-const moment = require("moment");
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Station Status</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-/******************** MIDDLEWARE ********************/
-app.use(express.static(__dirname));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+<style>
+body {
+    background: #f4f6f9;
+    font-family: Arial, sans-serif;
+}
 
-/******************** DB CONFIG ********************/
-const sqlConfig = {
-    user: "user_mis",
-    password: "admin",
-    database: "taco_treceability_master",
-    server: "localhost\\MSSQLSERVER",
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000
-    },
-    options: {
-        encrypt: true,
-        trustServerCertificate: true
-    }
-};
+.card {
+    background: #fff;
+    max-width: 1000px;
+    margin: 40px auto;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.15);
+}
 
-/******************** DB CONNECTION ********************/
-const dbConn = new sql.ConnectionPool(sqlConfig);
-dbConn.connect()
-    .then(() => console.log("✅ Connected to taco_treceability_master"))
-    .catch(err => console.error("❌ DB Connection Error:", err));
+h2 {
+    color: #2e7d32;
+    margin-bottom: 25px;
+}
 
-/******************** SERVER ********************/
-http.listen(5400, "0.0.0.0", () => {
-    console.log("🚀 Server running on port 5400");
-});
+.row {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
 
-/******************** UI ROUTE ********************/
-app.get("/station_status", (req, res) => {
-    res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
-});
+.group {
+    flex: 1;
+    min-width: 200px;
+}
 
-/******************** API: LOAD STATIONS ********************/
-app.get("/api/stations", async (req, res) => {
-    try {
-        const result = await dbConn.request().query(`
-            SELECT Station_ID, Station_Name
-            FROM taco_treceability.master_station
-            ORDER BY Station_Name
-        `);
+label {
+    font-weight: bold;
+    margin-bottom: 5px;
+    display: block;
+}
 
-        res.json(result.recordset);
-    } catch (err) {
-        console.error("❌ Station fetch error:", err);
-        res.status(500).json({ error: "Failed to load stations" });
-    }
-});
+input, select {
+    width: 100%;
+    height: 45px;
+    font-size: 16px;
+    padding: 6px 10px;
+}
 
-/******************** API: BARCODE SCAN ********************/
-app.post("/api/scan", async (req, res) => {
-    try {
-        const { stationId, line, barcode } = req.body;
+button {
+    height: 45px;
+    width: 160px;
+    font-size: 16px;
+    font-weight: bold;
+    background: #28a745;
+    border: none;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+}
 
-        if (!stationId || !barcode) {
-            return res.status(400).json({ message: "Station & barcode required" });
-        }
+button:hover {
+    background: #218838;
+}
 
-        console.log("📥 SCAN RECEIVED");
-        console.log("Station ID:", stationId);
-        console.log("Line:", line);
-        console.log("Barcode:", barcode);
+#barcode {
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+</style>
+</head>
 
-        // 👉 You can insert logic here if required
+<body>
 
-        res.json({ message: "Barcode received successfully" });
-    } catch (err) {
-        console.error("❌ Scan error:", err);
-        res.status(500).json({ message: "Scan failed" });
-    }
-});
+<div class="card">
+    <h2>Station Barcode Scanning</h2>
 
-/******************** SOCKET.IO ********************/
-io.sockets.on("connection", (socket) => {
+    <!-- ================= ROW 1 ================= -->
+    <div class="row">
 
-    console.log("🔌 Client connected");
+        <div class="group">
+            <label>Station Name</label>
+            <select id="stationName">
+                <option value="">Select Station</option>
+            </select>
+        </div>
 
-    /////////////////////////////// OK DATA ///////////////////////////////
+        <div class="group" style="max-width:150px;">
+            <label>Line</label>
+            <select id="line">
+                <option value="1">1</option>
+            </select>
+        </div>
 
-    socket.on("date_selected_searchdata_count_OK", (date) => {
-        console.log("Received date OK count:", date);
+        <div class="group">
+            <label>Barcode</label>
+            <input type="text"
+                   id="barcode"
+                   placeholder="Scan Barcode"
+                   autofocus
+                   onkeypress="if(event.key==='Enter') submitData()">
+        </div>
 
-        sql.connect(sqlConfig, function (err) {
-            if (err) return console.log(err);
+    </div>
 
-            const request = new sql.Request();
-            request.query(`
-                SELECT DISTINCT pack_no 
-                FROM taco_treceability.torque_details_EIP
-                WHERE CONVERT(varchar(200), date_dd) < '${date}'
-                AND pack_no != 'not_linked'
-            `, async (err, result) => {
-                if (err) return console.log(err);
+    <!-- ================= ROW 2 (SUBMIT BUTTON) ================= -->
+    <div class="row" style="justify-content:center; margin-top:25px;">
+        <button onclick="submitData()">Submit</button>
+    </div>
 
-                let totalCount = 0;
+</div>
 
-                for (const row of result.recordset) {
-                    const qr = row.pack_no.replace(/'/g, "''");
-
-                    const res2 = await new sql.Request().query(`
-                        SELECT COUNT(*) AS cnt
-                        FROM taco_treceability.station_status
-                        WHERE FinalQRCode LIKE '%${qr}%'
-                        AND FinalQRCodePrint_status = 'OK'
-                    `);
-
-                    totalCount += res2.recordset[0].cnt;
-                }
-
-                socket.emit("total_eip_data_count_fe", totalCount);
-            });
+<script>
+/* ========= LOAD STATION DROPDOWN ========= */
+fetch('/api/stations')
+    .then(res => res.json())
+    .then(data => {
+        const ddl = document.getElementById('stationName');
+        data.forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r.Station_ID;         // send ID
+            opt.textContent = r.Station_Name; // show name
+            ddl.appendChild(opt);
         });
     });
 
-    /////////////////////////////// NOT OK DATA ///////////////////////////////
+/* ========= SUBMIT DATA ========= */
+function submitData() {
+    const stationId = document.getElementById('stationName').value;
+    const line = document.getElementById('line').value;
+    const barcode = document.getElementById('barcode').value.trim();
 
-    socket.on("date_selected_searchdata_count_notok_shifting", (date) => {
-        console.log("Received date NOT OK count:", date);
+    if (!stationId || !barcode) {
+        alert('Select station and scan barcode');
+        return;
+    }
 
-        sql.connect(sqlConfig, function (err) {
-            if (err) return console.log(err);
-
-            const request = new sql.Request();
-            request.query(`
-                SELECT DISTINCT pack_no 
-                FROM taco_treceability.torque_details_EIP
-                WHERE CONVERT(varchar(200), date_dd) < '${date}'
-                AND pack_no != 'not_linked'
-            `, async (err, result) => {
-                if (err) return console.log(err);
-
-                let totalCount = 0;
-
-                for (const row of result.recordset) {
-                    const qr = row.pack_no.replace(/'/g, "''");
-
-                    const res2 = await new sql.Request().query(`
-                        SELECT COUNT(*) AS cnt
-                        FROM taco_treceability.station_status
-                        WHERE FinalQRCode LIKE '%${qr}%'
-                        AND FinalQRCodePrint_status = 'NOT OK'
-                    `);
-
-                    totalCount += res2.recordset[0].cnt;
-                }
-
-                socket.emit("total_eip_data_count_fe_notok", totalCount);
-            });
-        });
+    fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stationId, line, barcode })
+    })
+    .then(res => res.json())
+    .then(resp => {
+        alert(resp.message);
+        document.getElementById('barcode').value = '';
+        document.getElementById('barcode').focus(); // scanner ready
     });
+}
+</script>
 
-    socket.on("disconnect", () => {
-        console.log("❌ Client disconnected");
-    });
-});
+</body>
+</html>
