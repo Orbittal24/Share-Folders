@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Station Status</title>
@@ -11,6 +11,7 @@ body {
     font-family: Arial, sans-serif;
 }
 
+/* ===== CARD ===== */
 .card {
     background: #fff;
     max-width: 1000px;
@@ -25,35 +26,67 @@ h2 {
     margin-bottom: 25px;
 }
 
+/* ===== FORM ROW ===== */
 .row {
     display: flex;
-    gap: 20px;
-    align-items: flex-end;
+    gap: 24px;
+    align-items: flex-start;
     flex-wrap: wrap;
 }
 
+/* ===== FORM GROUPS ===== */
 .group {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Station wide */
+.group.station {
+    flex: 3;
+    min-width: 250px;
+}
+
+/* Line small */
+.group.line {
     flex: 1;
-    min-width: 200px;
+    max-width: 120px;
+}
+
+/* Barcode normal */
+.group.barcode {
+    flex: 2;
+    min-width: 220px;
 }
 
 label {
-    margin-bottom: 5px;
-    display: block;
+    font-size: 14px;
+    margin-bottom: 6px;
+    color: #444;
+    font-weight: bold;
 }
 
+/* ===== INPUTS ===== */
 input, select {
     width: 100%;
     height: 45px;
     font-size: 16px;
     padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
 }
 
-/* Barcode bold */
+/* Barcode emphasis */
 #barcode {
-    height: 29px;
     font-size: 18px;
     letter-spacing: 1px;
+}
+
+/* ===== BUTTON ===== */
+.button-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 30px;
 }
 
 button {
@@ -104,28 +137,27 @@ button:hover {
 
     <div class="row">
 
-        <div class="group">
-            <label><b>Station Name</b></label>
-            <!-- 🔍 Searchable station input -->
+        <div class="group station">
+            <label>Station Name</label>
             <input list="stations" id="stationName" placeholder="Search Station">
             <datalist id="stations"></datalist>
         </div>
 
-        <div class="group" style="max-width:150px;">
-            <label><b>Line</b></label>
+        <div class="group line">
+            <label>Line</label>
             <select id="line">
                 <option value="1">1</option>
             </select>
         </div>
 
-        <div class="group">
-            <label><b>Barcode</b></label>
+        <div class="group barcode">
+            <label>Barcode</label>
             <input type="text" id="barcode" placeholder="Scan Barcode" autofocus>
         </div>
 
     </div>
 
-    <div class="row" style="justify-content:center; margin-top:25px;">
+    <div class="button-row">
         <button onclick="submitData()">Submit</button>
     </div>
 </div>
@@ -189,7 +221,7 @@ function submitData() {
     });
 }
 
-/* ========= POPUP HANDLERS ========= */
+/* ========= POPUP ========= */
 function showPopup(msg) {
     document.getElementById('popupMessage').innerText = msg;
     document.getElementById('popup').style.display = "flex";
@@ -197,7 +229,7 @@ function showPopup(msg) {
 
 function closePopup() {
     document.getElementById('popup').style.display = "none";
-    location.reload();   // 🔁 Always reload
+    location.reload(); // reset for next scan
 }
 </script>
 
