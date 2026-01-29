@@ -1,3 +1,4 @@
+/******************** MODULES ********************/
 const express = require("express");
 const app = express();
 const http = require("http").Server(app);
@@ -7,12 +8,12 @@ const fs = require("fs");
 const sql = require("mssql");
 const moment = require("moment");
 
-/* ===================== STATIC + JSON ===================== */
+/******************** MIDDLEWARE ********************/
 app.use(express.static(__dirname));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* ===================== DB CONFIG ===================== */
+/******************** DB CONFIG ********************/
 const sqlConfig = {
     user: "user_mis",
     password: "admin",
@@ -29,30 +30,141 @@ const sqlConfig = {
     }
 };
 
-/* ===================== DB CONNECT LOG ===================== */
-var dbConn = new sql.ConnectionPool(sqlConfig);
+/******************** DB CONNECTION ********************/
+const dbConn = new sql.ConnectionPool(sqlConfig);
 dbConn.connect()
-    .then(() => console.log("Connected to taco_treceability_master...."))
-    .catch(err => console.error("DB Connection Error:", err));
+    .then(() => console.log("✅ Connected to taco_treceability_master"))
+    .catch(err => console.error("❌ DB Connection Error:", err));
 
-/* ===================== SERVER ===================== */
+/******************** SERVER ********************/
 http.listen(5400, "0.0.0.0", () => {
-    console.log("Connected to :5400");
+    console.log("🚀 Server running on port 5400");
 });
 
-/* ===================== UI ===================== */
+/******************** UI ROUTE ********************/
 app.get("/station_status", (req, res) => {
     res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
 });
 
-/* ===================== SOCKET.IO ===================== */
+/******************** API: LOAD STATIONS ********************/
+app.get("/api/stations", async (req, res) => {
+    try {
+        const result = await dbConn.request().query(`
+            SELECT Station_ID, Station_Name
+            FROM taco_treceability.master_station
+            ORDER BY Station_Name
+        `);
+
+        res.json(result.recordset);
+    } catch (err) {
+        console.error("❌ Station fetch error:", err);
+        res.status(500).json({ error: "Failed to load stations" });
+    }
+});
+
+/******************** API: BARCODE SCAN ********************/
+app.post("/api/scan", async (req, res) => {
+    try {
+        const { stationId, line, barcode } = req.body;
+
+        if (!stationId || !barcode) {
+            return res.status(400).json({ message: "Station & barcode required" });
+        }
+
+        console.log("📥 SCAN RECEIVED");
+        console.log("Station ID:", stationId);
+        console.log("Line:", line);
+        console.log("Barcode:", barcode);
+
+        // 👉 You can insert logic here if required
+
+        res.json({ message: "Barcode received successfully" });
+    } catch (err) {
+        console.error("❌ Scan error:", err);
+        res.status(500).json({ message: "Scan failed" });
+    }
+});
+
+/******************** SOCKET.IO ********************/
 io.sockets.on("connection", (socket) => {
 
-    /* 🔵 ALL YOUR EXISTING SOCKET EVENTS */
-    /* OK DATA */
-    /* NOT OK DATA */
-    /* SHIFTING LOGIC */
-    /* INSERT / DELETE LOGIC */
+    console.log("🔌 Client connected");
 
-    /* ⚠️ NOTHING REMOVED HERE */
+    /////////////////////////////// OK DATA ///////////////////////////////
+
+    socket.on("date_selected_searchdata_count_OK", (date) => {
+        console.log("Received date OK count:", date);
+
+        sql.connect(sqlConfig, function (err) {
+            if (err) return console.log(err);
+
+            const request = new sql.Request();
+            request.query(`
+                SELECT DISTINCT pack_no 
+                FROM taco_treceability.torque_details_EIP
+                WHERE CONVERT(varchar(200), date_dd) < '${date}'
+                AND pack_no != 'not_linked'
+            `, async (err, result) => {
+                if (err) return console.log(err);
+
+                let totalCount = 0;
+
+                for (const row of result.recordset) {
+                    const qr = row.pack_no.replace(/'/g, "''");
+
+                    const res2 = await new sql.Request().query(`
+                        SELECT COUNT(*) AS cnt
+                        FROM taco_treceability.station_status
+                        WHERE FinalQRCode LIKE '%${qr}%'
+                        AND FinalQRCodePrint_status = 'OK'
+                    `);
+
+                    totalCount += res2.recordset[0].cnt;
+                }
+
+                socket.emit("total_eip_data_count_fe", totalCount);
+            });
+        });
+    });
+
+    /////////////////////////////// NOT OK DATA ///////////////////////////////
+
+    socket.on("date_selected_searchdata_count_notok_shifting", (date) => {
+        console.log("Received date NOT OK count:", date);
+
+        sql.connect(sqlConfig, function (err) {
+            if (err) return console.log(err);
+
+            const request = new sql.Request();
+            request.query(`
+                SELECT DISTINCT pack_no 
+                FROM taco_treceability.torque_details_EIP
+                WHERE CONVERT(varchar(200), date_dd) < '${date}'
+                AND pack_no != 'not_linked'
+            `, async (err, result) => {
+                if (err) return console.log(err);
+
+                let totalCount = 0;
+
+                for (const row of result.recordset) {
+                    const qr = row.pack_no.replace(/'/g, "''");
+
+                    const res2 = await new sql.Request().query(`
+                        SELECT COUNT(*) AS cnt
+                        FROM taco_treceability.station_status
+                        WHERE FinalQRCode LIKE '%${qr}%'
+                        AND FinalQRCodePrint_status = 'NOT OK'
+                    `);
+
+                    totalCount += res2.recordset[0].cnt;
+                }
+
+                socket.emit("total_eip_data_count_fe_notok", totalCount);
+            });
+        });
+    });
+
+    socket.on("disconnect", () => {
+        console.log("❌ Client disconnected");
+    });
 });
