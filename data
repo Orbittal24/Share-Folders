@@ -150,8 +150,6 @@ fetch('/api/stations')
         });
     });
 
-let reloadAfterPopup = false;
-
 /* ========= SUBMIT ========= */
 function submitData() {
     const stationId = document.getElementById('stationName').value;
@@ -159,7 +157,7 @@ function submitData() {
     const barcode = document.getElementById('barcode').value.trim();
 
     if (!stationId || !barcode) {
-        showPopup("Select station and scan barcode", false);
+        showPopup("Select station and scan barcode");
         return;
     }
 
@@ -176,27 +174,22 @@ function submitData() {
             resp.message;
 
         if (apiMsg === "Station created/updated successfully.") {
-            showPopup("Station status updated", true);
+            showPopup("Station status updated");
         } else {
-            showPopup(apiMsg || "Unknown response", false);
+            showPopup(apiMsg || "Unknown response");
         }
     });
 }
 
 /* ========= POPUP HANDLERS ========= */
-function showPopup(msg, reload) {
-    reloadAfterPopup = reload;
+function showPopup(msg) {
     document.getElementById('popupMessage').innerText = msg;
     document.getElementById('popup').style.display = "flex";
 }
 
 function closePopup() {
     document.getElementById('popup').style.display = "none";
-    if (reloadAfterPopup) {
-        location.reload();
-    } else {
-        document.getElementById('barcode').focus();
-    }
+    location.reload();   // ✅ ALWAYS reload
 }
 </script>
 
