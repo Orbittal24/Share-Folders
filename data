@@ -43,11 +43,23 @@ label {
     display: block;
 }
 
-input, select {
+/* Station + Line normal */
+select {
     width: 100%;
     height: 45px;
     font-size: 16px;
     padding: 6px 10px;
+    font-weight: normal;
+}
+
+/* Barcode input bold */
+#barcode {
+    width: 100%;
+    height: 45px;
+    font-size: 18px;
+    padding: 6px 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
 }
 
 button {
@@ -64,12 +76,6 @@ button {
 
 button:hover {
     background: #218838;
-}
-
-#barcode {
-    font-size: 18px;
-    font-weight: bold;
-    letter-spacing: 1px;
 }
 </style>
 </head>
@@ -107,7 +113,7 @@ button:hover {
 
     </div>
 
-    <!-- ================= ROW 2 (SUBMIT BUTTON) ================= -->
+    <!-- ================= ROW 2 ================= -->
     <div class="row" style="justify-content:center; margin-top:25px;">
         <button onclick="submitData()">Submit</button>
     </div>
@@ -122,8 +128,8 @@ fetch('/api/stations')
         const ddl = document.getElementById('stationName');
         data.forEach(r => {
             const opt = document.createElement('option');
-            opt.value = r.Station_ID;         // send ID
-            opt.textContent = r.Station_Name; // show name
+            opt.value = r.Station_ID;
+            opt.textContent = r.Station_Name;
             ddl.appendChild(opt);
         });
     });
@@ -144,11 +150,10 @@ function submitData() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stationId, line, barcode })
     })
-    .then(res => res.json())
-    .then(resp => {
-        alert(resp.message);
+    .then(() => {
+        // ❌ No alert
         document.getElementById('barcode').value = '';
-        document.getElementById('barcode').focus(); // scanner ready
+        document.getElementById('barcode').focus(); // ready for next scan
     });
 }
 </script>
