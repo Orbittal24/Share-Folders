@@ -43,16 +43,15 @@ label {
     display: block;
 }
 
-/* Station + Line normal */
+/* Station & Line */
 select {
     width: 100%;
     height: 45px;
     font-size: 16px;
     padding: 6px 10px;
-    font-weight: normal;
 }
 
-/* Barcode input bold */
+/* Barcode – BOLD & SCANNER FRIENDLY */
 #barcode {
     width: 100%;
     height: 45px;
@@ -85,7 +84,7 @@ button:hover {
 <div class="card">
     <h2>Station Barcode Scanning</h2>
 
-    <!-- ================= ROW 1 ================= -->
+    <!-- ===== ROW 1 ===== -->
     <div class="row">
 
         <div class="group">
@@ -107,13 +106,12 @@ button:hover {
             <input type="text"
                    id="barcode"
                    placeholder="Scan Barcode"
-                   autofocus
-                   onkeypress="if(event.key==='Enter') submitData()">
+                   autofocus>
         </div>
 
     </div>
 
-    <!-- ================= ROW 2 ================= -->
+    <!-- ===== ROW 2 ===== -->
     <div class="row" style="justify-content:center; margin-top:25px;">
         <button onclick="submitData()">Submit</button>
     </div>
@@ -128,21 +126,37 @@ fetch('/api/stations')
         const ddl = document.getElementById('stationName');
         data.forEach(r => {
             const opt = document.createElement('option');
-            opt.value = r.Station_ID;
-            opt.textContent = r.Station_Name;
+            opt.value = r.Station_ID;        // send ID
+            opt.textContent = r.Station_Name; // show name
             ddl.appendChild(opt);
         });
     });
 
-/* ========= SUBMIT DATA ========= */
+/* ========= SCANNER SAFE ENTER HANDLING ========= */
+let scanTimer = null;
+const barcodeInput = document.getElementById('barcode');
+
+barcodeInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+
+        clearTimeout(scanTimer);
+
+        // allow scanner to finish input
+        scanTimer = setTimeout(() => {
+            submitData();
+        }, 100);
+    }
+});
+
+/* ========= SUBMIT ========= */
 function submitData() {
     const stationId = document.getElementById('stationName').value;
     const line = document.getElementById('line').value;
-    const barcode = document.getElementById('barcode').value.trim();
+    const barcode = barcodeInput.value.trim();
 
     if (!stationId || !barcode) {
-        alert('Select station and scan barcode');
-        return;
+        return; // silent (scanner friendly)
     }
 
     fetch('/api/scan', {
@@ -151,9 +165,12 @@ function submitData() {
         body: JSON.stringify({ stationId, line, barcode })
     })
     .then(() => {
-        // ❌ No alert
-        document.getElementById('barcode').value = '';
-        document.getElementById('barcode').focus(); // ready for next scan
+        // clear ONLY after scan is fully read
+        barcodeInput.value = '';
+        barcodeInput.focus();
+    })
+    .catch(() => {
+        barcodeInput.focus();
     });
 }
 </script>
