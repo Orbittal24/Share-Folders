@@ -100,8 +100,7 @@ button:hover {
             <input type="text"
                    id="barcode"
                    placeholder="Scan Barcode"
-                   autofocus
-                   onkeypress="if(event.key === 'Enter') submitData()">
+                   autofocus>
         </div>
 
     </div>
@@ -146,8 +145,8 @@ function submitData() {
     })
     .then(res => res.json())
     .then(resp => {
-        // ✅ ALERT REMOVED
-        barcodeInput.focus();  // keep focus for next scan
+        // ❌ ALERT REMOVED
+        barcodeInput.focus();
     });
 }
 </script>
