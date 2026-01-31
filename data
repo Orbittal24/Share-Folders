@@ -1,85 +1,20 @@
-# Global Redis connection (DB 0 for duplicates)
-def get_global_redis():
-    return redis.StrictRedis(
-        host="localhost",
-        port=6379,
-        db=0,  # Global DB for duplicate tracking
-        decode_responses=True
-    )
-    
-# time for duplicate tracking  
-GLOBAL_DUPLICATE_KEY = "cellqr_global_history"
 DUPLICATE_TTL_SECONDS = 5 * 24 * 60 * 60  # 5 days
+🔧 ONE-LINE CHANGE (this is the only change needed)
+Replace this line:
+python
+Copy code
+r.set(f"cell:{qr}", json.dumps(row_dict))
+With this:
+python
+Copy code
+r.setex(
+    f"cell:{qr}",
+    DUPLICATE_TTL_SECONDS,
+    json.dumps(row_dict)
+)
+Why this works
+SETEX = SET + EXPIRE
 
-# Insert cellQR into Redis with duplicate check
-@router.post("/redis/cell_scanning/insert_cellqr_inredis")
-async def insert_cellqr(request: Request):
-    data = await request.json()
+Redis will automatically delete cell:{qr} after 5 days
 
-    pack_no = data.get("pack_no")
-    pack_name = data.get("pack_name")
-    line_id = data.get("line_id")
-    module_barcode = data.get("module_barcode")
-    module_no = data.get("module_number")
-    cellqr = data.get("cellqr")
-
-    # Basic validation
-    if not all([pack_no, pack_name, line_id, module_barcode, module_no, cellqr]):
-        return {"status": "error", "message": "Missing required fields"}
-
-    try:
-        line_id = int(line_id)
-    except ValueError:
-        return {"status": "error", "message": "line_id must be an integer"}
-
-    # Redis connection for module data (per line)
-    per_line_r = redis.StrictRedis(
-        host="localhost",
-        port=6379,
-        db=line_id,  # Separate DB per line
-        decode_responses=True
-    )
-
-    counter_key = f"running_count:{pack_no}:{pack_name}:{line_id}:{module_barcode}:{module_no}"
-    current_value = per_line_r.get(counter_key)
-
-    # Step 1: Check if module key exists
-    if current_value is None:
-        return {
-            "status": "warning",
-            "message": f"Module key {counter_key} not found in DB {line_id}"
-        }
-
-    try:
-        obj = json.loads(current_value)
-    except json.JSONDecodeError:
-        return {
-            "status": "error",
-            "message": f"Module key {counter_key} does not contain valid JSON"
-        }
-
-    # Ensure running_cell_qr list exists
-    if "running_cell_qr" not in obj or not isinstance(obj["running_cell_qr"], list):
-        obj["running_cell_qr"] = []
-
-    # Step 2: Check duplicate in global set
-    global_r = get_global_redis()
-    if global_r.sismember(GLOBAL_DUPLICATE_KEY, cellqr):
-        return {
-            "status": "warning",
-            "message": f"Duplicate cellQR found in last 5 days: {cellqr}"
-        }
-
-    # Step 3: Insert into module key first
-    obj["running_cell_qr"].append(cellqr)
-    per_line_r.set(counter_key, json.dumps(obj))
-
-    # Step 4: Only after successful module insert → insert into global set
-    global_r.sadd(GLOBAL_DUPLICATE_KEY, cellqr)
-    global_r.expire(GLOBAL_DUPLICATE_KEY, DUPLICATE_TTL_SECONDS)  # reset TTL
-
-    return {
-        "status": "success",
-        "message": f"Inserted cellQR {cellqr} into {counter_key} and global set",
-        "total_cell_qrs": len(obj["running_cell_qr"])
-    }
+N
