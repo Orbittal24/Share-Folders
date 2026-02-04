@@ -1,128 +1,102 @@
-socket.on("get_popup_4_torque_rework", function (barcode, pack_battery) {
+socket.on('setGlobalIngersollData_bajaj', (ingwholeData, ingpackDAta, pck_no) => {
 
-    console.log("📥 Socket Triggered");
-    console.log("➡️ Barcode:", barcode);
-    console.log("➡️ Pack Battery:", pack_battery);
+    console.log("🟢 ingwholeData:", ingwholeData);
+    console.log("🟢 ingpackDAta:", ingpackDAta);
+    console.log("🟢 Pack QR:", pck_no);
 
-    sql.connect(sqlConfig, function (err) {
-        if (err) {
-            console.log("❌ SQL Connection Error:", err);
-            return;
-        }
+    let tableRows = '';
+    let pendingFound = false;
 
-        const request = new sql.Request();
+    // Convert ingpackDAta → map { processName: actualCount }
+    let packMap = {};
+    for (let j = 0; j < ingpackDAta.length; j += 2) {
+        packMap[ingpackDAta[j]] = parseInt(ingpackDAta[j + 1]);
+    }
 
-        // 1️⃣ Get FinalQRCode
-        const finalQRQuery = `
-            SELECT FinalQRCode 
-            FROM taco_treceability.station_status
-            WHERE PackName='${pack_battery}' 
-            AND ModuleBarcode='${barcode}'
-        `;
+    console.log("🗺️ Pack Map:", packMap);
 
-        console.log("🟡 FinalQRCode Query:", finalQRQuery);
+    // Loop master data
+    for (let i = 0; i < ingwholeData.length; i += 2) {
 
-        request.query(finalQRQuery, function (err, resultQR) {
-            if (err) {
-                console.log("❌ FinalQRCode Query Error:", err);
-                return;
-            }
+        let processName = ingwholeData[i];
+        let expectedCount = parseInt(ingwholeData[i + 1]);
+        let actualCount = packMap[processName] || 0;
 
-            console.log("🟢 FinalQRCode Query Result:", resultQR.recordset);
+        console.log(`🔍 ${processName} → ${actualCount}/${expectedCount}`);
 
-            if (!resultQR.recordset.length) {
-                console.log("⚠️ No FinalQRCode found for given barcode & pack");
-                return;
-            }
+        // Pending condition
+        if (actualCount < expectedCount) {
+            pendingFound = true;
 
-            const pack_no = resultQR.recordset[0].FinalQRCode;
-            console.log("✅ FinalQRCode (pack_no):", pack_no);
-
-            let ingwholeData = [];
-            let ingpackDAta = [];
-
-            // 2️⃣ Global torque master data
-            const query_GLOBALDATA = `
-                SELECT pack_name, Station_name, process_name, 
-                       SUM(total_screw) AS tot_screw_count 
-                FROM taco_treceability.torque_masterEIP 
-                WHERE pack_name='${pack_battery}' 
-                AND Station_name='Bus_bar_rework'
-                GROUP BY process_name, Station_name, pack_name
+            tableRows += `
+                <tr>
+                    <td>${processName}</td>
+                    <td class="status">(${actualCount}/${expectedCount})</td>
+                </tr>
             `;
+        }
+    }
 
-            console.log("🟡 Global Torque Query:", query_GLOBALDATA);
+    // 🚫 INTERLOCK POPUP
+    if (pendingFound) {
 
-            request.query(query_GLOBALDATA, function (err, globalResult) {
-                if (err) {
-                    console.log("❌ Global Torque Query Error:", err);
-                    return;
-                }
+        let pack_no = pck_no.substr(pck_no.length - 6);
 
-                console.log("🟢 Global Torque Result:", globalResult.recordset);
+        Swal.fire({
+            title: `IR Torque Pending of Pack: ${pack_no}!`,
+            html: `
+                <style>
+                    #pendingTable {
+                        width: 100%;
+                        border-collapse: collapse;
+                        font-size: 14px;
+                    }
+                    #pendingTable th, #pendingTable td {
+                        padding: 6px 10px;
+                        border: 1px solid #555;
+                        text-align: left;
+                        vertical-align: top;
+                        line-height: 1.3;
+                    }
+                    #pendingTable th {
+                        background: #e4eaf5;
+                        text-align: center;
+                    }
+                    .status {
+                        white-space: nowrap;
+                        text-align: center;
+                        font-weight: bold;
+                    }
+                </style>
 
-                if (globalResult.recordset.length) {
-                    globalResult.recordset.forEach(row => {
-                        console.log("➡️ Process:", row.process_name, 
-                                    "| Total Screw:", row.tot_screw_count);
+                <span style="font-size:18px;font-weight:bold;">
+                    Pending Process
+                </span>
 
-                        ingwholeData.push(row.process_name);
-                        ingwholeData.push(row.tot_screw_count);
-                    });
-                }
-
-                console.log("📦 ingwholeData:", ingwholeData);
-
-                // 3️⃣ Torque details query
-                const dbQueryPack1 = `
-                    SELECT process_name, COUNT(process_name) AS total_bolts 
-                    FROM taco_treceability.torque_details_EIP 
-                    WHERE pack_name='${pack_battery}' 
-                    AND pack_no='${pack_no}' 
-                    GROUP BY process_name
-                `;
-
-                console.log("🟡 Torque Details Query:", dbQueryPack1);
-
-                new sql.Request().query(dbQueryPack1)
-                    .then(detailResult => {
-
-                        console.log("🟢 Torque Details Result:", detailResult.recordset);
-
-                        detailResult.recordset.forEach(row => {
-                            console.log("➡️ Process:", row.process_name, 
-                                        "| Total Bolts:", row.total_bolts);
-
-                            ingpackDAta.push(row.process_name);
-                            ingpackDAta.push(row.total_bolts);
-                        });
-
-                        console.log("📦 ingpackDAta:", ingpackDAta);
-
-                        // 4️⃣ Emit final data
-                        console.log("📤 Emitting Data to Frontend:");
-                        console.log("➡️ ingwholeData:", ingwholeData);
-                        console.log("➡️ ingpackDAta:", ingpackDAta);
-                        console.log("➡️ pack_no:", pack_no);
-
-                        socket.emit(
-                            "setGlobalIngersollData_bajaj",
-                            ingwholeData,
-                            ingpackDAta,
-                            pack_no
-                        );
-                    })
-                    .catch(err => {
-                        console.log("❌ Torque detail query error:", err);
-
-                        socket.emit(
-                            "setGlobalIngersollData_bajaj",
-                            ingwholeData,
-                            [],
-                            pack_no
-                        );
-                    });
-            });
+                <table id="pendingTable">
+                    <thead>
+                        <tr>
+                            <th>Process Name</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tableRows}
+                    </tbody>
+                </table>
+            `,
+            icon: 'info',
+            width: 750,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            allowEnterKey: false,
+            confirmButtonText: 'OK'
+        }).then(() => {
+            location.reload();
         });
-    });
+
+    } else {
+        // ✅ No pending torque → allow process
+        console.log("✅ All torque processes completed successfully");
+    }
 });
