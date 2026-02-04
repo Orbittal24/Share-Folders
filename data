@@ -1,8 +1,14 @@
 socket.on("get_popup_4_torque_rework", function (barcode, pack_battery) {
-    console.log('barcode, pack_battery', barcode, pack_battery);
+
+    console.log("📥 Socket Triggered");
+    console.log("➡️ Barcode:", barcode);
+    console.log("➡️ Pack Battery:", pack_battery);
 
     sql.connect(sqlConfig, function (err) {
-        if (err) return console.log("SQL Connection Error:", err);
+        if (err) {
+            console.log("❌ SQL Connection Error:", err);
+            return;
+        }
 
         const request = new sql.Request();
 
@@ -14,17 +20,24 @@ socket.on("get_popup_4_torque_rework", function (barcode, pack_battery) {
             AND ModuleBarcode='${barcode}'
         `;
 
+        console.log("🟡 FinalQRCode Query:", finalQRQuery);
+
         request.query(finalQRQuery, function (err, resultQR) {
-            if (err) return console.log("FinalQRCode Query Error:", err);
+            if (err) {
+                console.log("❌ FinalQRCode Query Error:", err);
+                return;
+            }
+
+            console.log("🟢 FinalQRCode Query Result:", resultQR.recordset);
 
             if (!resultQR.recordset.length) {
-                console.log("No FinalQRCode found");
+                console.log("⚠️ No FinalQRCode found for given barcode & pack");
                 return;
             }
 
             const pack_no = resultQR.recordset[0].FinalQRCode;
+            console.log("✅ FinalQRCode (pack_no):", pack_no);
 
-            // Arrays for frontend
             let ingwholeData = [];
             let ingpackDAta = [];
 
@@ -38,17 +51,29 @@ socket.on("get_popup_4_torque_rework", function (barcode, pack_battery) {
                 GROUP BY process_name, Station_name, pack_name
             `;
 
+            console.log("🟡 Global Torque Query:", query_GLOBALDATA);
+
             request.query(query_GLOBALDATA, function (err, globalResult) {
-                if (err) return console.log("Global Query Error:", err);
+                if (err) {
+                    console.log("❌ Global Torque Query Error:", err);
+                    return;
+                }
+
+                console.log("🟢 Global Torque Result:", globalResult.recordset);
 
                 if (globalResult.recordset.length) {
                     globalResult.recordset.forEach(row => {
+                        console.log("➡️ Process:", row.process_name, 
+                                    "| Total Screw:", row.tot_screw_count);
+
                         ingwholeData.push(row.process_name);
                         ingwholeData.push(row.tot_screw_count);
                     });
                 }
 
-                // 3️⃣ Torque details (ONLY ONE QUERY – dbQueryPack2 removed)
+                console.log("📦 ingwholeData:", ingwholeData);
+
+                // 3️⃣ Torque details query
                 const dbQueryPack1 = `
                     SELECT process_name, COUNT(process_name) AS total_bolts 
                     FROM taco_treceability.torque_details_EIP 
@@ -57,14 +82,29 @@ socket.on("get_popup_4_torque_rework", function (barcode, pack_battery) {
                     GROUP BY process_name
                 `;
 
+                console.log("🟡 Torque Details Query:", dbQueryPack1);
+
                 new sql.Request().query(dbQueryPack1)
                     .then(detailResult => {
+
+                        console.log("🟢 Torque Details Result:", detailResult.recordset);
+
                         detailResult.recordset.forEach(row => {
+                            console.log("➡️ Process:", row.process_name, 
+                                        "| Total Bolts:", row.total_bolts);
+
                             ingpackDAta.push(row.process_name);
                             ingpackDAta.push(row.total_bolts);
                         });
 
+                        console.log("📦 ingpackDAta:", ingpackDAta);
+
                         // 4️⃣ Emit final data
+                        console.log("📤 Emitting Data to Frontend:");
+                        console.log("➡️ ingwholeData:", ingwholeData);
+                        console.log("➡️ ingpackDAta:", ingpackDAta);
+                        console.log("➡️ pack_no:", pack_no);
+
                         socket.emit(
                             "setGlobalIngersollData_bajaj",
                             ingwholeData,
@@ -73,7 +113,8 @@ socket.on("get_popup_4_torque_rework", function (barcode, pack_battery) {
                         );
                     })
                     .catch(err => {
-                        console.log("Torque detail query error:", err);
+                        console.log("❌ Torque detail query error:", err);
+
                         socket.emit(
                             "setGlobalIngersollData_bajaj",
                             ingwholeData,
