@@ -1,21 +1,175 @@
- #pendingTable {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 14px;
+socket.on('setGlobalIngersollData_bajaj', (ingwholeData, ingpackDAta, pck_no) => {
+
+    console.log("ingwholeData yogi:", ingwholeData);
+    console.log("ingpackDAta yogi:", ingpackDAta);
+
+    let matches = false;
+    let matcheddata = [];
+    let notmatcheddata = [];
+    let total_screw_count_not_mached = [];
+    let station_array = [];
+    let process_array = [];
+
+    // -----------------------------
+    // MATCHING LOGIC (UNCHANGED)
+    // -----------------------------
+    for (let i = 0; i < ingwholeData.length; i += 2) {
+
+        matches = false;
+
+        for (let j = 0; j < ingpackDAta.length; j += 2) {
+
+            console.log(
+                'crosscheck',
+                ingwholeData[i],
+                ingpackDAta[j],
+                parseInt(ingwholeData[i + 1]),
+                parseInt(ingpackDAta[j + 1])
+            );
+
+            // FULL MATCH OR EXTRA TORQUE
+            if (
+                ingwholeData[i] === ingpackDAta[j] &&
+                (
+                    parseInt(ingwholeData[i + 1]) === parseInt(ingpackDAta[j + 1]) ||
+                    parseInt(ingwholeData[i + 1]) < parseInt(ingpackDAta[j + 1])
+                )
+            ) {
+                matches = true;
+                matcheddata.push(ingpackDAta[j], ingpackDAta[j + 1]);
+            }
+
+            // PARTIAL TORQUE (PENDING)
+            if (
+                ingwholeData[i] === ingpackDAta[j] &&
+                parseInt(ingwholeData[i + 1]) > parseInt(ingpackDAta[j + 1])
+            ) {
+                total_screw_count_not_mached.push(
+                    ingpackDAta[j + 1],   // completed
+                    ingwholeData[i + 1], // expected
+                    ingwholeData[i]      // process
+                );
+            }
+        }
+
+        // PROCESS NOT FOUND AT ALL
+        if (!matches) {
+            notmatcheddata.push(ingwholeData[i], ingwholeData[i + 1]);
+            station_array.push(ingwholeData[i + 1]);
+            process_array.push(ingwholeData[i]);
+        }
     }
-    #pendingTable th,
-    #pendingTable td {
-        padding: 6px 8px;          /* 🔥 reduce row height */
-        border: 1px solid #555;
-        vertical-align: top;       /* 🔥 stop vertical centering */
-        line-height: 1.2;          /* 🔥 compact text */
+
+    // --------------------------------
+    // IF ANY PENDING → SHOW POPUP
+    // --------------------------------
+    if (notmatcheddata.length !== 0) {
+
+        let finalqr = globalBatteryFinalQRCode;
+        let pack_no = finalqr.substr(finalqr.length - 6);
+
+        let unique_process = process_array.filter(
+            (item, i, arr) => arr.indexOf(item) === i
+        );
+
+        let table = ``;
+
+        // PARTIAL COMPLETED
+        if (total_screw_count_not_mached.length !== 0) {
+            for (let k = 0; k < total_screw_count_not_mached.length; k += 3) {
+                table += `
+                    <tr>
+                        <td>${total_screw_count_not_mached[k + 2]}</td>
+                        <td class="status">
+                            (${total_screw_count_not_mached[k]}/${total_screw_count_not_mached[k + 1]})
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        // NOT DONE AT ALL
+        unique_process.forEach(proc => {
+            if (!table.includes(proc)) {
+                table += `
+                    <tr>
+                        <td>${proc}</td>
+                        <td class="status">(0)</td>
+                    </tr>
+                `;
+            }
+        });
+
+        // -----------------------------
+        // BEAUTIFUL POPUP (NO SCROLL)
+        // -----------------------------
+        Swal.fire({
+            title: `IR Torque Pending of Pack: ${pack_no}!`,
+            html: `
+            <style>
+                .swal2-popup {
+                    padding: 15px !important;
+                }
+
+                #pendingTable {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 14px;
+                }
+
+                #pendingTable th,
+                #pendingTable td {
+                    padding: 6px 10px;
+                    border: 1px solid #555;
+                    vertical-align: top;
+                    line-height: 1.3;
+                }
+
+                #pendingTable th {
+                    background-color: #e4eaf5;
+                    text-align: center;
+                }
+
+                .status {
+                    white-space: nowrap;
+                    text-align: center;
+                    font-weight: bold;
+                }
+
+                .pending-title {
+                    font-size: 18px;
+                    font-weight: bold;
+                    margin-bottom: 8px;
+                    display: block;
+                }
+            </style>
+
+            <span class="pending-title">Pending Process</span>
+
+            <table id="pendingTable">
+                <thead>
+                    <tr>
+                        <th>Process Name</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${table}
+                </tbody>
+            </table>
+            `,
+            icon: 'warning',
+            width: 750,
+            confirmButtonText: 'OK',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            allowEnterKey: false,
+            heightAuto: false
+        }).then(() => {
+            location.reload();
+        });
+
+    } else {
+        console.log("✅ No pending torque. Proceeding...");
     }
-    #pendingTable th {
-        background-color: #e4eaf5;
-        text-align: center;
-    }
-    .status {
-        white-space: nowrap;
-        text-align: center;
-        font-weight: bold;
-    }
+});
