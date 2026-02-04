@@ -1,102 +1,21 @@
-socket.on('setGlobalIngersollData_bajaj', (ingwholeData, ingpackDAta, pck_no) => {
-
-    console.log("🟢 ingwholeData:", ingwholeData);
-    console.log("🟢 ingpackDAta:", ingpackDAta);
-    console.log("🟢 Pack QR:", pck_no);
-
-    let tableRows = '';
-    let pendingFound = false;
-
-    // Convert ingpackDAta → map { processName: actualCount }
-    let packMap = {};
-    for (let j = 0; j < ingpackDAta.length; j += 2) {
-        packMap[ingpackDAta[j]] = parseInt(ingpackDAta[j + 1]);
+ #pendingTable {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
     }
-
-    console.log("🗺️ Pack Map:", packMap);
-
-    // Loop master data
-    for (let i = 0; i < ingwholeData.length; i += 2) {
-
-        let processName = ingwholeData[i];
-        let expectedCount = parseInt(ingwholeData[i + 1]);
-        let actualCount = packMap[processName] || 0;
-
-        console.log(`🔍 ${processName} → ${actualCount}/${expectedCount}`);
-
-        // Pending condition
-        if (actualCount < expectedCount) {
-            pendingFound = true;
-
-            tableRows += `
-                <tr>
-                    <td>${processName}</td>
-                    <td class="status">(${actualCount}/${expectedCount})</td>
-                </tr>
-            `;
-        }
+    #pendingTable th,
+    #pendingTable td {
+        padding: 6px 8px;          /* 🔥 reduce row height */
+        border: 1px solid #555;
+        vertical-align: top;       /* 🔥 stop vertical centering */
+        line-height: 1.2;          /* 🔥 compact text */
     }
-
-    // 🚫 INTERLOCK POPUP
-    if (pendingFound) {
-
-        let pack_no = pck_no.substr(pck_no.length - 6);
-
-        Swal.fire({
-            title: `IR Torque Pending of Pack: ${pack_no}!`,
-            html: `
-                <style>
-                    #pendingTable {
-                        width: 100%;
-                        border-collapse: collapse;
-                        font-size: 14px;
-                    }
-                    #pendingTable th, #pendingTable td {
-                        padding: 6px 10px;
-                        border: 1px solid #555;
-                        text-align: left;
-                        vertical-align: top;
-                        line-height: 1.3;
-                    }
-                    #pendingTable th {
-                        background: #e4eaf5;
-                        text-align: center;
-                    }
-                    .status {
-                        white-space: nowrap;
-                        text-align: center;
-                        font-weight: bold;
-                    }
-                </style>
-
-                <span style="font-size:18px;font-weight:bold;">
-                    Pending Process
-                </span>
-
-                <table id="pendingTable">
-                    <thead>
-                        <tr>
-                            <th>Process Name</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${tableRows}
-                    </tbody>
-                </table>
-            `,
-            icon: 'info',
-            width: 750,
-            allowOutsideClick: false,
-            allowEscapeKey: false,
-            allowEnterKey: false,
-            confirmButtonText: 'OK'
-        }).then(() => {
-            location.reload();
-        });
-
-    } else {
-        // ✅ No pending torque → allow process
-        console.log("✅ All torque processes completed successfully");
+    #pendingTable th {
+        background-color: #e4eaf5;
+        text-align: center;
     }
-});
+    .status {
+        white-space: nowrap;
+        text-align: center;
+        font-weight: bold;
+    }
