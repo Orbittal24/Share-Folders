@@ -1,20 +1,87 @@
-DUPLICATE_TTL_SECONDS = 5 * 24 * 60 * 60  # 5 days
-🔧 ONE-LINE CHANGE (this is the only change needed)
-Replace this line:
-python
-Copy code
-r.set(f"cell:{qr}", json.dumps(row_dict))
-With this:
-python
-Copy code
-r.setex(
-    f"cell:{qr}",
-    DUPLICATE_TTL_SECONDS,
-    json.dumps(row_dict)
-)
-Why this works
-SETEX = SET + EXPIRE
+socket.on("get_popup_4_torque_rework", function (barcode, pack_battery) {
+    console.log('barcode, pack_battery', barcode, pack_battery);
 
-Redis will automatically delete cell:{qr} after 5 days
+    sql.connect(sqlConfig, function (err) {
+        if (err) return console.log("SQL Connection Error:", err);
 
-N
+        const request = new sql.Request();
+
+        // 1️⃣ Get FinalQRCode
+        const finalQRQuery = `
+            SELECT FinalQRCode 
+            FROM taco_treceability.station_status
+            WHERE PackName='${pack_battery}' 
+            AND ModuleBarcode='${barcode}'
+        `;
+
+        request.query(finalQRQuery, function (err, resultQR) {
+            if (err) return console.log("FinalQRCode Query Error:", err);
+
+            if (!resultQR.recordset.length) {
+                console.log("No FinalQRCode found");
+                return;
+            }
+
+            const pack_no = resultQR.recordset[0].FinalQRCode;
+
+            // Arrays for frontend
+            let ingwholeData = [];
+            let ingpackDAta = [];
+
+            // 2️⃣ Global torque master data
+            const query_GLOBALDATA = `
+                SELECT pack_name, Station_name, process_name, 
+                       SUM(total_screw) AS tot_screw_count 
+                FROM taco_treceability.torque_masterEIP 
+                WHERE pack_name='${pack_battery}' 
+                AND Station_name='Bus_bar_rework'
+                GROUP BY process_name, Station_name, pack_name
+            `;
+
+            request.query(query_GLOBALDATA, function (err, globalResult) {
+                if (err) return console.log("Global Query Error:", err);
+
+                if (globalResult.recordset.length) {
+                    globalResult.recordset.forEach(row => {
+                        ingwholeData.push(row.process_name);
+                        ingwholeData.push(row.tot_screw_count);
+                    });
+                }
+
+                // 3️⃣ Torque details (ONLY ONE QUERY – dbQueryPack2 removed)
+                const dbQueryPack1 = `
+                    SELECT process_name, COUNT(process_name) AS total_bolts 
+                    FROM taco_treceability.torque_details_EIP 
+                    WHERE pack_name='${pack_battery}' 
+                    AND pack_no='${pack_no}' 
+                    GROUP BY process_name
+                `;
+
+                new sql.Request().query(dbQueryPack1)
+                    .then(detailResult => {
+                        detailResult.recordset.forEach(row => {
+                            ingpackDAta.push(row.process_name);
+                            ingpackDAta.push(row.total_bolts);
+                        });
+
+                        // 4️⃣ Emit final data
+                        socket.emit(
+                            "setGlobalIngersollData_bajaj",
+                            ingwholeData,
+                            ingpackDAta,
+                            pack_no
+                        );
+                    })
+                    .catch(err => {
+                        console.log("Torque detail query error:", err);
+                        socket.emit(
+                            "setGlobalIngersollData_bajaj",
+                            ingwholeData,
+                            [],
+                            pack_no
+                        );
+                    });
+            });
+        });
+    });
+});
