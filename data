@@ -1,4 +1,4 @@
-FRONTEND
+FRONT
 
 <!DOCTYPE html>
 <html lang="en">
@@ -30,7 +30,6 @@ h2 {
 .row {
     display: flex;
     gap: 24px;
-    align-items: flex-start;
     flex-wrap: wrap;
 }
 
@@ -39,26 +38,15 @@ h2 {
     flex-direction: column;
 }
 
-.group.station {
-    flex: 3;
-    min-width: 250px;
-}
-
-.group.line {
-    flex: 1;
-    max-width: 120px;
-}
-
-.group.barcode {
-    flex: 2;
-    min-width: 220px;
-}
+.group.station { flex: 3; min-width: 250px; }
+.group.line { flex: 1; max-width: 120px; }
+.group.barcode { flex: 2; min-width: 220px; }
 
 label {
     font-size: 14px;
     margin-bottom: 6px;
-    color: #444;
     font-weight: bold;
+    color: #444;
 }
 
 input, select {
@@ -82,20 +70,18 @@ input, select {
 }
 
 button {
-    height: 45px;
     width: 160px;
+    height: 45px;
     font-size: 16px;
     font-weight: bold;
     background: #28a745;
     border: none;
-    color: white;
     border-radius: 6px;
+    color: #fff;
     cursor: pointer;
 }
 
-button:hover {
-    background: #218838;
-}
+button:hover { background: #218838; }
 
 /* ===== POPUP ===== */
 .popup-overlay {
@@ -111,13 +97,13 @@ button:hover {
     background: #fff;
     padding: 25px 30px;
     border-radius: 8px;
-    text-align: center;
     min-width: 320px;
+    text-align: center;
 }
 
 .popup h3 {
-    margin-bottom: 15px;
     color: #2e7d32;
+    margin-bottom: 15px;
 }
 
 .popup input {
@@ -135,7 +121,6 @@ button:hover {
     <h2>Station Status OK</h2>
 
     <div class="row">
-
         <div class="group station">
             <label>Station Name</label>
             <input list="stations" id="stationName" placeholder="Search Station">
@@ -156,7 +141,6 @@ button:hover {
                    autocapitalize="off" spellcheck="false"
                    inputmode="none" autofocus>
         </div>
-
     </div>
 
     <div class="button-row">
@@ -164,7 +148,7 @@ button:hover {
     </div>
 </div>
 
-<!-- ===== PASSWORD POPUP ===== -->
+<!-- PASSWORD POPUP -->
 <div class="popup-overlay" id="popup">
     <div class="popup">
         <h3 id="popupMessage">Enter Password</h3>
@@ -177,7 +161,7 @@ button:hover {
 let stationMap = {};
 let pendingPayload = null;
 
-/* ===== LOAD STATIONS ===== */
+/* LOAD STATIONS */
 fetch('/api/stations')
     .then(res => res.json())
     .then(data => {
@@ -190,7 +174,6 @@ fetch('/api/stations')
         });
     });
 
-/* ===== SUBMIT CLICK ===== */
 function submitData() {
     const stationName = document.getElementById('stationName').value.trim();
     const stationId = stationMap[stationName];
@@ -206,7 +189,6 @@ function submitData() {
     showPopup("Enter Password");
 }
 
-/* ===== PASSWORD CONFIRM ===== */
 function confirmPassword() {
     const password = document.getElementById("passwordInput").value;
 
@@ -215,14 +197,12 @@ function confirmPassword() {
         return;
     }
 
-    const username = "STATION_USER";
-
     fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             ...pendingPayload,
-            username
+            username: "Abhishek"
         })
     })
     .then(res => res.json())
@@ -231,19 +211,19 @@ function confirmPassword() {
     });
 }
 
-/* ===== POPUP ===== */
 function showPopup(msg) {
     document.getElementById('popupMessage').innerText = msg;
     document.getElementById('passwordInput').value = "";
     document.getElementById('popup').style.display = "flex";
 }
-
 </script>
 
 </body>
 </html>
 
-BACKEND
+
+BACK
+
 /******************** MODULES ********************/
 const express = require("express");
 const app = express();
@@ -304,52 +284,60 @@ app.get("/api/stations", async (req, res) => {
 
 /******************** BARCODE SCAN ********************/
 app.post("/api/scan", async (req, res) => {
-    const { stationId, line, barcode, username } = req.body;
+    try {
+        const { stationId, line, barcode, username } = req.body;
 
-    if (!stationId || !barcode || !username) {
-        return res.status(400).json({ message: "Missing data" });
-    }
-
-    console.log("SCAN RECEIVED");
-    console.log("Station ID:", stationId);
-    console.log("Line:", line);
-    console.log("Barcode:", barcode);
-    console.log("Username:", username);
-
-    /* ===== INSERT LOG ===== */
-    await dbConn2.request()
-        .input("station_id", sql.VarChar, stationId)
-        .input("barcode_string", sql.VarChar, barcode)
-        .input("username", sql.VarChar, username)
-        .query(`
-            INSERT INTO taco_treceability.dbo.station_status_ok_universal
-            (station_id, barcode_string, username)
-            VALUES (@station_id, @barcode_string, @username)
-        `);
-
-    /* ===== EXTERNAL API ===== */
-    const apiPayload = {
-        station_id: stationId,
-        line_id: line,
-        customer_qrcode: barcode,
-        station_status: "OK",
-        checklist_name: "NA",
-        substation_id: "NA"
-    };
-
-    const apiResponse = await axios.post(
-        "https://mismainapp.tataautocomp.com:3241/station_status/filter",
-        apiPayload,
-        {
-            httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-            timeout: 10000
+        if (!stationId || !barcode || !username) {
+            return res.status(400).json({ message: "Missing required data" });
         }
-    );
 
-    res.json({
-        message: "Success",
-        externalApiResponse: apiResponse.data
-    });
+        console.log("SCAN RECEIVED");
+        console.log("Station ID:", stationId);
+        console.log("Line:", line);
+        console.log("Barcode:", barcode);
+        console.log("Username:", username);
+
+        const stationIdStr = String(stationId).trim();
+
+        /* INSERT LOG */
+        await dbConn2.request()
+            .input("station_id", sql.VarChar, stationIdStr)
+            .input("barcode_string", sql.VarChar, barcode)
+            .input("username", sql.VarChar, username)
+            .query(`
+                INSERT INTO taco_treceability.dbo.station_status_ok_universal
+                (station_id, barcode_string, username)
+                VALUES (@station_id, @barcode_string, @username)
+            `);
+
+        /* EXTERNAL API */
+        const apiPayload = {
+            station_id: stationIdStr,
+            line_id: line,
+            customer_qrcode: barcode,
+            station_status: "OK",
+            checklist_name: "NA",
+            substation_id: "NA"
+        };
+
+        const apiResponse = await axios.post(
+            "https://mismainapp.tataautocomp.com:3241/station_status/filter",
+            apiPayload,
+            {
+                httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+                timeout: 10000
+            }
+        );
+
+        res.json({
+            message: "Success",
+            externalApiResponse: apiResponse.data
+        });
+
+    } catch (err) {
+        console.error("Scan error:", err);
+        res.status(500).json({ message: "Scan failed" });
+    }
 });
 
 /******************** SOCKET ********************/
