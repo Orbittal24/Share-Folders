@@ -1,5 +1,3 @@
-FRONT
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -206,8 +204,21 @@ function confirmPassword() {
         })
     })
     .then(res => res.json())
-    .then(() => {
-        showPopup("Station status updated");
+    .then(resp => {
+        const apiMsg =
+            resp.externalApiResponse?.message ||
+            resp.externalApiResponse?.msg ||
+            resp.message;
+
+        if (apiMsg === "Station created/updated successfully.") {
+            showPopup("Station status updated");
+        } else {
+            showPopup(apiMsg || "Unknown response");
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        showPopup("Server error. Please try again.");
     });
 }
 
@@ -220,127 +231,3 @@ function showPopup(msg) {
 
 </body>
 </html>
-
-
-BACK
-
-/******************** MODULES ********************/
-const express = require("express");
-const app = express();
-const http = require("http").Server(app);
-const io = require("socket.io")(http);
-const path = require("path");
-const sql = require("mssql");
-const axios = require("axios");
-const https = require("https");
-
-/******************** MIDDLEWARE ********************/
-app.use(express.static(__dirname));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-/******************** DB CONFIG ********************/
-const sqlConfig = {
-    user: "user_mis",
-    password: "admin",
-    database: "taco_treceability_master",
-    server: "10.9.4.28\\MSSQLSERVER",
-    options: { encrypt: true, trustServerCertificate: true }
-};
-
-const sqlConfig2 = {
-    user: "user_mis",
-    password: "admin",
-    database: "taco_treceability",
-    server: "10.9.4.28\\MSSQLSERVER",
-    options: { encrypt: true, trustServerCertificate: true }
-};
-
-const dbConn = new sql.ConnectionPool(sqlConfig);
-const dbConn2 = new sql.ConnectionPool(sqlConfig2);
-
-dbConn.connect();
-dbConn2.connect();
-
-/******************** SERVER ********************/
-http.listen(5400, "0.0.0.0", () => {
-    console.log("Server running on port 5400");
-});
-
-/******************** UI ROUTE ********************/
-app.get("/station_status", (req, res) => {
-    res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
-});
-
-/******************** LOAD STATIONS ********************/
-app.get("/api/stations", async (req, res) => {
-    const result = await dbConn.request().query(`
-        SELECT Station_ID, Station_Name
-        FROM taco_treceability.master_station
-        ORDER BY Station_Name
-    `);
-    res.json(result.recordset);
-});
-
-/******************** BARCODE SCAN ********************/
-app.post("/api/scan", async (req, res) => {
-    try {
-        const { stationId, line, barcode, username } = req.body;
-
-        if (!stationId || !barcode || !username) {
-            return res.status(400).json({ message: "Missing required data" });
-        }
-
-        console.log("SCAN RECEIVED");
-        console.log("Station ID:", stationId);
-        console.log("Line:", line);
-        console.log("Barcode:", barcode);
-        console.log("Username:", username);
-
-        const stationIdStr = String(stationId).trim();
-
-        /* INSERT LOG */
-        await dbConn2.request()
-            .input("station_id", sql.VarChar, stationIdStr)
-            .input("barcode_string", sql.VarChar, barcode)
-            .input("username", sql.VarChar, username)
-            .query(`
-                INSERT INTO taco_treceability.dbo.station_status_ok_universal
-                (station_id, barcode_string, username)
-                VALUES (@station_id, @barcode_string, @username)
-            `);
-
-        /* EXTERNAL API */
-        const apiPayload = {
-            station_id: stationIdStr,
-            line_id: line,
-            customer_qrcode: barcode,
-            station_status: "OK",
-            checklist_name: "NA",
-            substation_id: "NA"
-        };
-
-        const apiResponse = await axios.post(
-            "https://mismainapp.tataautocomp.com:3241/station_status/filter",
-            apiPayload,
-            {
-                httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-                timeout: 10000
-            }
-        );
-
-        res.json({
-            message: "Success",
-            externalApiResponse: apiResponse.data
-        });
-
-    } catch (err) {
-        console.error("Scan error:", err);
-        res.status(500).json({ message: "Scan failed" });
-    }
-});
-
-/******************** SOCKET ********************/
-io.on("connection", () => {
-    console.log("Client connected");
-});
