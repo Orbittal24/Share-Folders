@@ -1,233 +1,41 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Station Status</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+socket.on('insert_mis_rejection_data', async (glob_final_qr) => {
+    try {
+        await sql.connect(sqlConfig);
 
-<style>
-body {
-    background: #f4f6f9;
-    font-family: Arial, sans-serif;
-}
+        const request = new sql.Request();
 
-.card {
-    background: #fff;
-    max-width: 1000px;
-    margin: 40px auto;
-    padding: 30px;
-    border-radius: 10px;
-    box-shadow: 0 6px 18px rgba(0,0,0,.15);
-}
+        // 1️⃣ Check if record exists
+        const checkResult = await request
+            .input('final_qrcode', sql.VarChar, glob_final_qr)
+            .input('station', sql.VarChar, 'alt_station')
+            .input('rework_remark', sql.VarChar, 'HV not ok')
+            .query(`
+                SELECT 1
+                FROM taco_treceability.mis_rejection_data
+                WHERE final_qrcode = @final_qrcode
+                  AND station = @station
+                  AND rework_remark = @rework_remark
+            `);
 
-h2 {
-    color: #2e7d32;
-    margin-bottom: 25px;
-}
-
-.row {
-    display: flex;
-    gap: 24px;
-    flex-wrap: wrap;
-}
-
-.group {
-    display: flex;
-    flex-direction: column;
-}
-
-.group.station { flex: 3; min-width: 250px; }
-.group.line { flex: 1; max-width: 120px; }
-.group.barcode { flex: 2; min-width: 220px; }
-
-label {
-    font-size: 14px;
-    margin-bottom: 6px;
-    font-weight: bold;
-    color: #444;
-}
-
-input, select {
-    width: 100%;
-    height: 45px;
-    font-size: 16px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-}
-
-#barcode {
-    font-size: 18px;
-    letter-spacing: 1px;
-}
-
-.button-row {
-    display: flex;
-    justify-content: center;
-    margin-top: 30px;
-}
-
-button {
-    width: 160px;
-    height: 45px;
-    font-size: 16px;
-    font-weight: bold;
-    background: #28a745;
-    border: none;
-    border-radius: 6px;
-    color: #fff;
-    cursor: pointer;
-}
-
-button:hover { background: #218838; }
-
-/* ===== POPUP ===== */
-.popup-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.4);
-    justify-content: center;
-    align-items: center;
-}
-
-.popup {
-    background: #fff;
-    padding: 25px 30px;
-    border-radius: 8px;
-    min-width: 320px;
-    text-align: center;
-}
-
-.popup h3 {
-    color: #2e7d32;
-    margin-bottom: 15px;
-}
-
-.popup input {
-    width: 100%;
-    height: 40px;
-    margin-bottom: 15px;
-    font-size: 16px;
-}
-</style>
-</head>
-
-<body>
-
-<div class="card">
-    <h2>Station Status OK</h2>
-
-    <div class="row">
-        <div class="group station">
-            <label>Station Name</label>
-            <input list="stations" id="stationName" placeholder="Search Station">
-            <datalist id="stations"></datalist>
-        </div>
-
-        <div class="group line">
-            <label>Line</label>
-            <select id="line">
-                <option value="1">1</option>
-            </select>
-        </div>
-
-        <div class="group barcode">
-            <label>Barcode</label>
-            <input type="text" id="barcode" placeholder="Scan Barcode"
-                   autocomplete="off" autocorrect="off"
-                   autocapitalize="off" spellcheck="false"
-                   inputmode="none" autofocus>
-        </div>
-    </div>
-
-    <div class="button-row">
-        <button onclick="submitData()">Submit</button>
-    </div>
-</div>
-
-<!-- PASSWORD POPUP -->
-<div class="popup-overlay" id="popup">
-    <div class="popup">
-        <h3 id="popupMessage">Enter Password</h3>
-        <input type="password" id="passwordInput" placeholder="Enter Password">
-        <button onclick="confirmPassword()">OK</button>
-    </div>
-</div>
-
-<script>
-let stationMap = {};
-let pendingPayload = null;
-
-/* LOAD STATIONS */
-fetch('/api/stations')
-    .then(res => res.json())
-    .then(data => {
-        const list = document.getElementById('stations');
-        data.forEach(r => {
-            stationMap[r.Station_Name] = r.Station_ID;
-            const opt = document.createElement('option');
-            opt.value = r.Station_Name;
-            list.appendChild(opt);
-        });
-    });
-
-function submitData() {
-    const stationName = document.getElementById('stationName').value.trim();
-    const stationId = stationMap[stationName];
-    const line = document.getElementById('line').value;
-    const barcode = document.getElementById('barcode').value.trim();
-
-    if (!stationId || !barcode) {
-        showPopup("Select valid station and scan barcode");
-        return;
-    }
-
-    pendingPayload = { stationId, line, barcode };
-    showPopup("Enter Password");
-}
-
-function confirmPassword() {
-    const password = document.getElementById("passwordInput").value;
-
-    if (password !== "123") {
-        showPopup("Invalid Password");
-        return;
-    }
-
-    fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            ...pendingPayload,
-            username: "Abhishek"
-        })
-    })
-    .then(res => res.json())
-    .then(resp => {
-        const apiMsg =
-            resp.externalApiResponse?.message ||
-            resp.externalApiResponse?.msg ||
-            resp.message;
-
-        if (apiMsg === "Station created/updated successfully.") {
-            showPopup("Station status updated");
-        } else {
-            showPopup(apiMsg || "Unknown response");
+        // 2️⃣ If record exists → do nothing
+        if (checkResult.recordset.length > 0) {
+            console.log('Record already exists, no insert needed');
+            return;
         }
-    })
-    .catch(err => {
-        console.error(err);
-        showPopup("Server error. Please try again.");
-    });
-}
 
-function showPopup(msg) {
-    document.getElementById('popupMessage').innerText = msg;
-    document.getElementById('passwordInput').value = "";
-    document.getElementById('popup').style.display = "flex";
-}
-</script>
+        // 3️⃣ If not exists → insert
+        await request
+            .input('battery_pack_name', sql.VarChar, packname)
+            .query(`
+                INSERT INTO taco_treceability.mis_rejection_data
+                (battery_pack_name, rework_status, final_qrcode, station, rework_remark)
+                VALUES
+                (@battery_pack_name, 'rejected', @final_qrcode, 'alt_station', 'HV not ok')
+            `);
 
-</body>
-</html>
+        console.log('New rejection record inserted');
+
+    } catch (err) {
+        console.error('Error in insert_mis_rejection_data socket:', err);
+    }
+});
