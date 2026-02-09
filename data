@@ -1,41 +1,54 @@
-socket.on('insert_mis_rejection_data', async (glob_final_qr) => {
-    try {
-        await sql.connect(sqlConfig);
+socket.on('insert_mis_rejection_data', (glob_final_qr, packk) => {
 
-        const request = new sql.Request();
-
-        // 1️⃣ Check if record exists
-        const checkResult = await request
-            .input('final_qrcode', sql.VarChar, glob_final_qr)
-            .input('station', sql.VarChar, 'alt_station')
-            .input('rework_remark', sql.VarChar, 'HV not ok')
-            .query(`
-                SELECT 1
-                FROM taco_treceability.mis_rejection_data
-                WHERE final_qrcode = @final_qrcode
-                  AND station = @station
-                  AND rework_remark = @rework_remark
-            `);
-
-        // 2️⃣ If record exists → do nothing
-        if (checkResult.recordset.length > 0) {
-            console.log('Record already exists, no insert needed');
+    sql.connect(sqlConfig, function (err) {
+        if (err) {
+            console.log("DB connection error:", err);
             return;
         }
 
-        // 3️⃣ If not exists → insert
-        await request
-            .input('battery_pack_name', sql.VarChar, packname)
-            .query(`
+        const request = new sql.Request();
+
+        // Step 1: Check if record exists
+        const checkQuery = `
+            SELECT 1 
+            FROM taco_treceability.mis_rejection_data
+            WHERE final_qrcode = @final_qrcode
+              AND station = 'alt_station'
+              AND rework_remark = 'HV not ok'
+        `;
+
+        request.input('final_qrcode', sql.VarChar, glob_final_qr);
+
+        request.query(checkQuery, function (err, result) {
+            if (err) {
+                console.log("Check query error:", err);
+                return;
+            }
+
+            // If record exists → do nothing
+            if (result.recordset.length > 0) {
+                console.log("Record already exists. No insert needed.");
+                return;
+            }
+
+            // Step 2: Insert if not exists
+            const insertRequest = new sql.Request();
+            const insertQuery = `
                 INSERT INTO taco_treceability.mis_rejection_data
                 (battery_pack_name, rework_status, final_qrcode, station, rework_remark)
-                VALUES
-                (@battery_pack_name, 'rejected', @final_qrcode, 'alt_station', 'HV not ok')
-            `);
+                VALUES (@packk, 'rejected', @final_qrcode, 'alt_station', 'HV not ok')
+            `;
 
-        console.log('New rejection record inserted');
-
-    } catch (err) {
-        console.error('Error in insert_mis_rejection_data socket:', err);
-    }
+            insertRequest
+                .input('packk', sql.VarChar, packk)
+                .input('final_qrcode', sql.VarChar, glob_final_qr)
+                .query(insertQuery, function (err) {
+                    if (err) {
+                        console.log("Insert query error:", err);
+                    } else {
+                        console.log("Record inserted successfully.");
+                    }
+                });
+        });
+    });
 });
