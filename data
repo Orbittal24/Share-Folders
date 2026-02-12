@@ -1,43 +1,140 @@
-Swal.fire({
-    title: `IR Torque Pending of Pack: ${pack_no}!`,
-    html: `
-        <span style='font-size:20px;'>Pending Process:</span>
-        <table id="table" border="1" style="width:100%; border-collapse:collapse; margin-top:10px;">
-            <thead>
-                <tr style='background-color:#e4eaf5;'>
-                    <th colspan='4'>Incomplete Process</th>
-                </tr>
-                <tr>
-                    <th>Station Name</th>
-                    <th>Process Name</th>
-                    <th>Status</th>
-                    <th>Module No.</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${incompleteData}
-            </tbody>
-        </table>
-    `,
-    icon: 'info',
-    width: 800,
-    showCancelButton: false,
-    confirmButtonText: 'OK',
-
-    allowOutsideClick: false,
-    allowEscapeKey: false,
-    allowEnterKey: false,
-    stopKeydownPropagation: true,
-    focusConfirm: false,
-
-    didOpen: () => {
-        const popup = Swal.getPopup();
-        popup.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                return false;
-            }
-        });
+// 🔐 Global Enter key blocker
+function blockEnterKey(e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return false;
     }
+}
+
+socket.on('setGlobalIngersollData_sm', (ingwholeData, ingpackDAta, pck_no) => {
+
+    console.log("ingwholeData yogi:", ingwholeData);
+    console.log("ingpackDAta yogi:", ingpackDAta);
+
+    var matches = false;
+    var matcheddata = [], notmatcheddata = [], total_screw_count_not_mached = [];
+    var station_array = [], process_array = [];
+
+    for (var i = 0; i < ingwholeData.length; i = i + 2) {
+
+        matches = false;
+
+        for (var j = 0; j < ingpackDAta.length; j = j + 2) {
+
+            console.log('crosscheck',
+                ingwholeData[i],
+                ingpackDAta[j],
+                parseInt(ingwholeData[i + 1]),
+                parseInt(ingpackDAta[j + 1])
+            );
+
+            // ✅ Matched or Over Completed
+            if ((ingwholeData[i] === ingpackDAta[j]) &&
+                ((parseInt(ingwholeData[i + 1]) == parseInt(ingpackDAta[j + 1])) ||
+                    (parseInt(ingwholeData[i + 1]) < parseInt(ingpackDAta[j + 1])))) {
+
+                matches = true;
+                matcheddata.push(ingpackDAta[j]);
+                matcheddata.push(ingpackDAta[j + 1]);
+            }
+
+            // ❌ Incomplete
+            if ((ingwholeData[i] === ingpackDAta[j]) &&
+                (parseInt(ingwholeData[i + 1]) > parseInt(ingpackDAta[j + 1]))) {
+
+                total_screw_count_not_mached.push(ingpackDAta[j + 1]); // completed
+                total_screw_count_not_mached.push(ingwholeData[i + 1]); // required
+                total_screw_count_not_mached.push(ingwholeData[i]);     // process
+            }
+        }
+
+        if (!matches) {
+            notmatcheddata.push(ingwholeData[i]);
+            notmatcheddata.push(ingwholeData[i + 1]);
+            station_array.push(ingwholeData[i + 1]);
+            process_array.push(ingwholeData[i]);
+        }
+    }
+
+    // 🔎 If Pending Exists
+    if (parseInt(notmatcheddata.length) != 0) {
+
+        var finalqr = globalBatteryFinalQRCode;
+        var pack_no = finalqr.substr(finalqr.length - 6);
+
+        var unique_process = process_array.filter((item, i, ar) => ar.indexOf(item) === i);
+
+        var table = ``;
+        var incompleteData = '';
+
+        if (total_screw_count_not_mached.length != 0) {
+
+            for (var k = 0; k < total_screw_count_not_mached.length; k = k + 3) {
+                table += `
+                    <tr>
+                        <td>${total_screw_count_not_mached[k + 2]}</td>
+                        <td>( ${total_screw_count_not_mached[k]} / ${total_screw_count_not_mached[k + 1]} )</td>
+                    </tr>`;
+            }
+
+        } else {
+            table += `<tr><td colspan="2">No Data</td></tr>`;
+        }
+
+        incompleteData = table;
+
+        Swal.fire({
+            title: `IR Torque Pending of Pack: ${pack_no}!`,
+            html: `
+                <span style='font-size:20px;'>Pending Process: </span>
+                <table border="1" width="100%" style="border-collapse:collapse;">
+                    <thead>
+                        <tr style='background-color:#e4eaf5;'>
+                            <th colspan='2'>Incomplete Process</th>
+                        </tr>
+                        <tr>
+                            <th>Process Name</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${incompleteData}
+                    </tbody>
+                </table>
+            `,
+            icon: 'info',
+            width: 800,
+            confirmButtonText: "OK",
+            showCancelButton: false,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            allowEnterKey: false,
+
+            // 🔐 Block Enter while Swal open
+            didOpen: () => {
+                document.addEventListener("keydown", blockEnterKey, true);
+            },
+
+            // 🔓 Remove block when closed
+            willClose: () => {
+                document.removeEventListener("keydown", blockEnterKey, true);
+            }
+
+        }).then((result) => {
+
+            if (result.isConfirmed) {
+                location.reload();
+            }
+
+        });
+
+    }
+    else {
+
+        // ✅ No pending → continue process
+        socket.emit("getFinalQRCodeStatus", globalBatteryFinalQRCode);
+
+    }
+
 });
