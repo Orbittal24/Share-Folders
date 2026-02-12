@@ -1,27 +1,43 @@
-SELECT FinalQRCode
-FROM taco_treceability.station_status
-WHERE FinalQRCodePrint_status = 'OK'
-  AND FinalQRCode IN (
-    'DJ1927-H280039258',
-    'DJ2030-H1S050669',
-    'DJ2048-H280000132',
-    'DJ1916-G280004188',
-    'DJ1927-H270039114',
-    'DJ1927-H220038680',
-    'DJ2048-H2A0000183',
-    'DJ1916-G280004181',
-    'DJ1916-G280004186',
-    'DJ1927-H270039138',
-    'DJ1927-H250038894',
-    'DJ1916-G270004178',
-    'DJ2048-H280000131',
-    'DJ2030-H1S050670',
-    'DJ2030-H1V050684',
-    'DJ2048-H280000130',
-    'DJ1916-G280004184',
-    'DJ2048-H280000127',
-    'DJ2048-H280000133',
-    'DJ1916-G280004187',
-    'DJ1916-G280004182',
-    'DJ1916-G280004185'
-  );
+Swal.fire({
+    title: `IR Torque Pending of Pack: ${pack_no}!`,
+    html: `
+        <span style='font-size:20px;'>Pending Process:</span>
+        <table id="table" border="1" style="width:100%; border-collapse:collapse; margin-top:10px;">
+            <thead>
+                <tr style='background-color:#e4eaf5;'>
+                    <th colspan='4'>Incomplete Process</th>
+                </tr>
+                <tr>
+                    <th>Station Name</th>
+                    <th>Process Name</th>
+                    <th>Status</th>
+                    <th>Module No.</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${incompleteData}
+            </tbody>
+        </table>
+    `,
+    icon: 'info',
+    width: 800,
+    showCancelButton: false,
+    confirmButtonText: 'OK',
+
+    allowOutsideClick: false,
+    allowEscapeKey: false,
+    allowEnterKey: false,
+    stopKeydownPropagation: true,
+    focusConfirm: false,
+
+    didOpen: () => {
+        const popup = Swal.getPopup();
+        popup.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return false;
+            }
+        });
+    }
+});
