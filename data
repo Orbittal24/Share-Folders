@@ -69,7 +69,7 @@ app.get("/station_status", (req, res) => {
     res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
 });
 
-/******************** API: LOAD STATIONS (MASTER DB) ********************/
+/******************** API: LOAD STATIONS ********************/
 app.get("/api/stations", async (req, res) => {
     try {
         const result = await dbConn.request().query(`
@@ -93,13 +93,14 @@ app.post("/api/scan", async (req, res) => {
             return res.status(400).json({ message: "Station, barcode & username required" });
         }
 
-        console.log("SCAN RECEIVED");
+        console.log("\n=========== SCAN RECEIVED ===========");
         console.log("Station ID:", stationId);
         console.log("Line:", line);
         console.log("Barcode:", barcode);
         console.log("Username:", username);
+        console.log("=====================================");
 
-        /* ================= INSERT LOG (SECOND DB) ================= */
+        /**************** INSERT LOG INTO SECOND DATABASE ****************/
         try {
             await dbConn2.request()
                 .input("station_id", sql.VarChar(sql.MAX), String(stationId))
@@ -111,14 +112,14 @@ app.post("/api/scan", async (req, res) => {
                     VALUES (@station_id, @barcode_string, @username)
                 `);
 
-            console.log("Log inserted successfully");
+            console.log("Log inserted successfully into taco_treceability");
 
         } catch (logErr) {
             console.error("Log Insert Error:", logErr);
             return res.status(500).json({ message: "Log insert failed" });
         }
 
-        /* ================= EXISTING API CALL ================= */
+        /**************** CALL EXTERNAL API ****************/
         const apiPayload = {
             station_id: stationId,
             line_id: line,
@@ -129,6 +130,10 @@ app.post("/api/scan", async (req, res) => {
         };
 
         try {
+
+            console.log("\nSending Payload To External API:");
+            console.log(apiPayload);
+
             const apiResponse = await axios.post(
                 "https://mismainapp.tataautocomp.com:3241/station_status/filter",
                 apiPayload,
@@ -140,6 +145,13 @@ app.post("/api/scan", async (req, res) => {
                 }
             );
 
+            console.log("\n=========== EXTERNAL API RESPONSE ===========");
+            console.log("Status Code:", apiResponse.status);
+            console.log("Status Text:", apiResponse.statusText);
+            console.log("Headers:", apiResponse.headers);
+            console.log("Response Data:", apiResponse.data);
+            console.log("=============================================\n");
+
             return res.json({
                 message: "Barcode processed successfully",
                 externalApiStatus: apiResponse.status,
@@ -147,7 +159,19 @@ app.post("/api/scan", async (req, res) => {
             });
 
         } catch (apiErr) {
-            console.error("External API ERROR:", apiErr.response?.data || apiErr.message);
+
+            console.log("\n=========== EXTERNAL API ERROR ===========");
+
+            if (apiErr.response) {
+                console.log("Error Status:", apiErr.response.status);
+                console.log("Error Headers:", apiErr.response.headers);
+                console.log("Error Data:", apiErr.response.data);
+            } else {
+                console.log("Error Message:", apiErr.message);
+            }
+
+            console.log("==========================================\n");
+
             return res.status(500).json({
                 message: "External API failed",
                 error: apiErr.response?.data || apiErr.message
@@ -163,6 +187,7 @@ app.post("/api/scan", async (req, res) => {
 /******************** SOCKET.IO ********************/
 io.on("connection", (socket) => {
     console.log("Client connected");
+
     socket.on("disconnect", () => {
         console.log("Client disconnected");
     });
