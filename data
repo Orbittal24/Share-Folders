@@ -1,146 +1,187 @@
-/******************** MODULES ********************/
-const express = require("express");
-const app = express();
-const http = require("http").Server(app);
-const io = require("socket.io")(http);
-const path = require("path");
-const sql = require("mssql");
-const axios = require("axios");
-const https = require("https");
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Station Status</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
-/******************** MIDDLEWARE ********************/
-app.use(express.static(__dirname));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+<style>
+body { background:#f4f6f9; font-family:Arial; }
+.card {
+    background:#fff; max-width:1000px; margin:40px auto;
+    padding:30px; border-radius:10px;
+    box-shadow:0 6px 18px rgba(0,0,0,.15);
+}
+h2 { color:#2e7d32; margin-bottom:25px; }
+.row { display:flex; gap:24px; flex-wrap:wrap; }
+.group { display:flex; flex-direction:column; }
+.group.station { flex:3; min-width:250px; }
+.group.line { flex:1; max-width:120px; }
+.group.barcode { flex:2; min-width:220px; }
+label { font-size:14px; margin-bottom:6px; font-weight:bold; }
+input, select {
+    width:100%; height:45px; font-size:16px;
+    padding:6px 10px; border-radius:6px;
+    border:1px solid #ccc;
+}
+#barcode { font-size:18px; letter-spacing:1px; }
+.button-row { text-align:center; margin-top:30px; }
+button {
+    height:45px; width:160px; font-size:16px;
+    font-weight:bold; background:#28a745;
+    border:none; color:white;
+    border-radius:6px; cursor:pointer;
+}
+button:hover { background:#218838; }
+.popup-overlay {
+    display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,.4);
+    justify-content:center; align-items:center;
+}
+.popup {
+    background:#fff; padding:25px 30px;
+    border-radius:8px; text-align:center;
+    min-width:300px;
+}
+</style>
+</head>
 
-/******************** DB CONFIG ********************/
-const sqlConfig = {
-    user: "user_mis",
-    password: "admin",
-    database: "taco_treceability_master",
-    server: "localhost\\MSSQLSERVER",
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000
-    },
-    options: {
-        encrypt: true,
-        trustServerCertificate: true
-    }
-};
+<body>
 
-/******************** DB CONNECTION ********************/
-const dbConn = new sql.ConnectionPool(sqlConfig);
-dbConn.connect()
-    .then(() => console.log("Connected to taco_treceability_master"))
-    .catch(err => console.error("DB Connection Error:", err));
+<div class="card">
+    <h2>Station Status OK</h2>
 
-/******************** SERVER ********************/
-http.listen(5400, "0.0.0.0", () => {
-    console.log("Server running on port 5400");
-});
+    <div class="row">
+        <div class="group station">
+            <label>Station Name</label>
+            <input list="stations" id="stationName" placeholder="Search Station">
+            <datalist id="stations"></datalist>
+        </div>
 
-/******************** UI ROUTE ********************/
-app.get("/station_status", (req, res) => {
-    res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
-});
+        <div class="group line">
+            <label>Line</label>
+            <select id="line">
+                <option value="1">1</option>
+            </select>
+        </div>
 
-/******************** API: LOAD STATIONS ********************/
-app.get("/api/stations", async (req, res) => {
-    try {
-        const result = await dbConn.request().query(`
-            SELECT Station_ID, Station_Name
-            FROM taco_treceability.master_station
-            ORDER BY Station_Name
-        `);
-        res.json(result.recordset);
-    } catch (err) {
-        console.error("Station fetch error:", err);
-        res.status(500).json({ error: "Failed to load stations" });
-    }
-});
+        <div class="group barcode">
+            <label>Barcode</label>
+            <input type="text" id="barcode"
+                placeholder="Scan Barcode"
+                autocomplete="off"
+                inputmode="none"
+                autofocus>
+        </div>
+    </div>
 
-/******************** API: BARCODE SCAN ********************/
-app.post("/api/scan", async (req, res) => {
-    try {
-        const { stationId, line, barcode, username } = req.body;
+    <div class="button-row">
+        <button onclick="submitData()">Submit</button>
+    </div>
+</div>
 
-        if (!stationId || !barcode || !username) {
-            return res.status(400).json({ message: "Station, barcode & username required" });
-        }
+<!-- PASSWORD POPUP -->
+<div class="popup-overlay" id="passwordPopup">
+    <div class="popup">
+        <h3>Enter Password</h3>
+        <input type="password" id="passwordInput" placeholder="Enter Password">
+        <br><br>
+        <button onclick="verifyPassword()">OK</button>
+    </div>
+</div>
 
-        console.log("SCAN RECEIVED");
-        console.log("Station ID:", stationId);
-        console.log("Line:", line);
-        console.log("Barcode:", barcode);
-        console.log("Username:", username);
+<!-- RESULT POPUP -->
+<div class="popup-overlay" id="resultPopup">
+    <div class="popup">
+        <h3 id="popupMessage"></h3>
+        <button onclick="closePopup()">OK</button>
+    </div>
+</div>
 
-        /* ================= INSERT LOG ================= */
-        try {
-            await dbConn.request()
-                .input("station_id", sql.VarChar(sql.MAX), String(stationId))
-                .input("barcode_string", sql.VarChar(sql.MAX), String(barcode))
-                .input("username", sql.VarChar(sql.MAX), String(username))
-                .query(`
-                    INSERT INTO taco_treceability.station_status_ok_universal
-                    (station_id, barcode_string, username)
-                    VALUES (@station_id, @barcode_string, @username)
-                `);
+<script>
+let stationMap = {};
+let tempData = {};
 
-            console.log("Log inserted successfully");
-
-        } catch (logErr) {
-            console.error("Log Insert Error:", logErr);
-            return res.status(500).json({ message: "Log insert failed" });
-        }
-
-        /* ================= EXISTING API CALL ================= */
-        const apiPayload = {
-            station_id: stationId,
-            line_id: line,
-            customer_qrcode: barcode,
-            station_status: "OK",
-            checklist_name: "NA",
-            substation_id: "NA"
-        };
-
-        try {
-            const apiResponse = await axios.post(
-                "https://mismainapp.tataautocomp.com:3241/station_status/filter",
-                apiPayload,
-                {
-                    httpsAgent: new https.Agent({
-                        rejectUnauthorized: false
-                    }),
-                    timeout: 10000
-                }
-            );
-
-            return res.json({
-                message: "Barcode processed successfully",
-                externalApiStatus: apiResponse.status,
-                externalApiResponse: apiResponse.data
-            });
-
-        } catch (apiErr) {
-            console.error("External API ERROR:", apiErr.response?.data || apiErr.message);
-            return res.status(500).json({
-                message: "External API failed",
-                error: apiErr.response?.data || apiErr.message
-            });
-        }
-
-    } catch (err) {
-        console.error("Scan error:", err);
-        res.status(500).json({ message: "Scan failed" });
-    }
-});
-
-/******************** SOCKET.IO ********************/
-io.on("connection", (socket) => {
-    console.log("Client connected");
-    socket.on("disconnect", () => {
-        console.log("Client disconnected");
+fetch('/api/stations')
+    .then(res => res.json())
+    .then(data => {
+        const list = document.getElementById('stations');
+        data.forEach(r => {
+            stationMap[r.Station_Name] = r.Station_ID;
+            const opt = document.createElement('option');
+            opt.value = r.Station_Name;
+            list.appendChild(opt);
+        });
     });
-});
+
+function submitData() {
+
+    const stationName = document.getElementById('stationName').value.trim();
+    const stationId = stationMap[stationName];
+    const line = document.getElementById('line').value;
+    const barcode = document.getElementById('barcode').value.trim();
+
+    if (!stationId || !barcode) {
+        showResultPopup("Select valid station and scan barcode");
+        return;
+    }
+
+    tempData = { stationId, line, barcode };
+    document.getElementById('passwordPopup').style.display = "flex";
+}
+
+function verifyPassword() {
+
+    const pwd = document.getElementById('passwordInput').value.trim();
+    let username = "";
+
+    if (pwd === "111") username = "Abhishek";
+    else if (pwd === "222") username = "Vaibhav";
+    else if (pwd === "333") username = "Indrajit";
+    else if (pwd === "444") username = "Aishwarya";
+    else if (pwd === "555") username = "Mahadu";
+    else if (pwd === "666") username = "Suraj";
+    else {
+        alert("Invalid Password");
+        return;
+    }
+
+    document.getElementById('passwordPopup').style.display = "none";
+
+    fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            ...tempData,
+            username: username
+        })
+    })
+    .then(res => res.json())
+    .then(resp => {
+
+        const apiMsg =
+            resp.externalApiResponse?.message ||
+            resp.externalApiResponse?.msg ||
+            resp.message;
+
+        if (apiMsg === "Station created/updated successfully.") {
+            showResultPopup("Station status updated");
+        } else {
+            showResultPopup(apiMsg || "Unknown response");
+        }
+    });
+}
+
+function showResultPopup(msg) {
+    document.getElementById('popupMessage').innerText = msg;
+    document.getElementById('resultPopup').style.display = "flex";
+}
+
+function closePopup() {
+    document.getElementById('resultPopup').style.display = "none";
+    location.reload();
+}
+</script>
+
+</body>
+</html>
