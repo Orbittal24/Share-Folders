@@ -1,194 +1,30 @@
-/******************** MODULES ********************/
-const express = require("express");
-const app = express();
-const http = require("http").Server(app);
-const io = require("socket.io")(http);
-const path = require("path");
-const sql = require("mssql");
-const axios = require("axios");
-const https = require("https");
-
-/******************** MIDDLEWARE ********************/
-app.use(express.static(__dirname));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-/******************** DB CONFIG 1 (MASTER DB) ********************/
-const sqlConfig = {
-    user: "user_mis",
-    password: "admin",
-    database: "taco_treceability_master",
-    server: "localhost\\MSSQLSERVER",
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000
-    },
-    options: {
-        encrypt: true,
-        trustServerCertificate: true
-    }
-};
-
-/******************** DB CONFIG 2 (LOG DB) ********************/
-const sqlConfig2 = {
-    user: "user_mis",
-    password: "admin",
-    database: "taco_treceability",
-    server: "localhost\\MSSQLSERVER",
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000
-    },
-    options: {
-        encrypt: true,
-        trustServerCertificate: true
-    }
-};
-
-/******************** DB CONNECTIONS ********************/
-const dbConn = new sql.ConnectionPool(sqlConfig);
-const dbConn2 = new sql.ConnectionPool(sqlConfig2);
-
-dbConn.connect()
-    .then(() => console.log("Connected to taco_treceability_master"))
-    .catch(err => console.error("Master DB Connection Error:", err));
-
-dbConn2.connect()
-    .then(() => console.log("Connected to taco_treceability"))
-    .catch(err => console.error("Log DB Connection Error:", err));
-
-/******************** SERVER ********************/
-http.listen(5400, "0.0.0.0", () => {
-    console.log("Server running on port 5400");
-});
-
-/******************** UI ROUTE ********************/
-app.get("/station_status", (req, res) => {
-    res.sendFile(path.join(__dirname, "app_station_status_ui.html"));
-});
-
-/******************** API: LOAD STATIONS ********************/
-app.get("/api/stations", async (req, res) => {
-    try {
-        const result = await dbConn.request().query(`
-            SELECT Station_ID, Station_Name
-            FROM taco_treceability.master_station
-            ORDER BY Station_Name
-        `);
-        res.json(result.recordset);
-    } catch (err) {
-        console.error("Station fetch error:", err);
-        res.status(500).json({ error: "Failed to load stations" });
-    }
-});
-
-/******************** API: BARCODE SCAN ********************/
-app.post("/api/scan", async (req, res) => {
-    try {
-        const { stationId, line, barcode, username } = req.body;
-
-        if (!stationId || !barcode || !username) {
-            return res.status(400).json({ message: "Station, barcode & username required" });
-        }
-
-        console.log("\n=========== SCAN RECEIVED ===========");
-        console.log("Station ID:", stationId);
-        console.log("Line:", line);
-        console.log("Barcode:", barcode);
-        console.log("Username:", username);
-        console.log("=====================================");
-
-        /**************** INSERT LOG INTO SECOND DATABASE ****************/
-        try {
-            await dbConn2.request()
-                .input("station_id", sql.VarChar(sql.MAX), String(stationId))
-                .input("barcode_string", sql.VarChar(sql.MAX), String(barcode))
-                .input("username", sql.VarChar(sql.MAX), String(username))
-                .query(`
-                    INSERT INTO dbo.station_status_ok_universal
-                    (station_id, barcode_string, username)
-                    VALUES (@station_id, @barcode_string, @username)
-                `);
-
-            console.log("Log inserted successfully into taco_treceability");
-
-        } catch (logErr) {
-            console.error("Log Insert Error:", logErr);
-            return res.status(500).json({ message: "Log insert failed" });
-        }
-
-        /**************** CALL EXTERNAL API ****************/
-        const apiPayload = {
-            station_id: stationId,
-            line_id: line,
-            customer_qrcode: barcode,
-            station_status: "OK",
-            checklist_name: "NA",
-            substation_id: "NA"
-        };
-
-        try {
-
-            console.log("\nSending Payload To External API:");
-            console.log(apiPayload);
-
-            const apiResponse = await axios.post(
-                "https://mismainapp.tataautocomp.com:3241/station_status/filter",
-                apiPayload,
-                {
-                    httpsAgent: new https.Agent({
-                        rejectUnauthorized: false
-                    }),
-                    timeout: 10000
-                }
-            );
-
-            console.log("\n=========== EXTERNAL API RESPONSE ===========");
-            console.log("Status Code:", apiResponse.status);
-            console.log("Status Text:", apiResponse.statusText);
-            console.log("Headers:", apiResponse.headers);
-            console.log("Response Data:", apiResponse.data);
-            console.log("=============================================\n");
-
-            return res.json({
-                message: "Barcode processed successfully",
-                externalApiStatus: apiResponse.status,
-                externalApiResponse: apiResponse.data
-            });
-
-        } catch (apiErr) {
-
-            console.log("\n=========== EXTERNAL API ERROR ===========");
-
-            if (apiErr.response) {
-                console.log("Error Status:", apiErr.response.status);
-                console.log("Error Headers:", apiErr.response.headers);
-                console.log("Error Data:", apiErr.response.data);
-            } else {
-                console.log("Error Message:", apiErr.message);
-            }
-
-            console.log("==========================================\n");
-
-            return res.status(500).json({
-                message: "External API failed",
-                error: apiErr.response?.data || apiErr.message
-            });
-        }
-
-    } catch (err) {
-        console.error("Scan error:", err);
-        res.status(500).json({ message: "Scan failed" });
-    }
-});
-
-/******************** SOCKET.IO ********************/
-io.on("connection", (socket) => {
-    console.log("Client connected");
-
-    socket.on("disconnect", () => {
-        console.log("Client disconnected");
-    });
-});
+<option value="NOVA Prismatic LR">NOVA Prismatic LR</option>
+<option value="Kanger 1">Kanger 1</option>
+<option value="Kanger 1 AIO">Kanger 1 AIO</option>
+<option value="Kanger 2">Kanger 2</option>
+<option value="Limber">Limber</option>
+<option value="Ejeeto 21.3">Ejeeto 21.3</option>
+<option value="Ejeeto 18.4">Ejeeto 18.4</option>
+<option value="SM eBada Dost">SM eBada Dost</option>
+<option value="SM eDost">SM eDost</option>
+<option value="NOVA MROPS">NOVA MROPS</option>
+<option value="NOVA LROPS">NOVA LROPS</option>
+<option value="CORAL SR">CORAL SR</option>
+<option value="Kratos1 450kwh">Kratos1 450kwh</option>
+<option value="EBUS LR">EBUS LR</option>
+<option value="TVS 9">TVS 9</option>
+<option value="Tamor">Tamor</option>
+<option value="EBUS 283">EBUS 283</option>
+<option value="Cerus1 Cerus2 Kratos HD 450kwh">Cerus1 Cerus2 Kratos HD 450kwh</option>
+<option value="Kratos1 300kwh">Kratos1 300kwh</option>
+<option value="Cerus1 Cerus2 300kwh">Cerus1 Cerus2 300kwh</option>
+<option value="UPP 39.9">UPP 39.9</option>
+<option value="UPP 27.8">UPP 27.8</option>
+<option value="EBUS 424">EBUS 424</option>
+<option value="Challenger LR">Challenger LR</option>
+<option value="Challenger MR">Challenger MR</option>
+<option value="EBUS 184">EBUS 184</option>
+<option value="NOVA 40kwh">NOVA 40kwh</option>
+<option value="Bajaj 9.2 LL">Bajaj 9.2 LL</option>
+<option value="Bajaj 12.1 LL">Bajaj 12.1 LL</option>
+<option value="TVS 12.1">TVS 12.1</option>
