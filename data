@@ -1,30 +1,30 @@
-<option value="NOVA Prismatic LR">NOVA Prismatic LR</option>
-<option value="Kanger 1">Kanger 1</option>
-<option value="Kanger 1 AIO">Kanger 1 AIO</option>
-<option value="Kanger 2">Kanger 2</option>
-<option value="Limber">Limber</option>
-<option value="Ejeeto 21.3">Ejeeto 21.3</option>
-<option value="Ejeeto 18.4">Ejeeto 18.4</option>
-<option value="SM eBada Dost">SM eBada Dost</option>
-<option value="SM eDost">SM eDost</option>
-<option value="NOVA MROPS">NOVA MROPS</option>
-<option value="NOVA LROPS">NOVA LROPS</option>
-<option value="CORAL SR">CORAL SR</option>
-<option value="Kratos1 450kwh">Kratos1 450kwh</option>
-<option value="EBUS LR">EBUS LR</option>
-<option value="TVS 9">TVS 9</option>
-<option value="Tamor">Tamor</option>
-<option value="EBUS 283">EBUS 283</option>
-<option value="Cerus1 Cerus2 Kratos HD 450kwh">Cerus1 Cerus2 Kratos HD 450kwh</option>
-<option value="Kratos1 300kwh">Kratos1 300kwh</option>
-<option value="Cerus1 Cerus2 300kwh">Cerus1 Cerus2 300kwh</option>
-<option value="UPP 39.9">UPP 39.9</option>
-<option value="UPP 27.8">UPP 27.8</option>
-<option value="EBUS 424">EBUS 424</option>
-<option value="Challenger LR">Challenger LR</option>
-<option value="Challenger MR">Challenger MR</option>
-<option value="EBUS 184">EBUS 184</option>
-<option value="NOVA 40kwh">NOVA 40kwh</option>
-<option value="Bajaj 9.2 LL">Bajaj 9.2 LL</option>
-<option value="Bajaj 12.1 LL">Bajaj 12.1 LL</option>
-<option value="TVS 12.1">TVS 12.1</option>
+SELECT  sr_no, pack_name, module_name, torque, angle, torque_status, 
+        date_dd, shift, module_barcode, process_status, pack_no, 
+        rework_status, bypass_operator, bypass_reason, process_name, 
+        station_name, smoke_sensor_linked_pack_no
+FROM taco_treceability.torque_details_EIP
+WHERE pack_no IN (
+'DJ2052-H2G0000059', 'DJ1927-H2H0039950', 'DJ2043-H2H0005647',
+'DJ2043-H2H0005639', 'DJ1927-H2G0039874', 'DJ1927-H2G0039834',
+'DJ1927-H2G0039840', 'DJ1927-H2G0039859', 'DJ1927-H2G0041402',
+'DJ2043-H2H0002868', 'DJ1918-G2G0001702', 'DJ1927-H2G0039865',
+'DJ2051-H2G0000048', 'DJ2048-H2H0000284', 'DJ2043-H2H0005652',
+'DJ1927-H2G0041398', 'DJ1927-H2G0039832', 'DJ2043-H2H0005643',
+'DJ1927-H2G0039871', 'DJ1927-H2G0039864', 'DJ1927-H2G0039873',
+'DJ2043-H2H0005651', 'DJ1927-H2G0039817', 'DJ2051-H2G0000049',
+'DJ1927-H2E0039690', 'DJ1927-H2G0039866', 'DJ1927-H2G0039858',
+'DJ1927-H2G0039875', 'DJ2029-G2G0001776', 'DJ2043-H2H0005649',
+'DJ1927-H2G0039824', 'DJ1927-H2G0039857', 'DJ2030-H2G0060258',
+'DJ1919-G2G0001870', 'DJ1927-H2G0041401', 'DJ1927-H2G0039878',
+'DJ2052-H2G0000058', 'DJ2043-H2H0005646', 'DJ2038-G2G0000110',
+'DJ1927-H2G0039839', 'DJ2029-G2H0001783', 'DJ1918-G240001637',
+'DJ1927-H2G0039877', 'DJ1927-H2G0039850', 'DJ1927-H2G0039890',
+'DJ2043-H2F0005629', 'DJ1927-H2G0039845', 'DJ1927-H2G0039870',
+'DJ1927-H2G0039853', 'DJ1918-G2H0001714', 'DJ1927-H2G0039835',
+'DJ1927-H2G0039852', 'DJ2029-G2H0001785', 'DJ1927-H2G0041396',
+'DJ1927-H2G0041404', 'DJ1927-H2D0039573', 'DJ1927-H2G0039809',
+'DJ1927-H2G0039830', 'DJ1927-H2G0039768', 'DJ2022-H100003879',
+'DJ1927-H2G0039825', 'DJ2043-H2H0005650', 'DJ1927-H2G0039879',
+'DJ1927-H2G0039863', 'DJ2022-H2D0004067', 'DJ1927-H2G0039829',
+'DJ1927-H2G0041400', 'DJ2043-H2H0005648'
+);
