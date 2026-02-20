@@ -1,68 +1,58 @@
+SELECT name, create_time
+FROM sys.server_event_sessions
+WHERE name = 'Failed_SQL_Queries';
+✅ 2️⃣ Check If It Is Currently Running
+SELECT name, started
+FROM sys.dm_xe_sessions
+WHERE name = 'Failed_SQL_Queries';
+started = 1 → Running
 
+No rows returned → Not running
 
-From: Shubham Shinde <rnd_5@orbittal.com> 
-Sent: Tuesday, January 27, 2026 11:42 AM
-To: 'rnd5.orbi@gmail.com' <rnd5.orbi@gmail.com>; 'Yogita | Orbittal' <yogita.r_d@orbittal.com>; 'rohan.r_d@orbittal.com' <rohan.r_d@orbittal.com>
-Subject: Logs for SQL failed queries
-
-1️⃣ Create an Extended Event session for FAILED QUERIES
-🔹 Step 1: Run this in SSMS (once)
-
-CREATE EVENT SESSION Failed_SQL_Queries
-ON SERVER
-ADD EVENT sqlserver.error_reported
-(
-    ACTION
-    (
-        sqlserver.sql_text,
-        sqlserver.client_hostname,
-        sqlserver.username,
-        sqlserver.database_name,
-        sqlserver.session_id
-    )
-    WHERE severity >= 11   -- captures real errors only
-)
-ADD TARGET package0.event_file
-(
-    SET filename = 'C:\SQLLogsQueries\FailedQueries.xel',
-        max_file_size = 50,
-        max_rollover_files = 10
-);
-GO
-
-📌 This captures:
-
-All failed SQL statements
-
-From any application (Node, SSMS, jobs, etc.)
-
-Across all databases
-
-2️⃣ Start the Event Session
+To start it if needed:
 
 ALTER EVENT SESSION Failed_SQL_Queries
-ON SERVER
-STATE = START;
-GO
+ON SERVER STATE = START;
+✅ 3️⃣ View Session Definition (Events + Actions + Filters)
+SELECT 
+    s.name AS session_name,
+    e.name AS event_name,
+    a.name AS action_name
+FROM sys.server_event_sessions s
+JOIN sys.server_event_session_events e 
+    ON s.event_session_id = e.event_session_id
+LEFT JOIN sys.server_event_session_actions a
+    ON e.event_session_id = a.event_session_id
+WHERE s.name = 'Failed_SQL_Queries';
+✅ 4️⃣ View Target (File Location & Settings)
+SELECT 
+    s.name AS session_name,
+    t.target_name,
+    t.target_data
+FROM sys.server_event_sessions s
+JOIN sys.server_event_session_targets t
+    ON s.event_session_id = t.event_session_id
+WHERE s.name = 'Failed_SQL_Queries';
+This will confirm:
 
-From this moment → every failed query is logged automatically 🎯
+File path
 
-3️⃣ View Failed Queries in SSMS
+Max file size
 
-Run this query anytime:
-SELECT
+Rollover count
+
+✅ 5️⃣ Read the Captured Errors from the .xel File (Most Important)
+This reads the actual failed queries:
+
+SELECT 
     event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
-    event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
-    event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
+    event_data.value('(event/data[@name="message"]/value)[1]', 'nvarchar(max)') AS error_message,
+    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS sql_text,
+    event_data.value('(event/action[@name="username"]/value)[1]', 'nvarchar(256)') AS username,
     event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
-    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS failed_query,
-    event_data.value('(event/data[@name="message"]/value)[1]', 'nvarchar(max)') AS error_message
-FROM
-(
-    SELECT CAST(event_data AS XML) AS event_data
-    FROM sys.fn_xe_file_target_read_file(
-        'C:\SQLLogsQueries\FailedQueries*.xel',
-        NULL, NULL, NULL
-    )
-) t
-ORDER BY event_time DESC;
+    event_data.value('(event/action[@name="database_name"]/value)[1]', 'nvarchar(256)') AS database_name
+FROM sys.fn_xe_file_target_read_file(
+    'C:\SQLLogsQueries\FailedQueries*.xel',
+    NULL, NULL, NULL
+) 
+CROSS APPLY (SELECT CAST(event_data AS XML) AS event_data) AS tab;
