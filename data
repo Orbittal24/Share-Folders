@@ -1,30 +1,68 @@
-SELECT  sr_no, pack_name, module_name, torque, angle, torque_status, 
-        date_dd, shift, module_barcode, process_status, pack_no, 
-        rework_status, bypass_operator, bypass_reason, process_name, 
-        station_name, smoke_sensor_linked_pack_no
-FROM taco_treceability.torque_details_EIP
-WHERE pack_no IN (
-'DJ2052-H2G0000059', 'DJ1927-H2H0039950', 'DJ2043-H2H0005647',
-'DJ2043-H2H0005639', 'DJ1927-H2G0039874', 'DJ1927-H2G0039834',
-'DJ1927-H2G0039840', 'DJ1927-H2G0039859', 'DJ1927-H2G0041402',
-'DJ2043-H2H0002868', 'DJ1918-G2G0001702', 'DJ1927-H2G0039865',
-'DJ2051-H2G0000048', 'DJ2048-H2H0000284', 'DJ2043-H2H0005652',
-'DJ1927-H2G0041398', 'DJ1927-H2G0039832', 'DJ2043-H2H0005643',
-'DJ1927-H2G0039871', 'DJ1927-H2G0039864', 'DJ1927-H2G0039873',
-'DJ2043-H2H0005651', 'DJ1927-H2G0039817', 'DJ2051-H2G0000049',
-'DJ1927-H2E0039690', 'DJ1927-H2G0039866', 'DJ1927-H2G0039858',
-'DJ1927-H2G0039875', 'DJ2029-G2G0001776', 'DJ2043-H2H0005649',
-'DJ1927-H2G0039824', 'DJ1927-H2G0039857', 'DJ2030-H2G0060258',
-'DJ1919-G2G0001870', 'DJ1927-H2G0041401', 'DJ1927-H2G0039878',
-'DJ2052-H2G0000058', 'DJ2043-H2H0005646', 'DJ2038-G2G0000110',
-'DJ1927-H2G0039839', 'DJ2029-G2H0001783', 'DJ1918-G240001637',
-'DJ1927-H2G0039877', 'DJ1927-H2G0039850', 'DJ1927-H2G0039890',
-'DJ2043-H2F0005629', 'DJ1927-H2G0039845', 'DJ1927-H2G0039870',
-'DJ1927-H2G0039853', 'DJ1918-G2H0001714', 'DJ1927-H2G0039835',
-'DJ1927-H2G0039852', 'DJ2029-G2H0001785', 'DJ1927-H2G0041396',
-'DJ1927-H2G0041404', 'DJ1927-H2D0039573', 'DJ1927-H2G0039809',
-'DJ1927-H2G0039830', 'DJ1927-H2G0039768', 'DJ2022-H100003879',
-'DJ1927-H2G0039825', 'DJ2043-H2H0005650', 'DJ1927-H2G0039879',
-'DJ1927-H2G0039863', 'DJ2022-H2D0004067', 'DJ1927-H2G0039829',
-'DJ1927-H2G0041400', 'DJ2043-H2H0005648'
+
+
+From: Shubham Shinde <rnd_5@orbittal.com> 
+Sent: Tuesday, January 27, 2026 11:42 AM
+To: 'rnd5.orbi@gmail.com' <rnd5.orbi@gmail.com>; 'Yogita | Orbittal' <yogita.r_d@orbittal.com>; 'rohan.r_d@orbittal.com' <rohan.r_d@orbittal.com>
+Subject: Logs for SQL failed queries
+
+1️⃣ Create an Extended Event session for FAILED QUERIES
+🔹 Step 1: Run this in SSMS (once)
+
+CREATE EVENT SESSION Failed_SQL_Queries
+ON SERVER
+ADD EVENT sqlserver.error_reported
+(
+    ACTION
+    (
+        sqlserver.sql_text,
+        sqlserver.client_hostname,
+        sqlserver.username,
+        sqlserver.database_name,
+        sqlserver.session_id
+    )
+    WHERE severity >= 11   -- captures real errors only
+)
+ADD TARGET package0.event_file
+(
+    SET filename = 'C:\SQLLogsQueries\FailedQueries.xel',
+        max_file_size = 50,
+        max_rollover_files = 10
 );
+GO
+
+📌 This captures:
+
+All failed SQL statements
+
+From any application (Node, SSMS, jobs, etc.)
+
+Across all databases
+
+2️⃣ Start the Event Session
+
+ALTER EVENT SESSION Failed_SQL_Queries
+ON SERVER
+STATE = START;
+GO
+
+From this moment → every failed query is logged automatically 🎯
+
+3️⃣ View Failed Queries in SSMS
+
+Run this query anytime:
+SELECT
+    event_data.value('(event/@timestamp)[1]', 'datetime2') AS event_time,
+    event_data.value('(event/action[@name="database_name"]/value)[1]', 'sysname') AS database_name,
+    event_data.value('(event/action[@name="username"]/value)[1]', 'sysname') AS username,
+    event_data.value('(event/action[@name="client_hostname"]/value)[1]', 'nvarchar(256)') AS client_host,
+    event_data.value('(event/action[@name="sql_text"]/value)[1]', 'nvarchar(max)') AS failed_query,
+    event_data.value('(event/data[@name="message"]/value)[1]', 'nvarchar(max)') AS error_message
+FROM
+(
+    SELECT CAST(event_data AS XML) AS event_data
+    FROM sys.fn_xe_file_target_read_file(
+        'C:\SQLLogsQueries\FailedQueries*.xel',
+        NULL, NULL, NULL
+    )
+) t
+ORDER BY event_time DESC;
