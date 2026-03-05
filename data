@@ -3,58 +3,48 @@ socket.on("submitPackData", (data) => {
 
     var array_counter = 0;
     var get_data_arr_status = [];
-    var checking_counter = 1;
 
     var pack_no = data.pack_no;
     var pack_name = data.pack_name;
 
-    // Step 1: Get ModuleBarcode and moduleNumber for New_final_qr_code
     var processquery = `SELECT ModuleBarcode, moduleNumber 
         FROM taco_treceability.station_status 
         WHERE FinalQRCode LIKE '%${pack_no}%' 
         AND PackName='${pack_name}'`;
 
-    sql.connect(sqlConfig, function (err) {  
-        if(err) return console.log(err);
+    // Use existing connection pool dbConn2
+    const request = new sql.Request(dbConn2);
+    request.query(processquery, function (err, recordset) {
+        if (err) return console.log(err);
 
-        var request = new sql.Request();
-        request.query(processquery, function (err, recordset) {
-            if(err) return console.log(err);
+        var result1 = recordset.recordset;
+        get_data_arr_status = [];
 
-            var result1 = recordset.recordset;
-            get_data_arr_status = [];
-
-            if (result1.length > 0) {
-                for (var i = 0; i < result1.length; i++) {
-                    get_data_arr_status.push(result1[i].ModuleBarcode);
-                    get_data_arr_status.push(result1[i].moduleNumber);
-                }   
-
-                console.log("Data array for update:", get_data_arr_status);
-
-                // Define the update function
-                function updateModuleBarcodes(moduleBarcode, moduleNumber, counter) {
-                    console.log(`Module ${counter/2 + 1}:`, moduleBarcode, moduleNumber);
-
-                    // Emit module info to frontend
-                    socket.emit("setProcess", moduleBarcode, moduleNumber);
-
-                    // Move to next pair if exists
-                    counter += 2;
-                    if (counter < get_data_arr_status.length) {
-                        updateModuleBarcodes(get_data_arr_status[counter], get_data_arr_status[counter + 1], counter);
-                    } else {
-                        console.log("All modules processed");
-                    }
-                }
-
-                // Start the update chain
-                updateModuleBarcodes(get_data_arr_status[array_counter], get_data_arr_status[array_counter + 1], array_counter);
-
-            } else {
-                console.log("No data found for this pack");
-                socket.emit("setProcess", "NA", "NA");
+        if (result1.length > 0) {
+            for (var i = 0; i < result1.length; i++) {
+                get_data_arr_status.push(result1[i].ModuleBarcode);
+                get_data_arr_status.push(result1[i].moduleNumber);
             }
-        });
+
+            console.log("Data array for update:", get_data_arr_status);
+
+            function updateModuleBarcodes(moduleBarcode, moduleNumber, counter) {
+                console.log(`Module ${counter/2 + 1}:`, moduleBarcode, moduleNumber);
+                socket.emit("setProcess", moduleBarcode, moduleNumber);
+
+                counter += 2;
+                if (counter < get_data_arr_status.length) {
+                    updateModuleBarcodes(get_data_arr_status[counter], get_data_arr_status[counter + 1], counter);
+                } else {
+                    console.log("All modules processed");
+                }
+            }
+
+            updateModuleBarcodes(get_data_arr_status[array_counter], get_data_arr_status[array_counter + 1], array_counter);
+
+        } else {
+            console.log("No data found for this pack");
+            socket.emit("setProcess", "NA", "NA");
+        }
     });
 });
