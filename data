@@ -1,130 +1,136 @@
+/******************** MODULES ********************/
+const express = require("express");
+const app = express();
+const http = require("http").Server(app);
+const io = require("socket.io")(http, { cors: { origin: "*", methods: ["GET","POST"] } });
+const path = require("path");
+const sql = require("mssql");
+
+/******************** MIDDLEWARE ********************/
+app.use(express.static(__dirname));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+/******************** DB CONFIG ********************/
+const sqlConfig2 = {
+    user: "user_mis",
+    password: "admin",
+    database: "taco_treceability",
+    server: "localhost\\MSSQLSERVER",
+    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+    options: { encrypt: true, trustServerCertificate: true }
+};
+
+/******************** DB POOL ********************/
+const dbConn2 = new sql.ConnectionPool(sqlConfig2);
+dbConn2.connect()
+    .then(() => console.log("Connected to taco_treceability"))
+    .catch(err => console.error("DB Connection Error:", err));
+
+/******************** SERVER ********************/
+http.listen(5401, "0.0.0.0", () => console.log("Server running on port 5401"));
+
+/******************** UI ROUTE ********************/
+app.get("/IR", (req, res) => {
+    res.sendFile(path.join(__dirname, "IR_backup_ui.html"));
+});
+
+/******************** SOCKET.IO ********************/
 io.on("connection", (socket) => {
     console.log("Client connected:", socket.id);
 
     socket.on("submitPackData", (data) => {
         console.log("Received data:", data);
 
-        const pack_no = data.pack_no;
-        const pack_name = data.pack_name;
-        const new_smoke = data.smoke_sensor || null; // smoke sensor from frontend
-
+        const { pack_name, pack_no, smoke_sensor } = data; // smoke_sensor may be empty or 'NA'
         let array_counter = 0;
         let checking_counter = 1;
         let get_data_arr_status = [];
 
-        // Step 1: Get ModuleBarcode and moduleNumber for the pack
+        // Step 1: Get ModuleBarcode and moduleNumber
         const processQuery = `
-            SELECT ModuleBarcode, moduleNumber 
-            FROM taco_treceability.station_status 
-            WHERE FinalQRCode LIKE '%${pack_no}%' 
-            AND PackName='${pack_name}'
+            SELECT ModuleBarcode, moduleNumber
+            FROM taco_treceability.station_status
+            WHERE FinalQRCode LIKE '%${pack_no}%' AND PackName='${pack_name}'
         `;
 
-        // Use existing pool
         const request = new sql.Request(dbConn2);
         request.query(processQuery, (err, recordset) => {
             if (err) return console.log(err);
 
             const result1 = recordset.recordset;
-            get_data_arr_status = [];
+            if (result1.length === 0) {
+                console.log("No modules found for this pack");
+                proceedSmokeSensor();
+                return;
+            }
 
-            if (result1.length > 0) {
-                // Flatten ModuleBarcode + moduleNumber
-                for (let i = 0; i < result1.length; i++) {
-                    get_data_arr_status.push(result1[i].ModuleBarcode);
-                    get_data_arr_status.push(result1[i].moduleNumber);
+            // Build array [ModuleBarcode1, moduleNumber1, ModuleBarcode2, moduleNumber2, ...]
+            result1.forEach(r => {
+                get_data_arr_status.push(r.ModuleBarcode);
+                get_data_arr_status.push(r.moduleNumber);
+            });
+
+            console.log("Module array for update:", get_data_arr_status);
+
+            // Start recursive update
+            updateModule(get_data_arr_status[array_counter], get_data_arr_status[array_counter + 1], array_counter);
+        });
+
+        // Recursive module update
+        function updateModule(temp_mBarcode, temp_mNo, array_counter) {
+            console.log(`Updating counter ${checking_counter}:`, temp_mBarcode, temp_mNo);
+
+            const updateQuery = `
+                UPDATE taco_treceability.torque_details_EIP_traial2
+                SET pack_no='${pack_no}', module_barcode='${temp_mBarcode}'
+                WHERE module_name='${temp_mNo}' AND pack_name='${pack_name}'
+            `;
+
+            const req = new sql.Request(dbConn2);
+            req.query(updateQuery, (err, recordset) => {
+                if (err) {
+                    console.log(err);
+                } else {
+                    checking_counter++;
+                    proceedNext(array_counter);
                 }
+            });
+        }
 
-                console.log("Data array for update:", get_data_arr_status);
-
-                // Step 2: Start update chain
-                function updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter) {
-                    console.log(`Updating counter: ${checking_counter}, Module: ${temp_mNo}`);
-
-                    const updateQuery = `
-                        UPDATE taco_treceability.torque_details_EIP_traial2 
-                        SET pack_no='${pack_no}', module_barcode='${temp_mBarcode}' 
-                        WHERE module_name='${temp_mNo}'
-                    `;
-
-                    const req = new sql.Request(dbConn2);
-                    req.query(updateQuery, (err, res) => {
-                        if (err) console.log(err);
-                        else {
-                            checking_counter++;
-                            proceedNext(array_counter);
-                        }
-                    });
-                }
-
-                function updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter) {
-                    console.log(`Updating counter2: ${checking_counter}, Module: ${temp_mNo}`);
-
-                    const updateQuery = `
-                        UPDATE taco_treceability.torque_details_EIP_traial2 
-                        SET pack_no='${pack_no}', module_barcode='${temp_mBarcode}' 
-                        WHERE module_name='${temp_mNo}'
-                    `;
-
-                    const req = new sql.Request(dbConn2);
-                    req.query(updateQuery, (err, res) => {
-                        if (err) console.log(err);
-                        else {
-                            checking_counter++;
-                            proceedNext(array_counter);
-                        }
-                    });
-                }
-
-                function proceedNext(array_counter) {
-                    if (array_counter + 2 < get_data_arr_status.length) {
-                        array_counter += 2;
-                        const temp_mBarcode = get_data_arr_status[array_counter];
-                        const temp_mNo = get_data_arr_status[array_counter + 1];
-
-                        setTimeout(() => {
-                            if (checking_counter % 2 === 0) {
-                                updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter);
-                            } else {
-                                updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter);
-                            }
-                        }, 500);
-                    } else {
-                        // All module updates done
-                        if (new_smoke) {
-                            const smokeQuery = `
-                                UPDATE taco_treceability.torque_details_EIP_traial2 
-                                SET module_barcode='${new_smoke}', smoke_sensor_linked_pack_no='${new_smoke}' 
-                                WHERE smoke_sensor_linked_pack_no IS NOT NULL
-                            `;
-                            const req = new sql.Request(dbConn2);
-                            req.query(smokeQuery, (err, res) => {
-                                if (err) console.log(err);
-                                else {
-                                    console.log("Smoke sensor updated. Copying data to import2 table...");
-                                    copyDataToImportTable(); // your final copy function
-                                }
-                            });
-                        } else {
-                            console.log("All modules processed. No smoke sensor scanned.");
-                            copyDataToImportTable();
-                        }
-                    }
-                }
-
-                // Start first update
+        function proceedNext(array_counter) {
+            if (array_counter + 2 < get_data_arr_status.length) {
+                array_counter += 2;
                 const temp_mBarcode = get_data_arr_status[array_counter];
                 const temp_mNo = get_data_arr_status[array_counter + 1];
-                updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter);
 
+                setTimeout(() => {
+                    updateModule(temp_mBarcode, temp_mNo, array_counter);
+                }, 500);
             } else {
-                console.log("No data found for this pack");
-                socket.emit("setProcess", "NA", "NA");
+                console.log("All module updates done");
+                proceedSmokeSensor();
             }
-        });
+        }
+
+        // Conditional smoke sensor update
+        function proceedSmokeSensor() {
+            if (smoke_sensor && smoke_sensor.toLowerCase() !== "na") {
+                const smokeQuery = `
+                    UPDATE taco_treceability.torque_details_EIP_traial2
+                    SET module_barcode='${smoke_sensor}', smoke_sensor_linked_pack_no='${smoke_sensor}'
+                    WHERE smoke_sensor_linked_pack_no IS NOT NULL
+                `;
+                const req = new sql.Request(dbConn2);
+                req.query(smokeQuery, (err, recordset) => {
+                    if (err) console.log(err);
+                    else console.log("Smoke sensor updated");
+                });
+            } else {
+                console.log("No smoke sensor scanned or value is NA. Skipping smoke update.");
+            }
+        }
     });
 
-    socket.on("disconnect", () => {
-        console.log("Client disconnected:", socket.id);
-    });
+    socket.on("disconnect", () => console.log("Client disconnected:", socket.id));
 });
