@@ -42,14 +42,14 @@ io.on("connection", (socket) => {
     socket.on("submitPackData", (data) => {
         console.log("Received data:", data);
 
-        const { pack_name, pack_no, smoke_sensor } = data; // smoke_sensor may be empty or 'NA'
+        const { pack_name, pack_no, smoke_sensor } = data; 
         let array_counter = 0;
         let checking_counter = 1;
         let get_data_arr_status = [];
 
-        // Step 1: Get ModuleBarcode and moduleNumber
+        // Step 1: Get ModuleBarcode, moduleNumber, and FinalQRCode
         const processQuery = `
-            SELECT ModuleBarcode, moduleNumber
+            SELECT ModuleBarcode, moduleNumber, FinalQRCode
             FROM taco_treceability.station_status
             WHERE FinalQRCode LIKE '%${pack_no}%' AND PackName='${pack_name}'
         `;
@@ -65,33 +65,33 @@ io.on("connection", (socket) => {
                 return;
             }
 
-            // Build array [ModuleBarcode1, moduleNumber1, ModuleBarcode2, moduleNumber2, ...]
+            // Build array [ModuleBarcode1, moduleNumber1, FinalQRCode1, ...]
             result1.forEach(r => {
                 get_data_arr_status.push(r.ModuleBarcode);
                 get_data_arr_status.push(r.moduleNumber);
+                get_data_arr_status.push(r.FinalQRCode); // <-- store FinalQRCode for updating pack_no
             });
 
             console.log("Module array for update:", get_data_arr_status);
 
             // Start recursive update
-            updateModule(get_data_arr_status[array_counter], get_data_arr_status[array_counter + 1], array_counter);
+            updateModule(get_data_arr_status[array_counter], get_data_arr_status[array_counter + 1], get_data_arr_status[array_counter + 2], array_counter);
         });
 
         // Recursive module update
-        function updateModule(temp_mBarcode, temp_mNo, array_counter) {
-            console.log(`Updating counter ${checking_counter}:`, temp_mBarcode, temp_mNo);
+        function updateModule(temp_mBarcode, temp_mNo, finalQRCode, array_counter) {
+            console.log(`Updating counter ${checking_counter}:`, temp_mBarcode, temp_mNo, finalQRCode);
 
             const updateQuery = `
                 UPDATE taco_treceability.torque_details_EIP_traial2
-                SET pack_no='${pack_no}', module_barcode='${temp_mBarcode}'
+                SET pack_no='${finalQRCode}', module_barcode='${temp_mBarcode}'
                 WHERE module_name='${temp_mNo}' AND pack_name='${pack_name}'
             `;
 
             const req = new sql.Request(dbConn2);
             req.query(updateQuery, (err, recordset) => {
-                if (err) {
-                    console.log(err);
-                } else {
+                if (err) console.log(err);
+                else {
                     checking_counter++;
                     proceedNext(array_counter);
                 }
@@ -99,13 +99,14 @@ io.on("connection", (socket) => {
         }
 
         function proceedNext(array_counter) {
-            if (array_counter + 2 < get_data_arr_status.length) {
-                array_counter += 2;
+            if (array_counter + 3 < get_data_arr_status.length) { // move by 3 since we also stored FinalQRCode
+                array_counter += 3;
                 const temp_mBarcode = get_data_arr_status[array_counter];
                 const temp_mNo = get_data_arr_status[array_counter + 1];
+                const finalQRCode = get_data_arr_status[array_counter + 2];
 
                 setTimeout(() => {
-                    updateModule(temp_mBarcode, temp_mNo, array_counter);
+                    updateModule(temp_mBarcode, temp_mNo, finalQRCode, array_counter);
                 }, 500);
             } else {
                 console.log("All module updates done");
