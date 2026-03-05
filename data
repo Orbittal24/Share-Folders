@@ -1,51 +1,105 @@
-<script src="js/socket.io.js"></script>
-<script>
-const socket = io("http://localhost:3000"); // your backend URL
+/******************** MODULES ********************/
+const express = require("express");
+const app = express();
+const http = require("http").Server(app);
+const io = require("socket.io")(http);
+const path = require("path");
+const sql = require("mssql");
 
-function submitData() {
+/******************** MIDDLEWARE ********************/
+app.use(express.static(__dirname));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-    const packName = document.getElementById("stationName").value.trim();
-    const packNo = document.getElementById("packNo").value.trim();
-    let barcode = document.getElementById("barcode").value.trim();
-
-    // Validate Pack Name
-    if(packName === ""){
-        alert("Please select Pack Name");
-        return;
+/******************** DB CONFIG 2 (LOG DB) ********************/
+const sqlConfig2 = {
+    user: "user_mis",
+    password: "admin",
+    database: "taco_treceability",
+    server: "localhost\\MSSQLSERVER",
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    },
+    options: {
+        encrypt: true,
+        trustServerCertificate: true
     }
+};
 
-    // Validate Pack No (must be 6 digits)
-    const packNoRegex = /^\d{6}$/;
-    if(!packNoRegex.test(packNo)){
-        alert("Pack No must be exactly 6 digits");
-        return;
-    }
+/******************** DB CONNECTION POOL ********************/
+const dbConn2 = new sql.ConnectionPool(sqlConfig2);
 
-    // If barcode empty send NA
-    if(barcode === ""){
-        barcode = "na";
-    }
+dbConn2.connect()
+    .then(() => console.log("Connected to taco_treceability"))
+    .catch(err => console.error("Log DB Connection Error:", err));
 
-    const data = {
-        pack_name: packName,
-        pack_no: packNo,
-        smoke_sensor: barcode
-    };
+/******************** SERVER ********************/
+http.listen(5401, "0.0.0.0", () => {
+    console.log("Server running on port 5401");
+});
 
-    // Emit data to backend via Socket.IO
-    socket.emit("submitPackData", data);
-}
+/******************** UI ROUTE ********************/
+app.get("/IR", (req, res) => {
+    res.sendFile(path.join(__dirname, "IR_backup_ui.html"));
+});
 
-// Listen for backend response
-socket.on("packResponse", function(status, message){
-    alert(message);
-
-    if(status === "success"){
-        // Clear form after successful submit
-        document.getElementById("packNo").value = "";
-        document.getElementById("barcode").value = "";
-        document.getElementById("stationName").value = "";
-        document.getElementById("stationName").focus();
+/******************** API: LOAD STATIONS ********************/
+app.get("/api/stations", async (req, res) => {
+    try {
+        const result = await dbConn2.request().query(`
+            SELECT Station_ID, Station_Name
+            FROM taco_treceability.master_station
+            ORDER BY Station_Name
+        `);
+        res.json(result.recordset);
+    } catch (err) {
+        console.error("Station fetch error:", err);
+        res.status(500).json({ error: "Failed to load stations" });
     }
 });
-</script>
+
+/******************** SOCKET.IO ********************/
+io.on("connection", (socket) => {
+    console.log("Client connected:", socket.id);
+
+    /******************** HANDLE PACK SUBMISSION ********************/
+    socket.on("submitPackData", async (data) => {
+        const { pack_name, pack_no, smoke_sensor } = data;
+
+        const processquery = `
+            SELECT ModuleBarcode, moduleNumber 
+            FROM taco_treceability.station_status 
+            WHERE FinalQRCode LIKE '%${smoke_sensor}%' 
+            AND PackName='${pack_name}'
+        `;
+
+        try {
+            const request = new sql.Request(dbConn2);
+            const result = await request.query(processquery);
+
+            if (result.recordset.length > 0) {
+                const moduleBarcode = result.recordset[0].ModuleBarcode;
+                const moduleNumber = result.recordset[0].moduleNumber;
+
+                // Send module info to frontend
+                socket.emit("setProcess", moduleBarcode, moduleNumber);
+
+                // Also send status message
+                socket.emit("packResponse", "success", "Data processed successfully");
+            } else {
+                socket.emit("setProcess", "NA", "No Data Found");
+                socket.emit("packResponse", "error", "No data found for this pack");
+            }
+        } catch (err) {
+            console.error("DB query error:", err);
+            socket.emit("packResponse", "error", "Database query failed");
+        }
+    });
+
+    /******************** DISCONNECT ********************/
+    socket.on("disconnect", () => {
+        console.log("Client disconnected:", socket.id);
+    });
+});
