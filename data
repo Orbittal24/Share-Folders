@@ -1,13 +1,89 @@
-<div class="group line">
-    <label>Pack No :</label>
-    <input 
-        type="text" 
-        id="packNo" 
-        name="pack_no"
-        placeholder="Enter 6 digit Pack No"
-        maxlength="6"
-        pattern="\d{6}"
-        inputmode="numeric"
-        required
-    >
-</div>
+<script>
+async function submitData() {
+
+    const packName = document.getElementById("stationName").value.trim();
+    const packNo = document.getElementById("packNo").value.trim();
+    let barcode = document.getElementById("barcode").value.trim();
+
+    // Validate Pack Name
+    if(packName === ""){
+        alert("Please select Pack Name");
+        return;
+    }
+
+    // Validate Pack No (must be 6 digits)
+    const packNoRegex = /^\d{6}$/;
+
+    if(!packNoRegex.test(packNo)){
+        alert("Pack No must be exactly 6 digits");
+        return;
+    }
+
+    // If barcode empty send NA
+    if(barcode === ""){
+        barcode = "na";
+    }
+
+    const data = {
+        pack_name: packName,
+        pack_no: packNo,
+        smoke_sensor: barcode
+    };
+
+    try{
+
+        const response = await fetch("/submit-pack", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        alert(result.message);
+
+        // clear fields after submit
+        document.getElementById("packNo").value = "";
+        document.getElementById("barcode").value = "";
+        document.getElementById("stationName").value = "";
+
+    }catch(err){
+        alert("Error sending data to server");
+        console.error(err);
+    }
+}
+</script>
+
+
+const express = require("express");
+const app = express();
+
+app.use(express.json());
+
+app.post("/submit-pack", (req, res) => {
+
+    const { pack_name, pack_no, smoke_sensor } = req.body;
+
+    if(!pack_name || !pack_no){
+        return res.json({
+            message: "Missing required fields"
+        });
+    }
+
+    console.log("Pack Name:", pack_name);
+    console.log("Pack No:", pack_no);
+    console.log("Smoke Sensor:", smoke_sensor);
+
+    // Example: Save to database here
+
+    res.json({
+        message: "Data received successfully"
+    });
+
+});
+
+app.listen(3000, () => {
+    console.log("Server running on port 3000");
+});
