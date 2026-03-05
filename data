@@ -1,6 +1,51 @@
-01TS004900002AG330000001
-
-
-7206183$XAK01900$00000000001$04.03.2026$2511273474$00000$00000$#1$JUNCTION BOX$TACO GOTION$
-final qr pA= 7206183$F2X08100$00000000006$28.02.2026$011/011$000/000$000/000$1001$#1$BATTERY PACK 184.32KWH$TACO GOTION$
-
+<div class="group station">
+    <label>Pack Name :</label>
+    <select id="stationName" name="pack_name">
+        <option value="">Select Pack</option>
+        <option value="NOVA Prismatic LR">NOVA Prismatic LR</option>
+        <option value="Bajaj 8.9">Bajaj 8.9</option>
+        <option value="Bajaj 11.8">Bajaj 11.8</option>
+        <option value="Kanger 1">Kanger 1</option>
+        <option value="Kanger 1 AIO">Kanger 1 AIO</option>
+        <option value="Kanger 2">Kanger 2</option>
+        <option value="Limber">Limber</option>
+        <option value="Bajaj 6.1">Bajaj 6.1</option>
+        <option value="Ejeeto 21.3">Ejeeto 21.3</option>
+        <option value="Ejeeto 18.4">Ejeeto 18.4</option>
+        <option value="SM eBada Dost">SM eBada Dost</option>
+        <option value="SM eDost">SM eDost</option>
+        <option value="NOVA MROPS">NOVA MROPS</option>
+        <option value="NOVA LROPS">NOVA LROPS</option>
+        <option value="CORAL SR">CORAL SR</option>
+        <option value="Kratos1 450kwh">Kratos1 450kwh</option>
+        <option value="EBUS LR">EBUS LR</option>
+        <option value="TVS 9">TVS 9</option>
+        <option value="Tamor">Tamor</option>
+        <option value="Bajaj 12.1">Bajaj 12.1</option>
+        <option value="EBUS 283">EBUS 283</option>
+        <option value="Cerus1 Cerus2 Kratos HD 450kwh">Cerus1 Cerus2 Kratos HD 450kwh</option>
+        <option value="Kratos1 300kwh">Kratos1 300kwh</option>
+        <option value="Cerus1 Cerus2 300kwh">Cerus1 Cerus2 300kwh</option>
+        <option value="UPP 39.9">UPP 39.9</option>
+        <option value="UPP 27.8">UPP 27.8</option>
+        <option value="Bajaj 5.9">Bajaj 5.9</option>
+        <option value="Bajaj 9.2">Bajaj 9.2</option>
+        <option value="Bajaj 12.2">Bajaj 12.2</option>
+        <option value="EBUS 424">EBUS 424</option>
+        <option value="Challenger LR">Challenger LR</option>
+        <option value="Challenger MR">Challenger MR</option>
+        <option value="EBUS 184">EBUS 184</option>
+        <option value="NOVA 40kwh">NOVA 40kwh</option>
+        <option value="PDU Kratos1 300kwh">PDU Kratos1 300kwh</option>
+        <option value="PDU Kratos1 450kwh">PDU Kratos1 450kwh</option>
+        <option value="PDU Cerus1 Cerus2 300kwh">PDU Cerus1 Cerus2 300kwh</option>
+        <option value="PDU Cerus1 Cerus2 Kratos HD 450kwh">PDU Cerus1 Cerus2 Kratos HD 450kwh</option>
+        <option value="PDU SM eBada Dost">PDU SM eBada Dost</option>
+        <option value="PDU EBUS 283">PDU EBUS 283</option>
+        <option value="PDU EBUS 424">PDU EBUS 424</option>
+        <option value="PDU EBUS 184">PDU EBUS 184</option>
+        <option value="Bajaj 9.2 LL">Bajaj 9.2 LL</option>
+        <option value="Bajaj 12.1 LL">Bajaj 12.1 LL</option>
+        <option value="TVS 12.1">TVS 12.1</option>
+    </select>
+</div>
