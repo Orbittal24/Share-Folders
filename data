@@ -1,9 +1,9 @@
 async function copyDataToImportTable() {
     try {
-        // Step 1: Get all updated records from traial2 (filtering only the pack that was just updated)
+
         const selectQuery = `
-            SELECT TOP (200)
-                sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift,
+            SELECT 
+                pack_name, module_name, torque, angle, torque_status, date_dd, shift,
                 module_barcode, process_status, pack_no, rework_status, bypass_operator,
                 bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
             FROM taco_treceability.torque_details_EIP_traial2
@@ -19,9 +19,9 @@ async function copyDataToImportTable() {
             return;
         }
 
-        // Step 2: Prepare values for bulk insert
         const values = rows.map(r => {
-            let dateStr = 'NULL';
+
+            let dateStr = '';
             if (r.date_dd) {
                 const d = new Date(r.date_dd);
                 const yyyy = d.getFullYear();
@@ -30,17 +30,16 @@ async function copyDataToImportTable() {
                 const hh = String(d.getHours()).padStart(2, '0');
                 const min = String(d.getMinutes()).padStart(2, '0');
                 const ss = String(d.getSeconds()).padStart(2, '0');
-                dateStr = `'${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}'`;
+                dateStr = `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
             }
 
             return `(
-                ${r.sr_no || 'NULL'},
                 '${r.pack_name}',
                 '${r.module_name}',
-                ${r.torque !== null ? r.torque : 'NULL'},
-                ${r.angle !== null ? r.angle : 'NULL'},
+                ${r.torque ?? 'NULL'},
+                ${r.angle ?? 'NULL'},
                 '${r.torque_status}',
-                ${dateStr},
+                '${dateStr}',
                 '${r.shift}',
                 '${r.module_barcode}',
                 '${r.process_status}',
@@ -50,21 +49,26 @@ async function copyDataToImportTable() {
                 '${r.bypass_reason}',
                 '${r.process_name}',
                 '${r.station_name}',
-                '${r.smoke_sensor_linked_pack_no || ''}'
+                '${r.smoke_sensor_linked_pack_no ?? ''}'
             )`;
+
         }).join(",");
 
-        // Step 3: Insert into traial1
+
         const insertQuery = `
             INSERT INTO taco_treceability.torque_details_EIP_traial1
-                (sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift,
-                 module_barcode, process_status, pack_no, rework_status, bypass_operator,
-                 bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
+            (
+                pack_name, module_name, torque, angle, torque_status, date_dd, shift,
+                module_barcode, process_status, pack_no, rework_status, bypass_operator,
+                bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+            )
             VALUES ${values}
         `;
 
         await req.query(insertQuery);
-        console.log(`Copied ${rows.length} records from traial2 to traial1 successfully.`);
+
+        console.log(`Copied ${rows.length} records from traial2 to traial1`);
+
     } catch (err) {
         console.error("Error copying data to traial1:", err);
     }
