@@ -1,89 +1,53 @@
-<script>
-async function submitData() {
+socket.on("getProcess", function(New_final_qr_code, pack_name){
 
-    const packName = document.getElementById("stationName").value.trim();
-    const packNo = document.getElementById("packNo").value.trim();
-    let barcode = document.getElementById("barcode").value.trim();
+    var moduleBarcode = "";
+    var moduleNumber = "";
 
-    // Validate Pack Name
-    if(packName === ""){
-        alert("Please select Pack Name");
-        return;
-    }
+    var processquery = `
+    SELECT ModuleBarcode, moduleNumber 
+    FROM taco_treceability.station_status 
+    WHERE FinalQRCode LIKE '%${New_final_qr_code}%' 
+    AND PackName='${pack_name}'
+    `;
 
-    // Validate Pack No (must be 6 digits)
-    const packNoRegex = /^\d{6}$/;
+    sql.connect(sqlConfig, function (err) {  
 
-    if(!packNoRegex.test(packNo)){
-        alert("Pack No must be exactly 6 digits");
-        return;
-    }
+        if (err) {
+            console.log(err);
+            return;
+        }
 
-    // If barcode empty send NA
-    if(barcode === ""){
-        barcode = "na";
-    }
+        request = new sql.Request();
 
-    const data = {
-        pack_name: packName,
-        pack_no: packNo,
-        smoke_sensor: barcode
-    };
+        request.query(processquery, function (err, recordset) {
 
-    try{
+            if (err) {
+                console.log(err);
+                return;
+            }
 
-        const response = await fetch("/submit-pack", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(data)
+            var result1 = recordset.recordset;
+
+            if (result1.length > 0) {
+
+                for (var i = 0; i < result1.length; i++) {
+
+                    moduleBarcode = result1[i].ModuleBarcode;
+                    moduleNumber = result1[i].moduleNumber;
+
+                }
+
+                socket.emit("setProcess", moduleBarcode, moduleNumber);
+
+            } 
+            else {
+
+                socket.emit("setProcess", "NA", "No Data Found");
+
+            }
+
         });
 
-        const result = await response.json();
-
-        alert(result.message);
-
-        // clear fields after submit
-        document.getElementById("packNo").value = "";
-        document.getElementById("barcode").value = "";
-        document.getElementById("stationName").value = "";
-
-    }catch(err){
-        alert("Error sending data to server");
-        console.error(err);
-    }
-}
-</script>
-
-
-const express = require("express");
-const app = express();
-
-app.use(express.json());
-
-app.post("/submit-pack", (req, res) => {
-
-    const { pack_name, pack_no, smoke_sensor } = req.body;
-
-    if(!pack_name || !pack_no){
-        return res.json({
-            message: "Missing required fields"
-        });
-    }
-
-    console.log("Pack Name:", pack_name);
-    console.log("Pack No:", pack_no);
-    console.log("Smoke Sensor:", smoke_sensor);
-
-    // Example: Save to database here
-
-    res.json({
-        message: "Data received successfully"
     });
 
-});
-
-app.listen(3000, () => {
-    console.log("Server running on port 3000");
 });
