@@ -1,199 +1,71 @@
-/******************** MODULES ********************/
-const express = require("express");
-const app = express();
-const http = require("http").Server(app);
-const io = require("socket.io")(http, { cors: { origin: "*", methods: ["GET","POST"] } });
-const path = require("path");
-const sql = require("mssql");
-
-/******************** MIDDLEWARE ********************/
-app.use(express.static(__dirname));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-/******************** DB CONFIG ********************/
-const sqlConfig = {
-    user: "user_mis",
-    password: "admin",
-    database: "taco_treceability",
-    server: "localhost\\MSSQLSERVER",
-    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
-    options: { encrypt: true, trustServerCertificate: true }
-};
-
-/******************** DB POOL ********************/
-const dbConn = new sql.ConnectionPool(sqlConfig);
-dbConn.connect()
-    .then(() => console.log("Connected to taco_treceability"))
-    .catch(err => console.error("DB Connection Error:", err));
-
-/******************** SERVER ********************/
-http.listen(5401, "0.0.0.0", () => console.log("Server running on port 5401"));
-
-/******************** UI ROUTE ********************/
-app.get("/IR", (req, res) => {
-    res.sendFile(path.join(__dirname, "IR_backup_ui.html"));
-});
-
-/******************** SOCKET.IO ********************/
-io.on("connection", (socket) => {
-    console.log("Client connected:", socket.id);
-
-    socket.on("submitPackData", async (data) => {
-        console.log("Received data:", data);
-
-        const { pack_name, pack_no, smoke_sensor } = data; 
-        let array_counter = 0;
-        let checking_counter = 1;
-        let get_data_arr_status = [];
-
-        // Step 1: Get ModuleBarcode, moduleNumber, and FinalQRCode
-        const processQuery = `
-            SELECT ModuleBarcode, moduleNumber, FinalQRCode
-            FROM taco_treceability.station_status
-            WHERE FinalQRCode LIKE '%${pack_no}%' AND PackName='${pack_name}'
+async function copyDataToImportTable() {
+    try {
+        // Step 1: Get all updated records from traial2 (filtering only the pack that was just updated)
+        const selectQuery = `
+            SELECT TOP (200)
+                sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift,
+                module_barcode, process_status, pack_no, rework_status, bypass_operator,
+                bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
+            FROM taco_treceability.torque_details_EIP_traial2
+            WHERE pack_no LIKE '%${pack_no}%'
         `;
 
-        try {
-            const request = new sql.Request(dbConn);
-            const result1 = (await request.query(processQuery)).recordset;
+        const req = new sql.Request(dbConn);
+        const result = await req.query(selectQuery);
+        const rows = result.recordset;
 
-            if (result1.length === 0) {
-                console.log("No modules found for this pack");
-                await proceedSmokeSensor();
-                return;
-            }
-
-            // Build array [ModuleBarcode1, moduleNumber1, FinalQRCode1, ...]
-            result1.forEach(r => {
-                get_data_arr_status.push(r.ModuleBarcode);
-                get_data_arr_status.push(r.moduleNumber);
-                get_data_arr_status.push(r.FinalQRCode);
-            });
-
-            console.log("Module array for update:", get_data_arr_status);
-
-            // Start recursive module update
-            await updateModule(get_data_arr_status[array_counter], get_data_arr_status[array_counter + 1], get_data_arr_status[array_counter + 2], array_counter);
-
-        } catch (err) {
-            console.error("Error querying modules:", err);
+        if (rows.length === 0) {
+            console.log("No updated data found to copy.");
+            return;
         }
 
-        // Recursive module update
-        async function updateModule(temp_mBarcode, temp_mNo, finalQRCode, array_counter) {
-            console.log(`Updating counter ${checking_counter}:`, temp_mBarcode, temp_mNo, finalQRCode);
-            const updateQuery = `
-                UPDATE taco_treceability.torque_details_EIP_traial2
-                SET pack_no='${finalQRCode}', module_barcode='${temp_mBarcode}'
-                WHERE module_name='${temp_mNo}' AND pack_name='${pack_name}'
-            `;
-
-            try {
-                const req = new sql.Request(dbConn);
-                await req.query(updateQuery);
-                checking_counter++;
-                await proceedNext(array_counter);
-            } catch (err) {
-                console.error("Error updating module:", err);
-            }
-        }
-
-        async function proceedNext(array_counter) {
-            if (array_counter + 3 < get_data_arr_status.length) {
-                array_counter += 3;
-                const temp_mBarcode = get_data_arr_status[array_counter];
-                const temp_mNo = get_data_arr_status[array_counter + 1];
-                const finalQRCode = get_data_arr_status[array_counter + 2];
-
-                setTimeout(async () => {
-                    await updateModule(temp_mBarcode, temp_mNo, finalQRCode, array_counter);
-                }, 500);
-            } else {
-                console.log("All module updates done");
-                await proceedSmokeSensor();
-            }
-        }
-
-        // Conditional smoke sensor update
-        async function proceedSmokeSensor() {
-            if (smoke_sensor && smoke_sensor.toLowerCase() !== "na") {
-                const smokeQuery = `
-                    UPDATE taco_treceability.torque_details_EIP_traial2
-                    SET module_barcode='${smoke_sensor}', smoke_sensor_linked_pack_no='${smoke_sensor}'
-                    WHERE smoke_sensor_linked_pack_no IS NOT NULL
-                `;
-                try {
-                    const req = new sql.Request(dbConn);
-                    await req.query(smokeQuery);
-                    console.log("Smoke sensor updated");
-                } catch (err) {
-                    console.error("Error updating smoke sensor:", err);
-                }
-            } else {
-                console.log("No smoke sensor scanned or value is NA. Skipping smoke update.");
+        // Step 2: Prepare values for bulk insert
+        const values = rows.map(r => {
+            let dateStr = 'NULL';
+            if (r.date_dd) {
+                const d = new Date(r.date_dd);
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                const ss = String(d.getSeconds()).padStart(2, '0');
+                dateStr = `'${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}'`;
             }
 
-            // Finally, copy the updated pack data to traial1
-            await copyDataToImportTable();
-        }
+            return `(
+                ${r.sr_no || 'NULL'},
+                '${r.pack_name}',
+                '${r.module_name}',
+                ${r.torque !== null ? r.torque : 'NULL'},
+                ${r.angle !== null ? r.angle : 'NULL'},
+                '${r.torque_status}',
+                ${dateStr},
+                '${r.shift}',
+                '${r.module_barcode}',
+                '${r.process_status}',
+                '${r.pack_no}',
+                '${r.rework_status}',
+                '${r.bypass_operator}',
+                '${r.bypass_reason}',
+                '${r.process_name}',
+                '${r.station_name}',
+                '${r.smoke_sensor_linked_pack_no || ''}'
+            )`;
+        }).join(",");
 
-        async function copyDataToImportTable() {
-            try {
-                const selectQuery = `
-                    SELECT 
-                        pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
-                        module_barcode, process_status, pack_no, rework_status, bypass_operator, 
-                        bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no
-                    FROM taco_treceability.torque_details_EIP_traial2
-                    WHERE pack_name='${pack_name}'
-                `;
+        // Step 3: Insert into traial1
+        const insertQuery = `
+            INSERT INTO taco_treceability.torque_details_EIP_traial1
+                (sr_no, pack_name, module_name, torque, angle, torque_status, date_dd, shift,
+                 module_barcode, process_status, pack_no, rework_status, bypass_operator,
+                 bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
+            VALUES ${values}
+        `;
 
-                const insertQueryBase = `
-                    INSERT INTO taco_treceability.torque_details_EIP_traial1
-                    (pack_name, module_name, torque, angle, torque_status, date_dd, shift, 
-                    module_barcode, process_status, pack_no, rework_status, bypass_operator, 
-                    bypass_reason, process_name, station_name, smoke_sensor_linked_pack_no)
-                    VALUES
-                `;
-
-                const pool = await sql.connect(sqlConfig);
-                const rows = (await pool.request().query(selectQuery)).recordset;
-
-                if (rows.length === 0) {
-                    console.log("No data to insert.");
-                    return;
-                }
-
-                const values = rows.map(r => {
-                    return `(
-                        '${r.pack_name}',
-                        '${r.module_name}',
-                        ${r.torque !== null ? r.torque : 'NULL'},
-                        ${r.angle !== null ? r.angle : 'NULL'},
-                        '${r.torque_status}',
-                        '${r.date_dd.toISOString().slice(0,19).replace('T',' ')}',
-                        '${r.shift}',
-                        '${r.module_barcode}',
-                        '${r.process_status}',
-                        '${r.pack_no}',
-                        '${r.rework_status}',
-                        '${r.bypass_operator}',
-                        '${r.bypass_reason}',
-                        '${r.process_name}',
-                        '${r.station_name}',
-                        '${r.smoke_sensor_linked_pack_no}'
-                    )`;
-                }).join(",");
-
-                const insertQuery = insertQueryBase + values;
-                await pool.request().query(insertQuery);
-                console.log("Data copied successfully from traial2 to traial1.");
-            } catch (err) {
-                console.error("Error copying data:", err);
-            }
-        }
-    });
-
-    socket.on("disconnect", () => console.log("Client disconnected:", socket.id));
-});
+        await req.query(insertQuery);
+        console.log(`Copied ${rows.length} records from traial2 to traial1 successfully.`);
+    } catch (err) {
+        console.error("Error copying data to traial1:", err);
+    }
+}
