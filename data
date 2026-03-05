@@ -1,1 +1,53 @@
 
+<div class="group station">
+    <label>Pack Name :</label>
+    <input list="packs" id="stationName" name="pack_name" placeholder="Search Pack">
+    
+    <datalist id="packs">
+        <option value="NOVA Prismatic LR">
+        <option value="Bajaj 8.9">
+        <option value="Bajaj 11.8">
+        <option value="Kanger 1">
+        <option value="Kanger 1 AIO">
+        <option value="Kanger 2">
+        <option value="Limber">
+        <option value="Bajaj 6.1">
+        <option value="Ejeeto 21.3">
+        <option value="Ejeeto 18.4">
+        <option value="SM eBada Dost">
+        <option value="SM eDost">
+        <option value="NOVA MROPS">
+        <option value="NOVA LROPS">
+        <option value="CORAL SR">
+        <option value="Kratos1 450kwh">
+        <option value="EBUS LR">
+        <option value="TVS 9">
+        <option value="Tamor">
+        <option value="Bajaj 12.1">
+        <option value="EBUS 283">
+        <option value="Cerus1 Cerus2 Kratos HD 450kwh">
+        <option value="Kratos1 300kwh">
+        <option value="Cerus1 Cerus2 300kwh">
+        <option value="UPP 39.9">
+        <option value="UPP 27.8">
+        <option value="Bajaj 5.9">
+        <option value="Bajaj 9.2">
+        <option value="Bajaj 12.2">
+        <option value="EBUS 424">
+        <option value="Challenger LR">
+        <option value="Challenger MR">
+        <option value="EBUS 184">
+        <option value="NOVA 40kwh">
+        <option value="PDU Kratos1 300kwh">
+        <option value="PDU Kratos1 450kwh">
+        <option value="PDU Cerus1 Cerus2 300kwh">
+        <option value="PDU Cerus1 Cerus2 Kratos HD 450kwh">
+        <option value="PDU SM eBada Dost">
+        <option value="PDU EBUS 283">
+        <option value="PDU EBUS 424">
+        <option value="PDU EBUS 184">
+        <option value="Bajaj 9.2 LL">
+        <option value="Bajaj 12.1 LL">
+        <option value="TVS 12.1">
+    </datalist>
+</div>
