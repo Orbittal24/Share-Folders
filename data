@@ -1,8 +1,185 @@
+frontend
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IR</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { background:#f4f6f9; font-family:Arial; }
+.card {
+    background:#fff; max-width:1000px; margin:40px auto;
+    padding:30px; border-radius:10px;
+    box-shadow:0 6px 18px rgba(0,0,0,.15);
+}
+h2 { color:#2e7d32; margin-bottom:25px; }
+.row { display:flex; gap:24px; flex-wrap:wrap; }
+.group { display:flex; flex-direction:column; }
+.group.station { flex:3; min-width:250px; }
+.group.line { flex:1; max-width:120px; }
+.group.barcode { flex:2; min-width:220px; }
+label { font-size:14px; margin-bottom:6px; font-weight:bold; }
+input, select {
+    width:95%; height:45px; font-size:16px;
+    padding:6px 10px; border-radius:6px;
+    border:1px solid #ccc;
+}
+#barcode { font-size:18px; letter-spacing:1px; }
+.button-row { text-align:center; margin-top:30px; }
+button {
+    height:45px; width:160px; font-size:16px;
+    font-weight:bold; background:#28a745;
+    border:none; color:white;
+    border-radius:6px; cursor:pointer;
+}
+button:hover { background:#218838; }
+</style>
+</head>
+<body>
+
+<div class="card">
+    <h2>New MIS Station Status OK</h2>
+
+    <div class="row">
+        <div class="group station">
+            <label>Pack Name :</label>
+            <input list="packs" id="stationName" name="pack_name" placeholder="Search Pack">
+            <datalist id="packs">
+                <option value="NOVA Prismatic LR">
+                <option value="Bajaj 8.9">
+                <option value="Bajaj 11.8">
+                <option value="Kanger 1">
+                <option value="Kanger 1 AIO">
+                <option value="Kanger 2">
+                <option value="Limber">
+                <option value="Bajaj 6.1">
+                <option value="Ejeeto 21.3">
+                <option value="Ejeeto 18.4">
+                <option value="SM eBada Dost">
+                <option value="SM eDost">
+                <option value="NOVA MROPS">
+                <option value="NOVA LROPS">
+                <option value="CORAL SR">
+                <option value="Kratos1 450kwh">
+                <option value="EBUS LR">
+                <option value="TVS 9">
+                <option value="Tamor">
+                <option value="Bajaj 12.1">
+                <option value="EBUS 283">
+                <option value="Cerus1 Cerus2 Kratos HD 450kwh">
+                <option value="Kratos1 300kwh">
+                <option value="Cerus1 Cerus2 300kwh">
+                <option value="UPP 39.9">
+                <option value="UPP 27.8">
+                <option value="Bajaj 5.9">
+                <option value="Bajaj 9.2">
+                <option value="Bajaj 12.2">
+                <option value="EBUS 424">
+                <option value="Challenger LR">
+                <option value="Challenger MR">
+                <option value="EBUS 184">
+                <option value="NOVA 40kwh">
+                <option value="PDU Kratos1 300kwh">
+                <option value="PDU Kratos1 450kwh">
+                <option value="PDU Cerus1 Cerus2 300kwh">
+                <option value="PDU Cerus1 Cerus2 Kratos HD 450kwh">
+                <option value="PDU SM eBada Dost">
+                <option value="PDU EBUS 283">
+                <option value="PDU EBUS 424">
+                <option value="PDU EBUS 184">
+                <option value="Bajaj 9.2 LL">
+                <option value="Bajaj 12.1 LL">
+                <option value="TVS 12.1">
+            </datalist>
+        </div>
+
+        <div class="group line">
+            <label>Pack No :</label>
+            <input 
+                type="text" 
+                id="packNo" 
+                name="pack_no"
+                placeholder="Enter 6 digit Pack No"
+                maxlength="6"
+                pattern="\d{6}"
+                inputmode="numeric"
+                required
+            >
+        </div>
+
+        <div class="group barcode">
+            <label>Smoke Sensor :</label>
+            <input type="text" id="barcode"
+                placeholder="Scan Barcode"
+                autocomplete="off"
+                inputmode="none"
+                autofocus>
+        </div>
+    </div>
+
+    <div class="button-row">
+        <button onclick="submitData()">Submit</button>
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io("http://localhost:5401"); // make sure port matches backend
+
+socket.on("connect", () => {
+    console.log("Connected to backend, ID:", socket.id);
+});
+
+function submitData() {
+    const packName = document.getElementById("stationName").value.trim();
+    const packNo = document.getElementById("packNo").value.trim();
+    let barcode = document.getElementById("barcode").value.trim();
+
+    if(!packName){
+        alert("Please select Pack Name");
+        return;
+    }
+
+    if(!/^\d{6}$/.test(packNo)){
+        alert("Pack No must be exactly 6 digits");
+        return;
+    }
+
+    if(!barcode) barcode = "na";
+
+    const data = { pack_name: packName, pack_no: packNo, smoke_sensor: barcode };
+    console.log("Sending data:", data);
+    socket.emit("submitPackData", data);
+}
+
+socket.on("packResponse", (status, message) => {
+    alert(message);
+    if(status === "success"){
+        document.getElementById("packNo").value = "";
+        document.getElementById("barcode").value = "";
+        document.getElementById("stationName").value = "";
+        document.getElementById("stationName").focus();
+    }
+});
+
+socket.on("setProcess", (moduleBarcode, moduleNumber) => {
+    console.log("Module Info:", moduleBarcode, moduleNumber);
+});
+</script>
+
+</body>
+</html>
+
+
+
+backend
 /******************** MODULES ********************/
 const express = require("express");
 const app = express();
 const http = require("http").Server(app);
-const io = require("socket.io")(http);
+const io = require("socket.io")(http, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
+});
 const path = require("path");
 const sql = require("mssql");
 
@@ -11,24 +188,17 @@ app.use(express.static(__dirname));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/******************** DB CONFIG 2 (LOG DB) ********************/
+/******************** DB CONFIG ********************/
 const sqlConfig2 = {
     user: "user_mis",
     password: "admin",
     database: "taco_treceability",
     server: "localhost\\MSSQLSERVER",
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000
-    },
-    options: {
-        encrypt: true,
-        trustServerCertificate: true
-    }
+    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+    options: { encrypt: true, trustServerCertificate: true }
 };
 
-/******************** DB CONNECTION POOL ********************/
+/******************** DB CONNECTION ********************/
 const dbConn2 = new sql.ConnectionPool(sqlConfig2);
 
 dbConn2.connect()
@@ -42,30 +212,16 @@ http.listen(5401, "0.0.0.0", () => {
 
 /******************** UI ROUTE ********************/
 app.get("/IR", (req, res) => {
-    res.sendFile(path.join(__dirname, "IR_backup_ui.html"));
-});
-
-/******************** API: LOAD STATIONS ********************/
-app.get("/api/stations", async (req, res) => {
-    try {
-        const result = await dbConn2.request().query(`
-            SELECT Station_ID, Station_Name
-            FROM taco_treceability.master_station
-            ORDER BY Station_Name
-        `);
-        res.json(result.recordset);
-    } catch (err) {
-        console.error("Station fetch error:", err);
-        res.status(500).json({ error: "Failed to load stations" });
-    }
+    res.sendFile(path.join(__dirname, "IR.html"));
 });
 
 /******************** SOCKET.IO ********************/
 io.on("connection", (socket) => {
     console.log("Client connected:", socket.id);
 
-    /******************** HANDLE PACK SUBMISSION ********************/
     socket.on("submitPackData", async (data) => {
+        console.log("Received data:", data);
+
         const { pack_name, pack_no, smoke_sensor } = data;
 
         const processquery = `
@@ -79,26 +235,20 @@ io.on("connection", (socket) => {
             const request = new sql.Request(dbConn2);
             const result = await request.query(processquery);
 
-            if (result.recordset.length > 0) {
-                const moduleBarcode = result.recordset[0].ModuleBarcode;
-                const moduleNumber = result.recordset[0].moduleNumber;
-
-                // Send module info to frontend
-                socket.emit("setProcess", moduleBarcode, moduleNumber);
-
-                // Also send status message
+            if(result.recordset.length > 0){
+                const { ModuleBarcode, moduleNumber } = result.recordset[0];
+                socket.emit("setProcess", ModuleBarcode, moduleNumber);
                 socket.emit("packResponse", "success", "Data processed successfully");
             } else {
-                socket.emit("setProcess", "NA", "No Data Found");
+                socket.emit("setProcess", "NA", "NA");
                 socket.emit("packResponse", "error", "No data found for this pack");
             }
-        } catch (err) {
+        } catch(err){
             console.error("DB query error:", err);
             socket.emit("packResponse", "error", "Database query failed");
         }
     });
 
-    /******************** DISCONNECT ********************/
     socket.on("disconnect", () => {
         console.log("Client disconnected:", socket.id);
     });
