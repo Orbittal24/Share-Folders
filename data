@@ -1,50 +1,130 @@
-socket.on("submitPackData", (data) => {
-    console.log("Received data:", data);
+io.on("connection", (socket) => {
+    console.log("Client connected:", socket.id);
 
-    var array_counter = 0;
-    var get_data_arr_status = [];
+    socket.on("submitPackData", (data) => {
+        console.log("Received data:", data);
 
-    var pack_no = data.pack_no;
-    var pack_name = data.pack_name;
+        const pack_no = data.pack_no;
+        const pack_name = data.pack_name;
+        const new_smoke = data.smoke_sensor || null; // smoke sensor from frontend
 
-    var processquery = `SELECT ModuleBarcode, moduleNumber 
-        FROM taco_treceability.station_status 
-        WHERE FinalQRCode LIKE '%${pack_no}%' 
-        AND PackName='${pack_name}'`;
+        let array_counter = 0;
+        let checking_counter = 1;
+        let get_data_arr_status = [];
 
-    // Use existing connection pool dbConn2
-    const request = new sql.Request(dbConn2);
-    request.query(processquery, function (err, recordset) {
-        if (err) return console.log(err);
+        // Step 1: Get ModuleBarcode and moduleNumber for the pack
+        const processQuery = `
+            SELECT ModuleBarcode, moduleNumber 
+            FROM taco_treceability.station_status 
+            WHERE FinalQRCode LIKE '%${pack_no}%' 
+            AND PackName='${pack_name}'
+        `;
 
-        var result1 = recordset.recordset;
-        get_data_arr_status = [];
+        // Use existing pool
+        const request = new sql.Request(dbConn2);
+        request.query(processQuery, (err, recordset) => {
+            if (err) return console.log(err);
 
-        if (result1.length > 0) {
-            for (var i = 0; i < result1.length; i++) {
-                get_data_arr_status.push(result1[i].ModuleBarcode);
-                get_data_arr_status.push(result1[i].moduleNumber);
-            }
+            const result1 = recordset.recordset;
+            get_data_arr_status = [];
 
-            console.log("Data array for update:", get_data_arr_status);
-
-            function updateModuleBarcodes(moduleBarcode, moduleNumber, counter) {
-                console.log(`Module ${counter/2 + 1}:`, moduleBarcode, moduleNumber);
-                socket.emit("setProcess", moduleBarcode, moduleNumber);
-
-                counter += 2;
-                if (counter < get_data_arr_status.length) {
-                    updateModuleBarcodes(get_data_arr_status[counter], get_data_arr_status[counter + 1], counter);
-                } else {
-                    console.log("All modules processed");
+            if (result1.length > 0) {
+                // Flatten ModuleBarcode + moduleNumber
+                for (let i = 0; i < result1.length; i++) {
+                    get_data_arr_status.push(result1[i].ModuleBarcode);
+                    get_data_arr_status.push(result1[i].moduleNumber);
                 }
+
+                console.log("Data array for update:", get_data_arr_status);
+
+                // Step 2: Start update chain
+                function updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter) {
+                    console.log(`Updating counter: ${checking_counter}, Module: ${temp_mNo}`);
+
+                    const updateQuery = `
+                        UPDATE taco_treceability.torque_details_EIP_traial2 
+                        SET pack_no='${pack_no}', module_barcode='${temp_mBarcode}' 
+                        WHERE module_name='${temp_mNo}'
+                    `;
+
+                    const req = new sql.Request(dbConn2);
+                    req.query(updateQuery, (err, res) => {
+                        if (err) console.log(err);
+                        else {
+                            checking_counter++;
+                            proceedNext(array_counter);
+                        }
+                    });
+                }
+
+                function updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter) {
+                    console.log(`Updating counter2: ${checking_counter}, Module: ${temp_mNo}`);
+
+                    const updateQuery = `
+                        UPDATE taco_treceability.torque_details_EIP_traial2 
+                        SET pack_no='${pack_no}', module_barcode='${temp_mBarcode}' 
+                        WHERE module_name='${temp_mNo}'
+                    `;
+
+                    const req = new sql.Request(dbConn2);
+                    req.query(updateQuery, (err, res) => {
+                        if (err) console.log(err);
+                        else {
+                            checking_counter++;
+                            proceedNext(array_counter);
+                        }
+                    });
+                }
+
+                function proceedNext(array_counter) {
+                    if (array_counter + 2 < get_data_arr_status.length) {
+                        array_counter += 2;
+                        const temp_mBarcode = get_data_arr_status[array_counter];
+                        const temp_mNo = get_data_arr_status[array_counter + 1];
+
+                        setTimeout(() => {
+                            if (checking_counter % 2 === 0) {
+                                updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter);
+                            } else {
+                                updateModuleBarcodes2(temp_mBarcode, temp_mNo, array_counter);
+                            }
+                        }, 500);
+                    } else {
+                        // All module updates done
+                        if (new_smoke) {
+                            const smokeQuery = `
+                                UPDATE taco_treceability.torque_details_EIP_traial2 
+                                SET module_barcode='${new_smoke}', smoke_sensor_linked_pack_no='${new_smoke}' 
+                                WHERE smoke_sensor_linked_pack_no IS NOT NULL
+                            `;
+                            const req = new sql.Request(dbConn2);
+                            req.query(smokeQuery, (err, res) => {
+                                if (err) console.log(err);
+                                else {
+                                    console.log("Smoke sensor updated. Copying data to import2 table...");
+                                    copyDataToImportTable(); // your final copy function
+                                }
+                            });
+                        } else {
+                            console.log("All modules processed. No smoke sensor scanned.");
+                            copyDataToImportTable();
+                        }
+                    }
+                }
+
+                // Start first update
+                const temp_mBarcode = get_data_arr_status[array_counter];
+                const temp_mNo = get_data_arr_status[array_counter + 1];
+                updateModuleBarcodes(temp_mBarcode, temp_mNo, array_counter);
+
+            } else {
+                console.log("No data found for this pack");
+                socket.emit("setProcess", "NA", "NA");
             }
+        });
+    });
 
-            updateModuleBarcodes(get_data_arr_status[array_counter], get_data_arr_status[array_counter + 1], array_counter);
-
-        } else {
-            console.log("No data found for this pack");
-            socket.emit("setProcess", "NA", "NA");
-        }
+    socket.on("disconnect", () => {
+        console.log("Client disconnected:", socket.id);
     });
 });
