@@ -1,3 +1,2 @@
-SELECT SERVERPROPERTY('Edition') AS Edition,
-       SERVERPROPERTY('ProductVersion') AS Version,
-       SERVERPROPERTY('ProductLevel') AS Level;
+ALTER TABLE ocvcell_inventory_data_2025_11_08
+ALTER COLUMN capacity NVARCHAR(50);
