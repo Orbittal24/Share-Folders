@@ -1,2 +1,21 @@
 ALTER TABLE ocvcell_inventory_data_2025_11_08
 ALTER COLUMN capacity NVARCHAR(50);
+
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin@123",   // ✅ updated password
+    database: "taco_treceability",
+    server: "10.9.4.29",     // ✅ ONLY IP here
+    port: 1433,              // ✅ important
+    options: {
+        instanceName: "PROD_SQL_2026", // ✅ instance here
+        encrypt: false,                // ✅ for local network
+        trustServerCertificate: true
+    },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
