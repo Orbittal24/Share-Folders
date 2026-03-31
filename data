@@ -7,6 +7,15 @@ SQL_CONN_STR = (
     'TrustServerCertificate=yes;'
 )
 
+python running
+SQL_CONN_STR = (
+    'DRIVER={ODBC Driver 17 for SQL Server};'
+    'SERVER=10.9.4.29\\PROD_SQL_2026,1433;'
+    'DATABASE=taco_treceability_ir;'
+    'UID=user_mis;'
+    'PWD=admin@123'
+)
+
 const sqlConfig = {
     user: "user_mis",
     password: "admin@123",   // ✅ updated password
