@@ -1,5 +1,11 @@
-ALTER TABLE ocvcell_inventory_data_2025_11_08
-ALTER COLUMN capacity NVARCHAR(50);
+SQL_CONN_STR = (
+    'DRIVER={ODBC Driver 17 for SQL Server};'
+    'SERVER=10.9.4.29\\PROD_SQL_2026,1433;'
+    'DATABASE=taco_treceability;'
+    'UID=user_mis;'
+    'PWD=admin@123;'
+    'TrustServerCertificate=yes;'
+)
 
 const sqlConfig = {
     user: "user_mis",
