@@ -1,10 +1,14 @@
-{
-  "apps": [
-    {
-      "name": "Line_1_ALT_gun1",
-      "cwd": "C:\\Project\\EV_Battery_MIS\\SQL\\TACO Batch Uesed Script code\\",
-      "script": "app_ocv_machine_data_alert_line1_line2.py",
-      "interpreter": "pythonw"
-    }
-  ]
-}
+try:
+    # SQL
+    dst_cursor.execute(...)
+    dst_conn.commit()
+
+    # Redis ONLY if SQL success
+    r.setex(...)
+
+    # DELETE ONLY if everything success
+    src_cursor.execute(...)
+    src_conn.commit()
+
+except Exception as e:
+    print("FAILED - NO DELETE, NO REDIS")
