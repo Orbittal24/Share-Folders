@@ -1,6 +1,114 @@
-ALTER TABLE ocvcell_inventory_data_2026_12_08
-ALTER COLUMN capacity INT;
+# ============================
+# SQL BLOCK
+# ============================
+try:
 
+    dst_cursor.execute(f"""
+    SELECT cellqr FROM {tableName}
+    WHERE cellqr = ?
+    """, qr)
+
+    exists = dst_cursor.fetchone()
+
+    if exists:
+
+        dst_cursor.execute(f"""
+        UPDATE {tableName}
+        SET voltage=?, ir=?, class_grade=?, capacity=?,
+            k_value=?, ocv_mc_no=?, first_para_time=?,
+            last_para_time=?, batch=?, plant_code=?
+        WHERE cellqr=?
+        """,
+        (
+            safe(row.voltage),
+            safe(row.ir),
+            safe(row.cell_class),
+            capacity_val,
+            safe(row.kvalue),
+            safe(row.machine_location),
+            row.today_date,
+            row.today_date,
+            dateCode,
+            code12_13,
+            qr
+        ))
+
+        print("UPDATED :", qr)
+
+    else:
+
+        dst_cursor.execute(f"""
+        INSERT INTO {tableName}
+        (
+            cellqr, voltage, ir, class_grade,
+            capacity, thickness, k_value,
+            negative_voltage, cell_status,
+            ocv_mc_no, first_para_time, last_para_time,
+            laser_status, batch, plant_code
+        )
+        VALUES
+        (?,?,?,?,?,NULL,?,NULL,'OK',?,?,?,NULL,?,?)
+        """,
+        (
+            qr,
+            safe(row.voltage),
+            safe(row.ir),
+            safe(row.cell_class),
+            capacity_val,
+            safe(row.kvalue),
+            safe(row.machine_location),
+            row.today_date,
+            row.today_date,
+            dateCode,
+            code12_13
+        ))
+
+        print("INSERTED :", qr)
+
+    dst_conn.commit()
+    print("SQL SUCCESS :", qr)
+
+except Exception as sql_error:
+    print("SQL FAILED :", sql_error)
+    dst_conn.rollback()
+    raise Exception("SQL BLOCK FAILED")
+
+
+# ============================
+# REDIS BLOCK
+# ============================
+try:
+
+    row_dict = {
+        "cellqr": qr,
+        "voltage": safe(row.voltage),
+        "ir": safe(row.ir),
+        "class_grade": safe(row.cell_class),
+        "capacity": capacity_val,
+        "k_value": safe(row.kvalue),
+        "ocv_mc_no": safe(row.machine_location),
+        "first_para_time": safe(row.today_date),
+        "last_para_time": safe(row.today_date),
+        "batch": dateCode,
+        "plant_code": code12_13
+    }
+
+    r.setex(
+        f"cell:{qr}",
+        DUPLICATE_TTL_SECONDS,
+        json.dumps(row_dict)
+    )
+
+    print("REDIS SUCCESS :", qr)
+
+except Exception as redis_error:
+    print("REDIS FAILED :", redis_error)
+    raise Exception("REDIS BLOCK FAILED")
+
+
+# ============================
+# OUTER EXCEPTION (RETRY LOGIC)
+# ============================
 except Exception as e:
     print("PROCESS ERROR:", e)
 
@@ -25,12 +133,11 @@ except Exception as e:
         return
 
     # -----------------------------------
-    # IF RETRIES EXCEEDED → MOVE TO REJECTION
+    # MOVE TO REJECTION
     # -----------------------------------
     try:
         print("MAX RETRIES REACHED → MOVING TO REJECTION")
 
-        # INSERT INTO REJECTION
         src_cursor.execute("""
         INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
         SELECT *
@@ -41,7 +148,6 @@ except Exception as e:
         src_conn.commit()
         print("INSERTED INTO REJECTION:", qr)
 
-        # DELETE FROM SOURCE
         src_cursor.execute("""
         DELETE FROM taco_treceability.ocv_machine_data_mirror
         WHERE cell_qrcode=?
@@ -50,20 +156,8 @@ except Exception as e:
         src_conn.commit()
         print("DELETED FROM SOURCE:", qr)
 
-        # CLEANUP RETRY KEY
         r.delete(retry_key)
 
     except Exception as move_error:
         print("REJECTION MOVE FAILED:", move_error)
         src_conn.rollback()
-
-
-except Exception as sql_error:
-    print("SQL FAILED :", sql_error)
-    dst_conn.rollback()
-    raise Exception("SQL BLOCK FAILED")
-
-
-except Exception as redis_error:
-    print("REDIS FAILED :", redis_error)
-    raise Exception("REDIS BLOCK FAILED")
