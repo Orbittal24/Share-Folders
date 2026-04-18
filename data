@@ -1,24 +1,2 @@
-import re
-
-def extract_capacity(val):
-    if val is None:
-        return ""
-
-    val_str = str(val)
-
-    # Extract first number (integer or decimal)
-    match = re.search(r"\d+(\.\d+)?", val_str)
-
-    if match:
-        return match.group(0)   # returns "105" from "105 AH"
-    
-    return ""
-🔧 Replace your current line
-
-Change this:
-
-capacity_val = safe(row.cell_capacity)
-
-👉 To this:
-
-capacity_val = extract_capacity(row.cell_capacity)
+ALTER TABLE ocvcell_inventory_data_2026_12_08
+ALTER COLUMN capacity INT;
