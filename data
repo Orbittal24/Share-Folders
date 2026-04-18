@@ -1,25 +1,16 @@
 ALTER TABLE ocvcell_inventory_data_2026_12_08
 ALTER COLUMN capacity INT;
 
-def get_retry_key(qr):
-    return f"retry:{qr}"
-
-Find
-except Exception as e:
-    print("PROCESS ERROR (SKIPPED):", e)
-    return
-
-Replace
 except Exception as e:
     print("PROCESS ERROR:", e)
 
     retry_key = get_retry_key(qr)
-    retries = r.get(retry_key)
 
-    if retries is None:
+    try:
+        retries = r.get(retry_key)
+        retries = int(retries) if retries else 0
+    except:
         retries = 0
-    else:
-        retries = int(retries)
 
     retries += 1
     r.set(retry_key, retries)
@@ -27,9 +18,9 @@ except Exception as e:
     print(f"RETRY COUNT for {qr}: {retries}")
 
     # -----------------------------------
-    # IF RETRIES < 3 → SKIP FOR NOW
+    # IF RETRIES < 10 → SKIP FOR NOW
     # -----------------------------------
-    if retries < 3:
+    if retries < 10:
         print("Will retry later...")
         return
 
@@ -39,6 +30,7 @@ except Exception as e:
     try:
         print("MAX RETRIES REACHED → MOVING TO REJECTION")
 
+        # INSERT INTO REJECTION
         src_cursor.execute("""
         INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
         SELECT *
@@ -47,20 +39,18 @@ except Exception as e:
         """, qr)
 
         src_conn.commit()
-
         print("INSERTED INTO REJECTION:", qr)
 
-        # delete after successful insert
+        # DELETE FROM SOURCE
         src_cursor.execute("""
         DELETE FROM taco_treceability.ocv_machine_data_mirror
         WHERE cell_qrcode=?
         """, qr)
 
         src_conn.commit()
-
         print("DELETED FROM SOURCE:", qr)
 
-        # cleanup retry key
+        # CLEANUP RETRY KEY
         r.delete(retry_key)
 
     except Exception as move_error:
@@ -68,11 +58,12 @@ except Exception as e:
         src_conn.rollback()
 
 
-SELECT TOP 1 *
-FROM taco_treceability.ocv_machine_data_mirror
-WHERE machine_location='line11_line12'
-AND cell_qrcode NOT IN (
-    SELECT cell_qrcode
-    FROM taco_treceability.ocv_machine_data_mirror_rejection
-)
-ORDER BY sr_no ASC
+except Exception as sql_error:
+    print("SQL FAILED :", sql_error)
+    dst_conn.rollback()
+    raise Exception("SQL BLOCK FAILED")
+
+
+except Exception as redis_error:
+    print("REDIS FAILED :", redis_error)
+    raise Exception("REDIS BLOCK FAILED")
