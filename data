@@ -1,163 +1,286 @@
-# ============================
-# SQL BLOCK
-# ============================
-try:
+import pyodbc
+import time
+import redis
+import json
+import re
 
-    dst_cursor.execute(f"""
-    SELECT cellqr FROM {tableName}
-    WHERE cellqr = ?
-    """, qr)
+# -----------------------------------
+# REDIS CONFIG
+# -----------------------------------
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 31
 
-    exists = dst_cursor.fetchone()
+r = redis.StrictRedis(
+    host=redis_host,
+    port=redis_port,
+    db=redis_db,
+    decode_responses=True
+)
 
-    if exists:
+DUPLICATE_TTL_SECONDS = 3 * 24 * 60 * 60
 
-        dst_cursor.execute(f"""
-        UPDATE {tableName}
-        SET voltage=?, ir=?, class_grade=?, capacity=?,
-            k_value=?, ocv_mc_no=?, first_para_time=?,
-            last_para_time=?, batch=?, plant_code=?
-        WHERE cellqr=?
-        """,
-        (
-            safe(row.voltage),
-            safe(row.ir),
-            safe(row.cell_class),
-            capacity_val,
-            safe(row.kvalue),
-            safe(row.machine_location),
-            row.today_date,
-            row.today_date,
-            dateCode,
-            code12_13,
-            qr
-        ))
-
-        print("UPDATED :", qr)
-
-    else:
-
-        dst_cursor.execute(f"""
-        INSERT INTO {tableName}
-        (
-            cellqr, voltage, ir, class_grade,
-            capacity, thickness, k_value,
-            negative_voltage, cell_status,
-            ocv_mc_no, first_para_time, last_para_time,
-            laser_status, batch, plant_code
-        )
-        VALUES
-        (?,?,?,?,?,NULL,?,NULL,'OK',?,?,?,NULL,?,?)
-        """,
-        (
-            qr,
-            safe(row.voltage),
-            safe(row.ir),
-            safe(row.cell_class),
-            capacity_val,
-            safe(row.kvalue),
-            safe(row.machine_location),
-            row.today_date,
-            row.today_date,
-            dateCode,
-            code12_13
-        ))
-
-        print("INSERTED :", qr)
-
-    dst_conn.commit()
-    print("SQL SUCCESS :", qr)
-
-except Exception as sql_error:
-    print("SQL FAILED :", sql_error)
-    dst_conn.rollback()
-    raise Exception("SQL BLOCK FAILED")
+# -----------------------------------
+# HELPERS
+# -----------------------------------
+def safe(val):
+    return "" if val is None else str(val)
 
 
-# ============================
-# REDIS BLOCK
-# ============================
-try:
+def extract_capacity(val):
+    if val is None:
+        return ""
+    val_str = str(val)
+    match = re.search(r"\d+(\.\d+)?", val_str)
+    return match.group(0) if match else ""
 
-    row_dict = {
-        "cellqr": qr,
-        "voltage": safe(row.voltage),
-        "ir": safe(row.ir),
-        "class_grade": safe(row.cell_class),
-        "capacity": capacity_val,
-        "k_value": safe(row.kvalue),
-        "ocv_mc_no": safe(row.machine_location),
-        "first_para_time": safe(row.today_date),
-        "last_para_time": safe(row.today_date),
-        "batch": dateCode,
-        "plant_code": code12_13
-    }
 
-    r.setex(
-        f"cell:{qr}",
-        DUPLICATE_TTL_SECONDS,
-        json.dumps(row_dict)
+def get_retry_key(qr):
+    return f"retry:{qr}"
+
+
+# -----------------------------------
+# DB CONFIG
+# -----------------------------------
+sqlConfig1 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "taco_treceability",
+    "user": "user_mis",
+    "password": "admin@123",
+}
+
+sqlConfig2 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "ocv_inventory_master",
+    "user": "user_mis",
+    "password": "admin@123",
+}
+
+# -----------------------------------
+# CONNECT DB
+# -----------------------------------
+def connect_db(config):
+    conn = pyodbc.connect(
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={config['server']};"
+        f"DATABASE={config['database']};"
+        f"UID={config['user']};"
+        f"PWD={config['password']};"
+        f"TrustServerCertificate=yes;"
     )
-
-    print("REDIS SUCCESS :", qr)
-
-except Exception as redis_error:
-    print("REDIS FAILED :", redis_error)
-    raise Exception("REDIS BLOCK FAILED")
+    conn.autocommit = False
+    return conn
 
 
-# ============================
-# OUTER EXCEPTION (RETRY LOGIC)
-# ============================
-except Exception as e:
-    print("PROCESS ERROR:", e)
+# -----------------------------------
+# DATE MAPS
+# -----------------------------------
+yearMap = {
+    "B": 21, "C": 22, "D": 23, "E": 24, "F": 25, "G": 26, "H": 27, "J": 28,
+    "K": 29, "L": 30, "M": 31, "N": 32, "P": 33, "R": 34, "S": 35, "T": 36,
+    "V": 37, "W": 38, "X": 39, "Y": 40,
+    "1": 41, "2": 42, "3": 43, "4": 44, "5": 45, "6": 46, "7": 47, "8": 48,
+    "9": 49, "A": 50,
+}
 
-    retry_key = get_retry_key(qr)
+monthMap = {"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"A":10,"B":11,"C":12}
+
+dayMap = {
+    "1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
+    "A":10,"B":11,"C":12,"D":13,"E":14,"F":15,"G":16,"H":17,
+    "J":18,"K":19,"L":20,"M":21,"N":22,"P":23,"R":24,"S":25,
+    "T":26,"V":27,"W":28,"X":29,"Y":30,"0":31
+}
+
+# -----------------------------------
+# ENSURE TABLE
+# -----------------------------------
+def ensure_table(cursor, tableName):
+    cursor.execute(f"""
+    IF NOT EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.TABLES 
+        WHERE TABLE_NAME = '{tableName}'
+    )
+    BEGIN
+        CREATE TABLE {tableName} (
+            sr_no INT IDENTITY(1,1) PRIMARY KEY,
+            cellqr NVARCHAR(50),
+            voltage NVARCHAR(50),
+            ir NVARCHAR(50),
+            class_grade NVARCHAR(30),
+            capacity NVARCHAR(50),
+            thickness NVARCHAR(50),
+            k_value NVARCHAR(50),
+            negative_voltage NVARCHAR(50),
+            cell_status NVARCHAR(20),
+            ocv_mc_no NVARCHAR(40),
+            first_para_time DATETIME,
+            last_para_time DATETIME,
+            laser_status VARCHAR(50),
+            batch VARCHAR(100),
+            plant_code VARCHAR(50)
+        )
+    END
+    """)
+
+# -----------------------------------
+# PROCESS RECORD
+# -----------------------------------
+def process_record(src_conn, dst_conn):
+
+    src_cursor = src_conn.cursor()
+    dst_cursor = dst_conn.cursor()
 
     try:
-        retries = r.get(retry_key)
-        retries = int(retries) if retries else 0
-    except:
-        retries = 0
-
-    retries += 1
-    r.set(retry_key, retries)
-
-    print(f"RETRY COUNT for {qr}: {retries}")
-
-    # -----------------------------------
-    # IF RETRIES < 10 → SKIP FOR NOW
-    # -----------------------------------
-    if retries < 10:
-        print("Will retry later...")
-        return
-
-    # -----------------------------------
-    # MOVE TO REJECTION
-    # -----------------------------------
-    try:
-        print("MAX RETRIES REACHED → MOVING TO REJECTION")
-
+        # FETCH
         src_cursor.execute("""
-        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
-        SELECT *
+        SELECT TOP 1 *
         FROM taco_treceability.ocv_machine_data_mirror
-        WHERE cell_qrcode=?
-        """, qr)
+        WHERE machine_location='line11_line12'
+        ORDER BY sr_no ASC
+        """)
 
-        src_conn.commit()
-        print("INSERTED INTO REJECTION:", qr)
+        row = src_cursor.fetchone()
 
+        if not row:
+            print("No records...")
+            return
+
+        qr = safe(row.cell_qrcode)
+
+        print("\n========= NEW RECORD =========")
+        print("QR :", qr)
+
+        # VALIDATION
+        if len(qr) < 16:
+            raise Exception("QR too short")
+
+        code12_13 = qr[12:14]
+        dateCode = qr[8:11] if code12_13 == "BV" else qr[14:17]
+
+        yearValue = yearMap.get(dateCode[0])
+        monthValue = monthMap.get(dateCode[1])
+        dayValue = dayMap.get(dateCode[2])
+
+        if not yearValue or not monthValue or not dayValue:
+            raise Exception("Date mapping failed")
+
+        year = 2000 + yearValue
+        month = f"{monthValue:02d}"
+        day = f"{dayValue:02d}"
+
+        tableName = f"ocvcell_inventory_data_{year}_{month}_{day}"
+        ensure_table(dst_cursor, tableName)
+
+        capacity_val = safe(row.cell_capacity)
+
+        # ---------------- SQL ----------------
+        try:
+            dst_cursor.execute(f"SELECT cellqr FROM {tableName} WHERE cellqr=?", qr)
+            exists = dst_cursor.fetchone()
+
+            if exists:
+                dst_cursor.execute(f"""
+                UPDATE {tableName}
+                SET voltage=?, ir=?, class_grade=?, capacity=?,
+                    k_value=?, ocv_mc_no=?, first_para_time=?,
+                    last_para_time=?, batch=?, plant_code=?
+                WHERE cellqr=?
+                """,
+                (safe(row.voltage), safe(row.ir), safe(row.cell_class),
+                 capacity_val, safe(row.kvalue), safe(row.machine_location),
+                 row.today_date, row.today_date, dateCode, code12_13, qr))
+                print("UPDATED :", qr)
+            else:
+                dst_cursor.execute(f"""
+                INSERT INTO {tableName}
+                (cellqr, voltage, ir, class_grade, capacity, thickness,
+                 k_value, negative_voltage, cell_status, ocv_mc_no,
+                 first_para_time, last_para_time, laser_status, batch, plant_code)
+                VALUES (?,?,?,?,?,NULL,?,NULL,'OK',?,?,?,NULL,?,?)
+                """,
+                (qr, safe(row.voltage), safe(row.ir), safe(row.cell_class),
+                 capacity_val, safe(row.kvalue), safe(row.machine_location),
+                 row.today_date, row.today_date, dateCode, code12_13))
+                print("INSERTED :", qr)
+
+            dst_conn.commit()
+
+        except Exception as e:
+            dst_conn.rollback()
+            raise Exception(f"SQL FAILED: {e}")
+
+        # ---------------- REDIS ----------------
+        try:
+            r.setex(f"cell:{qr}", DUPLICATE_TTL_SECONDS, json.dumps({"cellqr": qr}))
+        except Exception as e:
+            raise Exception(f"REDIS FAILED: {e}")
+
+        # ---------------- DELETE ----------------
         src_cursor.execute("""
         DELETE FROM taco_treceability.ocv_machine_data_mirror
         WHERE cell_qrcode=?
         """, qr)
-
         src_conn.commit()
-        print("DELETED FROM SOURCE:", qr)
 
-        r.delete(retry_key)
+        print("SUCCESS :", qr)
 
-    except Exception as move_error:
-        print("REJECTION MOVE FAILED:", move_error)
-        src_conn.rollback()
+    except Exception as e:
+        print("PROCESS ERROR:", e)
+
+        retry_key = get_retry_key(qr)
+        retries = int(r.get(retry_key) or 0) + 1
+        r.set(retry_key, retries)
+
+        print("RETRY:", retries)
+
+        if retries < 10:
+            return
+
+        try:
+            print("MOVING TO REJECTION")
+
+            src_cursor.execute("""
+            INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
+            SELECT *
+            FROM taco_treceability.ocv_machine_data_mirror
+            WHERE cell_qrcode=?
+            """, qr)
+
+            src_conn.commit()
+
+            src_cursor.execute("""
+            DELETE FROM taco_treceability.ocv_machine_data_mirror
+            WHERE cell_qrcode=?
+            """, qr)
+
+            src_conn.commit()
+
+            r.delete(retry_key)
+
+        except Exception as move_error:
+            print("REJECTION FAILED:", move_error)
+            src_conn.rollback()
+
+
+# -----------------------------------
+# MAIN LOOP
+# -----------------------------------
+def start():
+    src_conn = connect_db(sqlConfig1)
+    dst_conn = connect_db(sqlConfig2)
+
+    print("SYSTEM STARTED")
+
+    while True:
+        try:
+            process_record(src_conn, dst_conn)
+        except Exception as e:
+            print("MAIN ERROR:", e)
+        time.sleep(0.1)
+
+
+# -----------------------------------
+# START
+# -----------------------------------
+start()
