@@ -20,24 +20,27 @@ r = redis.StrictRedis(
 
 DUPLICATE_TTL_SECONDS = 3 * 24 * 60 * 60
 
+# ✅ RETRY CONFIG
+MAX_RETRY = 3
+RETRY_KEY_PREFIX = "retry:"
+
 # -----------------------------------
-# HELPERS
+# SAFE STRING
 # -----------------------------------
 def safe(val):
     return "" if val is None else str(val)
 
-
 def extract_capacity(val):
     if val is None:
         return ""
+
     val_str = str(val)
     match = re.search(r"\d+(\.\d+)?", val_str)
-    return match.group(0) if match else ""
 
-
-def get_retry_key(qr):
-    return f"retry:{qr}"
-
+    if match:
+        return match.group(0)
+    
+    return ""
 
 # -----------------------------------
 # DB CONFIG
@@ -71,7 +74,6 @@ def connect_db(config):
     conn.autocommit = False
     return conn
 
-
 # -----------------------------------
 # DATE MAPS
 # -----------------------------------
@@ -95,8 +97,8 @@ dayMap = {
 # -----------------------------------
 # ENSURE TABLE
 # -----------------------------------
-def ensure_table(cursor, tableName):
-    cursor.execute(f"""
+def ensure_table(dst_cursor, tableName):
+    dst_cursor.execute(f"""
     IF NOT EXISTS (
         SELECT 1 FROM INFORMATION_SCHEMA.TABLES 
         WHERE TABLE_NAME = '{tableName}'
@@ -124,6 +126,80 @@ def ensure_table(cursor, tableName):
     """)
 
 # -----------------------------------
+# MOVE TO REJECTION
+# -----------------------------------
+def move_to_rejection(src_conn, row):
+    cursor = src_conn.cursor()
+    try:
+        cursor.execute("""
+        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
+        (
+            cell_qrcode, voltage, ir, today_date, updated_time,
+            machine_location, shift, used_on_line, kvalue,
+            grade, cell_capacity, cell_class
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            row.cell_qrcode,
+            row.voltage,
+            row.ir,
+            row.today_date,
+            row.updated_time,
+            row.machine_location,
+            row.shift,
+            row.used_on_line,
+            row.kvalue,
+            row.grade,
+            row.cell_capacity,
+            row.cell_class
+        ))
+
+        src_conn.commit()
+        print("MOVED TO REJECTION :", row.cell_qrcode)
+        return True
+
+    except Exception as e:
+        print("REJECTION INSERT FAILED :", e)
+        src_conn.rollback()
+        return False
+
+# -----------------------------------
+# HANDLE FAILURE (RETRY LOGIC)
+# -----------------------------------
+def handle_failure(src_conn, row):
+    qr = safe(row.cell_qrcode)
+    retry_key = RETRY_KEY_PREFIX + qr
+
+    try:
+        retry_count = r.get(retry_key)
+        retry_count = int(retry_count) if retry_count else 0
+        retry_count += 1
+
+        if retry_count >= MAX_RETRY:
+            print(f"MAX RETRY REACHED ({retry_count}) :", qr)
+
+            if move_to_rejection(src_conn, row):
+
+                cursor = src_conn.cursor()
+                cursor.execute("""
+                DELETE FROM taco_treceability.ocv_machine_data_mirror
+                WHERE cell_qrcode=?
+                """, qr)
+
+                src_conn.commit()
+                print("DELETED AFTER REJECTION :", qr)
+
+                r.delete(retry_key)
+
+        else:
+            r.setex(retry_key, 3600, retry_count)
+            print(f"RETRY {retry_count}/{MAX_RETRY} :", qr)
+
+    except Exception as e:
+        print("RETRY HANDLER ERROR :", e)
+
+# -----------------------------------
 # PROCESS RECORD
 # -----------------------------------
 def process_record(src_conn, dst_conn):
@@ -131,8 +207,9 @@ def process_record(src_conn, dst_conn):
     src_cursor = src_conn.cursor()
     dst_cursor = dst_conn.cursor()
 
+    row = None
+
     try:
-        # FETCH
         src_cursor.execute("""
         SELECT TOP 1 *
         FROM taco_treceability.ocv_machine_data_mirror
@@ -151,11 +228,11 @@ def process_record(src_conn, dst_conn):
         print("\n========= NEW RECORD =========")
         print("QR :", qr)
 
-        # VALIDATION
         if len(qr) < 16:
             raise Exception("QR too short")
 
         code12_13 = qr[12:14]
+
         dateCode = qr[8:11] if code12_13 == "BV" else qr[14:17]
 
         yearValue = yearMap.get(dateCode[0])
@@ -170,11 +247,13 @@ def process_record(src_conn, dst_conn):
         day = f"{dayValue:02d}"
 
         tableName = f"ocvcell_inventory_data_{year}_{month}_{day}"
+
+        print("TABLE :", tableName)
+
         ensure_table(dst_cursor, tableName)
 
-        capacity_val = safe(row.cell_capacity)
+        capacity_val = extract_capacity(row.cell_capacity)
 
-        # ---------------- SQL ----------------
         try:
             dst_cursor.execute(f"SELECT cellqr FROM {tableName} WHERE cellqr=?", qr)
             exists = dst_cursor.fetchone()
@@ -187,10 +266,21 @@ def process_record(src_conn, dst_conn):
                     last_para_time=?, batch=?, plant_code=?
                 WHERE cellqr=?
                 """,
-                (safe(row.voltage), safe(row.ir), safe(row.cell_class),
-                 capacity_val, safe(row.kvalue), safe(row.machine_location),
-                 row.today_date, row.today_date, dateCode, code12_13, qr))
+                (
+                    safe(row.voltage),
+                    safe(row.ir),
+                    safe(row.cell_class),
+                    capacity_val,
+                    safe(row.kvalue),
+                    safe(row.machine_location),
+                    row.today_date,
+                    row.today_date,
+                    dateCode,
+                    code12_13,
+                    qr
+                ))
                 print("UPDATED :", qr)
+
             else:
                 dst_cursor.execute(f"""
                 INSERT INTO {tableName}
@@ -199,69 +289,58 @@ def process_record(src_conn, dst_conn):
                  first_para_time, last_para_time, laser_status, batch, plant_code)
                 VALUES (?,?,?,?,?,NULL,?,NULL,'OK',?,?,?,NULL,?,?)
                 """,
-                (qr, safe(row.voltage), safe(row.ir), safe(row.cell_class),
-                 capacity_val, safe(row.kvalue), safe(row.machine_location),
-                 row.today_date, row.today_date, dateCode, code12_13))
+                (
+                    qr,
+                    safe(row.voltage),
+                    safe(row.ir),
+                    safe(row.cell_class),
+                    capacity_val,
+                    safe(row.kvalue),
+                    safe(row.machine_location),
+                    row.today_date,
+                    row.today_date,
+                    dateCode,
+                    code12_13
+                ))
                 print("INSERTED :", qr)
 
             dst_conn.commit()
+            print("SQL SUCCESS :", qr)
 
-        except Exception as e:
+        except Exception as sql_error:
+            print("SQL FAILED :", sql_error)
             dst_conn.rollback()
-            raise Exception(f"SQL FAILED: {e}")
-
-        # ---------------- REDIS ----------------
-        try:
-            r.setex(f"cell:{qr}", DUPLICATE_TTL_SECONDS, json.dumps({"cellqr": qr}))
-        except Exception as e:
-            raise Exception(f"REDIS FAILED: {e}")
-
-        # ---------------- DELETE ----------------
-        src_cursor.execute("""
-        DELETE FROM taco_treceability.ocv_machine_data_mirror
-        WHERE cell_qrcode=?
-        """, qr)
-        src_conn.commit()
-
-        print("SUCCESS :", qr)
-
-    except Exception as e:
-        print("PROCESS ERROR:", e)
-
-        retry_key = get_retry_key(qr)
-        retries = int(r.get(retry_key) or 0) + 1
-        r.set(retry_key, retries)
-
-        print("RETRY:", retries)
-
-        if retries < 10:
+            handle_failure(src_conn, row)
             return
 
+        # REDIS
         try:
-            print("MOVING TO REJECTION")
+            r.setex(f"cell:{qr}", DUPLICATE_TTL_SECONDS, json.dumps({"cellqr": qr}))
+            print("REDIS SUCCESS :", qr)
 
-            src_cursor.execute("""
-            INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
-            SELECT *
-            FROM taco_treceability.ocv_machine_data_mirror
-            WHERE cell_qrcode=?
-            """, qr)
+        except Exception as redis_error:
+            print("REDIS FAILED :", redis_error)
+            return
 
-            src_conn.commit()
-
+        # DELETE
+        try:
             src_cursor.execute("""
             DELETE FROM taco_treceability.ocv_machine_data_mirror
             WHERE cell_qrcode=?
             """, qr)
 
             src_conn.commit()
+            print("SOURCE DELETED :", qr)
 
-            r.delete(retry_key)
-
-        except Exception as move_error:
-            print("REJECTION FAILED:", move_error)
+        except Exception as del_error:
+            print("DELETE FAILED :", del_error)
             src_conn.rollback()
 
+    except Exception as e:
+        print("PROCESS ERROR :", e)
+        if row:
+            handle_failure(src_conn, row)
+        return
 
 # -----------------------------------
 # MAIN LOOP
@@ -275,10 +354,18 @@ def start():
     while True:
         try:
             process_record(src_conn, dst_conn)
-        except Exception as e:
-            print("MAIN ERROR:", e)
-        time.sleep(0.1)
 
+        except Exception as main_error:
+            print("MAIN LOOP ERROR :", main_error)
+
+            try:
+                src_conn = connect_db(sqlConfig1)
+                dst_conn = connect_db(sqlConfig2)
+                print("DB RECONNECTED")
+            except:
+                print("RECONNECT FAILED")
+
+        time.sleep(0.1)
 
 # -----------------------------------
 # START
