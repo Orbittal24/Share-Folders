@@ -1,2 +1,78 @@
 ALTER TABLE ocvcell_inventory_data_2026_12_08
 ALTER COLUMN capacity INT;
+
+def get_retry_key(qr):
+    return f"retry:{qr}"
+
+Find
+except Exception as e:
+    print("PROCESS ERROR (SKIPPED):", e)
+    return
+
+Replace
+except Exception as e:
+    print("PROCESS ERROR:", e)
+
+    retry_key = get_retry_key(qr)
+    retries = r.get(retry_key)
+
+    if retries is None:
+        retries = 0
+    else:
+        retries = int(retries)
+
+    retries += 1
+    r.set(retry_key, retries)
+
+    print(f"RETRY COUNT for {qr}: {retries}")
+
+    # -----------------------------------
+    # IF RETRIES < 3 → SKIP FOR NOW
+    # -----------------------------------
+    if retries < 3:
+        print("Will retry later...")
+        return
+
+    # -----------------------------------
+    # IF RETRIES EXCEEDED → MOVE TO REJECTION
+    # -----------------------------------
+    try:
+        print("MAX RETRIES REACHED → MOVING TO REJECTION")
+
+        src_cursor.execute("""
+        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
+        SELECT *
+        FROM taco_treceability.ocv_machine_data_mirror
+        WHERE cell_qrcode=?
+        """, qr)
+
+        src_conn.commit()
+
+        print("INSERTED INTO REJECTION:", qr)
+
+        # delete after successful insert
+        src_cursor.execute("""
+        DELETE FROM taco_treceability.ocv_machine_data_mirror
+        WHERE cell_qrcode=?
+        """, qr)
+
+        src_conn.commit()
+
+        print("DELETED FROM SOURCE:", qr)
+
+        # cleanup retry key
+        r.delete(retry_key)
+
+    except Exception as move_error:
+        print("REJECTION MOVE FAILED:", move_error)
+        src_conn.rollback()
+
+
+SELECT TOP 1 *
+FROM taco_treceability.ocv_machine_data_mirror
+WHERE machine_location='line11_line12'
+AND cell_qrcode NOT IN (
+    SELECT cell_qrcode
+    FROM taco_treceability.ocv_machine_data_mirror_rejection
+)
+ORDER BY sr_no ASC
