@@ -1,24 +1,9 @@
 @echo off
 echo Starting OCV Services...
 
-REM Set working directory
 cd /d "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code"
 
-REM Start each service in background using pythonw
-
-start "" pythonw "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code\ocv_cell_data_mirror_ocv_universal_line_1_2.pyw"
-
-start "" pythonw "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code\ocv_cell_data_mirror_ocv_universal_line_3_4.pyw"
-
-start "" pythonw "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code\ocv_cell_data_mirror_ocv_universal_line_5_6.pyw"
-
-start "" pythonw "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code\ocv_cell_data_mirror_ocv_universal_line_7_8.pyw"
-
-start "" pythonw "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code\ocv_cell_data_mirror_ocv_universal_XNG.pyw"
-
-start "" pythonw "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code\ocv_cell_data_mirror_ocv_universal_bajaj_2w.pyw"
-
-start "" pythonw "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code\ocv_cell_data_mirror_ocv_universal_line_A.pyw"
+pm2 start ocv_cell_data_mirror_ocv_universal_line_11_12.py --interpreter python
 
 echo All services started.
 exit
