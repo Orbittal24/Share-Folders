@@ -1,13 +1,5 @@
-@echo off
-echo Starting OCV Services...
-
-cd /d "C:\Project\EV_Battery_MIS\SQL\TACO Batch Uesed Script code"
-
-REM Start services via PM2
-pm2 start ocv_cell_data_mirror_ocv_universal_line_11_12.py --interpreter python --name line_11_12
-pm2 start ocv_cell_data_mirror_ocv_universal_line_5_6.py --interpreter python --name line_5_6
-
-echo All services started.
-
-pm2 save
-exit
+DJ1914-F4E0014235
+DJ1914-F7A0023989
+DJ1914-G130062546
+DJ2030-G920023900
+DJ1914-DB90004625
