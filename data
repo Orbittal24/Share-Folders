@@ -1,5 +1,8 @@
-DJ1914-F4E0014235
-DJ1914-F7A0023989
-DJ1914-G130062546
-DJ2030-G920023900
-DJ1914-DB90004625
+
+redis_client = redis.Redis(
+    host='localhost',
+    port=6379,
+    db=0,
+    password='Gotion@123Strong!',
+    decode_responses=True
+)
