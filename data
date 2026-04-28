@@ -20,3 +20,13 @@ r = redis.StrictRedis(
     db=redis_db,
     decode_responses=True
 )
+
+
+XNG
+r = redis.StrictRedis(
+    host=redis_host,
+    port=redis_port,
+    password="Gotion@123Strong!",  # 👈 add this
+    db=redis_db,
+    decode_responses=True
+)
