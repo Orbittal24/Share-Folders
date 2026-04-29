@@ -6,14 +6,13 @@ WHERE pack_no LIKE '%747'
 
 UPDATE taco_treceability.torque_details_EIP_import2
 SET date_dd = 
-    CAST('2025-09-10' AS DATETIME) 
-    + CAST(CAST(date_dd AS TIME) AS DATETIME)
+    CAST('2024-12-12' AS DATETIME) 
+    + CAST(date_dd AS TIME)
 WHERE pack_name = 'EBUS 283'
-  AND pack_no LIKE '%0000044'
+  AND pack_no LIKE '%229'
   AND process_name IN (
         'IPB component fitment (283)',
         'Flexible busbar to -ve side IPB (283)',
         'IPB component positive busbar (283)',
         'Positive IPB busbar (283)'
-    )
-  AND CAST(date_dd AS DATE) = '2024-09-23';
+  );
