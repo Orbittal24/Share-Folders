@@ -5,9 +5,11 @@ WHERE pack_no LIKE '%747'
 
 
 UPDATE taco_treceability.torque_details_EIP_import2
-SET date_dd = 
-    CAST('2024-12-12' AS DATETIME) 
-    + CAST(date_dd AS TIME)
+SET date_dd = DATEADD(
+    DAY,
+    DATEDIFF(DAY, date_dd, '2024-12-12'),
+    date_dd
+)
 WHERE pack_name = 'EBUS 283'
   AND pack_no LIKE '%229'
   AND process_name IN (
