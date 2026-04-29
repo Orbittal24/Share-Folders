@@ -1,32 +1,4 @@
-
-redis_client = redis.Redis(
-    host='localhost',
-    port=6379,
-    db=0,
-    password='Gotion@123Strong!',
-    decode_responses=True
-)
-
-
-redis_host = "localhost"
-redis_port = 6379
-redis_db = 31
-redis_password = "Gotion@123Strong!"
-
-r = redis.StrictRedis(
-    host=redis_host,
-    port=redis_port,
-    password=redis_password,   # 👈 add this line
-    db=redis_db,
-    decode_responses=True
-)
-
-
-XNG
-r = redis.StrictRedis(
-    host=redis_host,
-    port=redis_port,
-    password="Gotion@123Strong!",  # 👈 add this
-    db=redis_db,
-    decode_responses=True
-)
+UPDATE taco_treceability.torque_details_EIP_insert
+SET angle = CAST(2000 + (RAND(CHECKSUM(NEWID())) * 2001) AS INT)
+WHERE pack_no LIKE '%747'
+  AND process_name = 'IPB component fitment (283)';
