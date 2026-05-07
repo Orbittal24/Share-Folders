@@ -9,3 +9,18 @@ MOVE 'taco_treceability_log' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\M
 
 ALTER DATABASE taco_treceability_screw
 SET MULTI_USER;
+
+
+///////////Overwrite//////////////
+
+ALTER DATABASE taco_treceability_screw
+SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+
+RESTORE DATABASE taco_treceability_screw
+FROM DISK = 'E:\Path\New_Backup_File.bak'
+WITH REPLACE,
+MOVE 'taco_treceability' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\MSSQL\DATA\taco_treceability_screw.mdf',
+MOVE 'taco_treceability_log' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\MSSQL\DATA\taco_treceability_screw_log.ldf';
+
+ALTER DATABASE taco_treceability_screw
+SET MULTI_USER;
