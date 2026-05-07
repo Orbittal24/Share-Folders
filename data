@@ -1,18 +1,11 @@
-ALTER DATABASE taco_traceability_screwing
+ALTER DATABASE taco_treceability_screw
 SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
 
-
-/////////////////////////////////////
-
-
-RESTORE DATABASE taco_traceability_screwing
+RESTORE DATABASE taco_treceability_screw
 FROM DISK = 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\MSSQL\Backup\taco_traceability.bak'
 WITH REPLACE,
-MOVE 'taco_traceability' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\MSSQL\DATA\taco_traceability_screwing.mdf',
-MOVE 'taco_traceability_log' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\MSSQL\DATA\taco_traceability_screwing_log.ldf';
+MOVE 'taco_traceability' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\MSSQL\DATA\taco_treceability_screw.mdf',
+MOVE 'taco_traceability_log' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\MSSQL\DATA\taco_treceability_screw_log.ldf';
 
-
-////////////////////////////
-
-ALTER DATABASE taco_traceability_screwing
+ALTER DATABASE taco_treceability_screw
 SET MULTI_USER;
