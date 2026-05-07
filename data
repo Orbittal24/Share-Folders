@@ -24,3 +24,10 @@ MOVE 'taco_treceability_log' TO 'E:\Microsoft SQL Server\MSSQL15.PROD_SQL_2026\M
 
 ALTER DATABASE taco_treceability_screw
 SET MULTI_USER;
+
+
+////////////////Drop
+ALTER DATABASE taco_treceability_screw
+SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+
+DROP DATABASE taco_treceability_screw;
