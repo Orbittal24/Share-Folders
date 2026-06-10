@@ -1,70 +1,10 @@
-socket.on('modbusData', function (data) {
+else if (Number(globarr.status) === 1 && newcycle === 1) {
 
-    console.log("Data:", data);
+    console.log("DISPLAY BLOCK EXECUTED");
 
-    globarr = data;
+    document.getElementById('forceValue').innerText =
+        Number(globarr.force).toFixed(3);
 
-    console.log('newcycle::::::', newcycle, 'status:::', globarr.status);
-    console.log('valueupdate::::::', valueupdate);
-
-    // Do not show data until barcode is validated
-    const barcodeValue = document.getElementById('barcodeInput').value.trim();
-
-    if (valueupdate !== 1 || barcodeValue === "") {
-
-        clearFields();
-        newcycle = 0;
-        return;
-    }
-
-    if (globarr.status === "0" && newcycle === 0) {
-
-        console.log('globarr.status333:', globarr.status);
-
-        newcycle = 1;
-        clearFields();
-    }
-
-    else if (globarr.status === "1" && newcycle === 0) {
-
-        console.log('globarr.status333:', globarr.status);
-
-        newcycle = 1;
-        clearFields();
-    }
-
-    else if (globarr.status === "1" && newcycle === 1) {
-
-        console.log('globarr.status222:', globarr.status);
-
-        document.getElementById('forceValue').innerText =
-            globarr.force ? parseFloat(globarr.force).toFixed(3) : '';
-
-        document.getElementById('loadValue').innerText =
-            globarr.load ? parseFloat(globarr.load).toFixed(2) : '';
-
-        document.getElementById('bitValue').innerText = 'OK';
-
-        document.getElementById("bitValue").style.backgroundColor = "green";
-        document.getElementById("bitValue1").style.backgroundColor = "green";
-    }
-
-    else if (globarr.status === "2") {
-
-        document.getElementById('forceValue').innerText =
-            globarr.force ? parseFloat(globarr.force).toFixed(3) : '';
-
-        document.getElementById('loadValue').innerText =
-            globarr.load ? parseFloat(globarr.load).toFixed(2) : '';
-
-        document.getElementById('bitValue').innerText = 'NOK';
-
-        document.getElementById("bitValue").style.backgroundColor = "red";
-        document.getElementById("bitValue1").style.backgroundColor = "red";
-    }
-
-    else {
-
-        clearFields();
-    }
-});
+    document.getElementById('loadValue').innerText =
+        Number(globarr.load).toFixed(3);
+}
