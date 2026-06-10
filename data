@@ -4,12 +4,30 @@ socket.on('modbusData', function (data) {
 
     globarr = data;
 
-    console.log("globarr.status =", globarr.status);
-    console.log("newcycle =", newcycle);
+    console.log('newcycle::::::', newcycle, 'status:::', globarr.status);
+    console.log('valueupdate::::::', valueupdate);
+
+    // Do not show data until barcode is validated
+    const barcodeValue = document.getElementById('barcodeInput').value.trim();
+
+    if (valueupdate !== 1 || barcodeValue === "") {
+
+        clearFields();
+        newcycle = 0;
+        return;
+    }
 
     if (globarr.status === "0" && newcycle === 0) {
 
-        console.log("Status 0 received -> New Cycle Started");
+        console.log('globarr.status333:', globarr.status);
+
+        newcycle = 1;
+        clearFields();
+    }
+
+    else if (globarr.status === "1" && newcycle === 0) {
+
+        console.log('globarr.status333:', globarr.status);
 
         newcycle = 1;
         clearFields();
@@ -17,13 +35,13 @@ socket.on('modbusData', function (data) {
 
     else if (globarr.status === "1" && newcycle === 1) {
 
-        console.log("Status 1 received -> Displaying Values");
+        console.log('globarr.status222:', globarr.status);
 
         document.getElementById('forceValue').innerText =
             globarr.force ? parseFloat(globarr.force).toFixed(3) : '';
 
         document.getElementById('loadValue').innerText =
-            globarr.load ? parseFloat(globarr.load).toFixed(3) : '';
+            globarr.load ? parseFloat(globarr.load).toFixed(2) : '';
 
         document.getElementById('bitValue').innerText = 'OK';
 
@@ -33,13 +51,11 @@ socket.on('modbusData', function (data) {
 
     else if (globarr.status === "2") {
 
-        console.log("Status 2 received -> NOK");
-
         document.getElementById('forceValue').innerText =
             globarr.force ? parseFloat(globarr.force).toFixed(3) : '';
 
         document.getElementById('loadValue').innerText =
-            globarr.load ? parseFloat(globarr.load).toFixed(3) : '';
+            globarr.load ? parseFloat(globarr.load).toFixed(2) : '';
 
         document.getElementById('bitValue').innerText = 'NOK';
 
@@ -48,10 +64,6 @@ socket.on('modbusData', function (data) {
     }
 
     else {
-
-        console.log("Else Block Executed");
-        console.log("status =", globarr.status);
-        console.log("newcycle =", newcycle);
 
         clearFields();
     }
