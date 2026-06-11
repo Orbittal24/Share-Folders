@@ -1,72 +1,57 @@
+let lastForce = null;
+
 socket.on('modbusData', function (data) {
 
     console.log("Data:", data);
 
     globarr = data;
 
-    // Always show latest values
-    document.getElementById('forceValue').innerText =
-        data.force !== undefined
-            ? parseFloat(data.force).toFixed(3)
-            : '';
+    let currentForce = parseFloat(globarr.force);
 
-    document.getElementById('loadValue').innerText =
-        data.load !== undefined
-            ? data.load
-            : '';
+    console.log("lastForce:", lastForce);
+    console.log("currentForce:", currentForce);
 
-    // Status handling
-    if (data.status === "1") {
+    // First value received
+    if (lastForce === null) {
+
+        document.getElementById('forceValue').innerText =
+            currentForce.toFixed(3);
+
+        document.getElementById('loadValue').innerText =
+            globarr.load || '';
 
         document.getElementById('bitValue').innerText = 'OK';
 
         document.getElementById("bitValue").style.backgroundColor = "green";
         document.getElementById("bitValue1").style.backgroundColor = "green";
 
-        console.log("Values Displayed");
+        lastForce = currentForce;
 
+        return;
     }
-    else if (data.status === "0") {
 
-        document.getElementById('bitValue').innerText = 'WAIT';
+    // Update only when force changes
+    if (currentForce !== lastForce) {
 
-        document.getElementById("bitValue").style.backgroundColor = "yellow";
-        document.getElementById("bitValue1").style.backgroundColor = "yellow";
+        console.log("Force Changed:", lastForce, "=>", currentForce);
 
-        console.log("Waiting for cycle");
+        document.getElementById('forceValue').innerText =
+            currentForce.toFixed(3);
 
-    }
-    else if (data.status === "2") {
+        document.getElementById('loadValue').innerText =
+            globarr.load || '';
 
-        document.getElementById('bitValue').innerText = 'NOK';
+        document.getElementById('bitValue').innerText = 'OK';
 
-        document.getElementById("bitValue").style.backgroundColor = "red";
-        document.getElementById("bitValue1").style.backgroundColor = "red";
+        document.getElementById("bitValue").style.backgroundColor = "green";
+        document.getElementById("bitValue1").style.backgroundColor = "green";
 
-        console.log("NOK Status");
-
-    }
-    else {
-
-        document.getElementById('bitValue').innerText = data.status;
-
-        console.log("Unknown Status:", data.status);
+        // Store latest force value
+        lastForce = currentForce;
     }
 });
 
 
 
 
-
-/////////////////
-socket.emit("modbusData", {
-    force: Number(finalValue),
-    load: Number(formattedLoad),
-    status: String(bitvalue)
-});
-
-console.log("Data sent to frontend:", {
-    force: Number(finalValue),
-    load: Number(formattedLoad),
-    status: String(bitvalue)
-});
+lastForce = null;
