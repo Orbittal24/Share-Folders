@@ -1,10 +1,72 @@
-else if (Number(globarr.status) === 1 && newcycle === 1) {
+socket.on('modbusData', function (data) {
 
-    console.log("DISPLAY BLOCK EXECUTED");
+    console.log("Data:", data);
 
+    globarr = data;
+
+    // Always show latest values
     document.getElementById('forceValue').innerText =
-        Number(globarr.force).toFixed(3);
+        data.force !== undefined
+            ? parseFloat(data.force).toFixed(3)
+            : '';
 
     document.getElementById('loadValue').innerText =
-        Number(globarr.load).toFixed(3);
-}
+        data.load !== undefined
+            ? data.load
+            : '';
+
+    // Status handling
+    if (data.status === "1") {
+
+        document.getElementById('bitValue').innerText = 'OK';
+
+        document.getElementById("bitValue").style.backgroundColor = "green";
+        document.getElementById("bitValue1").style.backgroundColor = "green";
+
+        console.log("Values Displayed");
+
+    }
+    else if (data.status === "0") {
+
+        document.getElementById('bitValue').innerText = 'WAIT';
+
+        document.getElementById("bitValue").style.backgroundColor = "yellow";
+        document.getElementById("bitValue1").style.backgroundColor = "yellow";
+
+        console.log("Waiting for cycle");
+
+    }
+    else if (data.status === "2") {
+
+        document.getElementById('bitValue').innerText = 'NOK';
+
+        document.getElementById("bitValue").style.backgroundColor = "red";
+        document.getElementById("bitValue1").style.backgroundColor = "red";
+
+        console.log("NOK Status");
+
+    }
+    else {
+
+        document.getElementById('bitValue').innerText = data.status;
+
+        console.log("Unknown Status:", data.status);
+    }
+});
+
+
+
+
+
+/////////////////
+socket.emit("modbusData", {
+    force: Number(finalValue),
+    load: Number(formattedLoad),
+    status: String(bitvalue)
+});
+
+console.log("Data sent to frontend:", {
+    force: Number(finalValue),
+    load: Number(formattedLoad),
+    status: String(bitvalue)
+});
