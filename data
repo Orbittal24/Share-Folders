@@ -1,57 +1,110 @@
-let lastForce = null;
+// ================= MODBUS CONFIG =================
 
-socket.on('modbusData', function (data) {
+const MODBUS_IP_ADDRESS = "192.168.1.6";
+const MODBUS_PORT = 502;
 
-    console.log("Data:", data);
+const client = new ModbusRTU();
 
-    globarr = data;
+var globarr = {};
+var modbusConnected = false;
 
-    let currentForce = parseFloat(globarr.force);
+// Convert 2 registers (16-bit + 16-bit) to signed 32-bit integer
+function convertLong(highWord, lowWord) {
 
-    console.log("lastForce:", lastForce);
-    console.log("currentForce:", currentForce);
+    let value = ((highWord << 16) | lowWord);
 
-    // First value received
-    if (lastForce === null) {
-
-        document.getElementById('forceValue').innerText =
-            currentForce.toFixed(3);
-
-        document.getElementById('loadValue').innerText =
-            globarr.load || '';
-
-        document.getElementById('bitValue').innerText = 'OK';
-
-        document.getElementById("bitValue").style.backgroundColor = "green";
-        document.getElementById("bitValue1").style.backgroundColor = "green";
-
-        lastForce = currentForce;
-
-        return;
+    // Convert unsigned to signed INT32
+    if (value > 0x7FFFFFFF) {
+        value = value - 0x100000000;
     }
 
-    // Update only when force changes
-    if (currentForce !== lastForce) {
+    return value;
+}
 
-        console.log("Force Changed:", lastForce, "=>", currentForce);
+// Connect to Modbus server
+async function connectModbus() {
 
-        document.getElementById('forceValue').innerText =
-            currentForce.toFixed(3);
+    try {
 
-        document.getElementById('loadValue').innerText =
-            globarr.load || '';
+        if (!client.isOpen) {
 
-        document.getElementById('bitValue').innerText = 'OK';
+            await client.connectTCP(
+                MODBUS_IP_ADDRESS,
+                { port: MODBUS_PORT }
+            );
 
-        document.getElementById("bitValue").style.backgroundColor = "green";
-        document.getElementById("bitValue1").style.backgroundColor = "green";
+            client.setID(1);
 
-        // Store latest force value
-        lastForce = currentForce;
+            modbusConnected = true;
+
+            console.log("Connected to Modbus server");
+        }
+
+    } catch (err) {
+
+        modbusConnected = false;
+
+        console.error("Modbus Connection Error:", err.message);
+
+        setTimeout(connectModbus, 5000);
     }
-});
+}
 
+// Read Modbus Data
+async function readModbus() {
 
+    try {
 
+        if (!client.isOpen) {
+            await connectModbus();
+            return;
+        }
 
-lastForce = null;
+        // Read 32 registers starting from address 1
+        const data = await client.readHoldingRegisters(1, 32);
+
+        const regs = data.data;
+
+        console.log("Raw Registers:", regs);
+
+        // ============================
+        // CHANGE REGISTER NUMBERS HERE
+        // ============================
+
+        // Example: Force uses register 2 & 3
+        let force = convertLong(regs[2], regs[3]);
+
+        // Example: Load uses register 8 & 9
+        let load = convertLong(regs[8], regs[9]);
+
+        // Status register
+        let status = regs[13];
+
+        globarr = {
+            force: force,
+            load: load,
+            status: status,
+            raw: regs
+        };
+
+        console.log("Parsed Modbus:", globarr);
+
+    } catch (err) {
+
+        console.error("Modbus Read Error:", err.message);
+
+        modbusConnected = false;
+
+        try {
+            client.close();
+        } catch (e) {}
+
+        setTimeout(connectModbus, 5000);
+    }
+}
+
+// Connect once
+connectModbus();
+
+// Read every second
+setInterval(readModbus, 1000);
