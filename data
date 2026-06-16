@@ -1,5 +1,5 @@
 // ================= MODBUS CONFIG =================
-
+const ModbusRTU = require("modbus-serial");
 const MODBUS_IP_ADDRESS = "192.168.1.6";
 const MODBUS_PORT = 502;
 
