@@ -1,27 +1,78 @@
-// ================= MODBUS CONFIG =================
 const ModbusRTU = require("modbus-serial");
+
+// Modbus server details
 const MODBUS_IP_ADDRESS = "192.168.1.6";
 const MODBUS_PORT = 502;
+const SLAVE_ID = 1;
 
 const client = new ModbusRTU();
 
-var globarr = {};
-var modbusConnected = false;
+var globarr = [];
 
-// Convert 2 registers (16-bit + 16-bit) to signed 32-bit integer
-function convertLong(highWord, lowWord) {
+/*************************************************
+ * 32 BIT DATA CONVERSION FUNCTIONS
+ *************************************************/
 
-    let value = ((highWord << 16) | lowWord);
+// Unsigned 32-bit Integer
+function toUInt32(high, low) {
+    return (high * 65536) + low;
+}
 
-    // Convert unsigned to signed INT32
+// Signed 32-bit Integer (DINT/LONG)
+function toInt32(high, low) {
+
+    let value = (high * 65536) + low;
+
     if (value > 0x7FFFFFFF) {
-        value = value - 0x100000000;
+        value -= 0x100000000;
     }
 
     return value;
 }
 
-// Connect to Modbus server
+// Float IEEE754 Big Endian
+function toFloat(high, low) {
+
+    const buffer = Buffer.alloc(4);
+
+    buffer.writeUInt16BE(high, 0);
+    buffer.writeUInt16BE(low, 2);
+
+    return buffer.readFloatBE(0);
+}
+
+// Float IEEE754 Word Swap
+function toFloatSwap(high, low) {
+
+    const buffer = Buffer.alloc(4);
+
+    buffer.writeUInt16BE(low, 0);
+    buffer.writeUInt16BE(high, 2);
+
+    return buffer.readFloatBE(0);
+}
+
+// INT32 Word Swap
+function toInt32Swap(high, low) {
+
+    let value = (low * 65536) + high;
+
+    if (value > 0x7FFFFFFF) {
+        value -= 0x100000000;
+    }
+
+    return value;
+}
+
+// UINT32 Word Swap
+function toUInt32Swap(high, low) {
+    return (low * 65536) + high;
+}
+
+/*************************************************
+ * CONNECT MODBUS
+ *************************************************/
+
 async function connectModbus() {
 
     try {
@@ -33,78 +84,131 @@ async function connectModbus() {
                 { port: MODBUS_PORT }
             );
 
-            client.setID(1);
+            client.setID(SLAVE_ID);
 
-            modbusConnected = true;
-
-            console.log("Connected to Modbus server");
+            console.log("Connected to Modbus Server");
         }
 
-    } catch (err) {
+    }
+    catch (err) {
 
-        modbusConnected = false;
-
-        console.error("Modbus Connection Error:", err.message);
+        console.log("Connection Error :", err.message);
 
         setTimeout(connectModbus, 5000);
     }
 }
 
-// Read Modbus Data
-async function readModbus() {
+connectModbus();
+
+/*************************************************
+ * READ DATA EVERY SECOND
+ *************************************************/
+
+setInterval(async () => {
 
     try {
 
         if (!client.isOpen) {
             await connectModbus();
-            return;
         }
 
-        // Read 32 registers starting from address 1
-        const data = await client.readHoldingRegisters(1, 32);
+        const data =
+            await client.readHoldingRegisters(
+                0x0001,
+                32
+            );
 
-        const regs = data.data;
+        globarr = data.data;
 
-        console.log("Raw Registers:", regs);
+        console.log("Raw Registers :", globarr);
 
-        // ============================
-        // CHANGE REGISTER NUMBERS HERE
-        // ============================
+        /*******************************************
+         * EXAMPLES
+         *******************************************/
 
-        // Example: Force uses register 2 & 3
-        let force = convertLong(regs[2], regs[3]);
+        //------------------------------------------------
+        // Example 1 : UINT32
+        //------------------------------------------------
+        let unsignedValue =
+            toUInt32(
+                globarr[3],
+                globarr[4]
+            );
 
-        // Example: Load uses register 8 & 9
-        let load = convertLong(regs[8], regs[9]);
+        console.log(
+            "UINT32 Value =",
+            unsignedValue
+        );
 
-        // Status register
-        let status = regs[13];
+        //------------------------------------------------
+        // Example 2 : INT32 / LONG
+        //------------------------------------------------
+        let longValue =
+            toInt32(
+                globarr[3],
+                globarr[4]
+            );
 
-        globarr = {
-            force: force,
-            load: load,
-            status: status,
-            raw: regs
-        };
+        console.log(
+            "INT32 Value =",
+            longValue
+        );
 
-        console.log("Parsed Modbus:", globarr);
+        //------------------------------------------------
+        // Example 3 : FLOAT
+        //------------------------------------------------
+        let floatValue =
+            toFloat(
+                globarr[3],
+                globarr[4]
+            );
 
-    } catch (err) {
+        console.log(
+            "FLOAT Value =",
+            floatValue
+        );
 
-        console.error("Modbus Read Error:", err.message);
+        //------------------------------------------------
+        // Example 4 : FLOAT WORD SWAP
+        //------------------------------------------------
+        let floatSwapValue =
+            toFloatSwap(
+                globarr[3],
+                globarr[4]
+            );
 
-        modbusConnected = false;
+        console.log(
+            "FLOAT SWAP =",
+            floatSwapValue
+        );
+
+        //------------------------------------------------
+        // Example 5 : INT32 WORD SWAP
+        //------------------------------------------------
+        let longSwap =
+            toInt32Swap(
+                globarr[3],
+                globarr[4]
+            );
+
+        console.log(
+            "INT32 SWAP =",
+            longSwap
+        );
+
+    }
+    catch (err) {
+
+        console.log(
+            "Modbus Read Error :",
+            err.message
+        );
 
         try {
             client.close();
-        } catch (e) {}
+        }
+        catch (e) { }
 
-        setTimeout(connectModbus, 5000);
     }
-}
 
-// Connect once
-connectModbus();
-
-// Read every second
-setInterval(readModbus, 1000);
+}, 1000);
