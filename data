@@ -1,10 +1,88 @@
-function convertLongIntegerLSW(lowWord, highWord) {
-    let value = (highWord << 16) | lowWord;
+async function startModbus() {
 
-    // Convert unsigned to signed 32-bit
-    if (value & 0x80000000) {
-        value = value - 0x100000000;
+    while (true) {
+
+        try {
+
+            if (!modbusConnected) {
+
+                console.log("Connecting Modbus Server...");
+
+                await client.connectTCP(
+                    MODBUS_IP_ADDRESS,
+                    { port: MODBUS_PORT }
+                );
+
+                client.setID(1);
+
+                modbusConnected = true;
+
+                console.log("Modbus Connected");
+            }
+
+            let data =
+                await client.readHoldingRegisters(
+                    0x0001,
+                    32
+                );
+
+            globarr = data.data;
+
+            console.log("Raw Registers:", globarr);
+
+            let longValues = [];
+
+            for (
+                let i = 0;
+                i < globarr.length;
+                i += 2
+            ) {
+
+                longValues.push(
+                    convertLongIntegerLSW(
+                        globarr[i],
+                        globarr[i + 1]
+                    )
+                );
+            }
+
+            console.log(
+                "Long Integer Values:",
+                longValues
+            );
+
+            await new Promise(
+                resolve =>
+                    setTimeout(
+                        resolve,
+                        1000
+                    )
+            );
+
+        }
+        catch (err) {
+
+            console.log(
+                "Modbus Error:",
+                err.message
+            );
+
+            modbusConnected = false;
+
+            try {
+                client.close();
+            }
+            catch (e) {}
+
+            await new Promise(
+                resolve =>
+                    setTimeout(
+                        resolve,
+                        5000
+                    )
+            );
+        }
     }
-
-    return value;
 }
+
+startModbus();
