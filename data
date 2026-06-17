@@ -1,2 +1,10 @@
-var globarr = [];
-var modbusConnected = false;
+function convertLongIntegerLSW(lowWord, highWord) {
+    let value = (highWord << 16) | lowWord;
+
+    // Convert unsigned to signed 32-bit
+    if (value & 0x80000000) {
+        value = value - 0x100000000;
+    }
+
+    return value;
+}
