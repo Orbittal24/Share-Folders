@@ -1,88 +1,71 @@
-async function startModbus() {
+socket.on('get_modbusData', function () {
 
-    while (true) {
+    console.log(
+        "Current Registers:",
+        globarr
+    );
 
-        try {
-
-            if (!modbusConnected) {
-
-                console.log("Connecting Modbus Server...");
-
-                await client.connectTCP(
-                    MODBUS_IP_ADDRESS,
-                    { port: MODBUS_PORT }
-                );
-
-                client.setID(1);
-
-                modbusConnected = true;
-
-                console.log("Modbus Connected");
-            }
-
-            let data =
-                await client.readHoldingRegisters(
-                    0x0001,
-                    32
-                );
-
-            globarr = data.data;
-
-            console.log("Raw Registers:", globarr);
-
-            let longValues = [];
-
-            for (
-                let i = 0;
-                i < globarr.length;
-                i += 2
-            ) {
-
-                longValues.push(
-                    convertLongIntegerLSW(
-                        globarr[i],
-                        globarr[i + 1]
-                    )
-                );
-            }
-
-            console.log(
-                "Long Integer Values:",
-                longValues
-            );
-
-            await new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        1000
-                    )
-            );
-
-        }
-        catch (err) {
-
-            console.log(
-                "Modbus Error:",
-                err.message
-            );
-
-            modbusConnected = false;
-
-            try {
-                client.close();
-            }
-            catch (e) {}
-
-            await new Promise(
-                resolve =>
-                    setTimeout(
-                        resolve,
-                        5000
-                    )
-            );
-        }
+    if (
+        !globarr ||
+        globarr.length < 32
+    ) {
+        return;
     }
-}
 
-startModbus();
+    let longValues = [];
+
+    for (
+        let i = 0;
+        i < globarr.length;
+        i += 2
+    ) {
+
+        longValues.push(
+            convertLongIntegerLSW(
+                globarr[i],
+                globarr[i + 1]
+            )
+        );
+    }
+
+    console.log(
+        "Converted Long Values:",
+        longValues
+    );
+
+    /*
+      Register Mapping Example
+
+      LongValue[0] = Reg1 + Reg2
+      LongValue[1] = Reg3 + Reg4
+      LongValue[2] = Reg5 + Reg6
+      ...
+    */
+
+    // Change index according to PLC mapping
+    let force = longValues[1];
+    let loadValue = longValues[4];
+    let bitvalue = longValues[6];
+
+    let finalValue =
+        (0.001 * force) +
+        851.968;
+
+    socket.emit(
+        "modbusData",
+        {
+            force: finalValue,
+            load: loadValue,
+            status: bitvalue
+        }
+    );
+
+    console.log(
+        "Data sent:",
+        {
+            force: finalValue,
+            load: loadValue,
+            status: bitvalue
+        }
+    );
+});
