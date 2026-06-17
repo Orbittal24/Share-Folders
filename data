@@ -1,8 +1,14 @@
-socket.emit(
-    "modbusData",
-    {
-        force: finalValue,
-        load: (loadValue / 100).toFixed(2),
-        status: bitvalue
+const client = new ModbusRTU();
+
+// Add this function here
+function convertLongIntegerLSW(lowWord, highWord) {
+
+    let value = (highWord << 16) | lowWord;
+
+    // Convert to signed 32-bit integer
+    if (value & 0x80000000) {
+        value = value - 0x100000000;
     }
-);
+
+    return value;
+}
