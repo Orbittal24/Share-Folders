@@ -1,4 +1,8 @@
-load:
-(
-    loadValue / 100
-).toFixed(2)
+socket.emit(
+    "modbusData",
+    {
+        force: finalValue,
+        load: (loadValue / 100).toFixed(2),
+        status: bitvalue
+    }
+);
