@@ -1,1 +1,302 @@
-<script src="C:\project\project\Modetcpip\node_modules\sweetalert2@11">
+js
+const express = require("express");
+const sql = require("mssql");
+const path = require("path");
+const http = require("http");
+
+const app = express();
+const server = http.createServer(app);
+
+// ================= DATABASE CONFIG =================
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin@123",
+    database: "taco_treceability",
+    server: "10.9.4.29",
+    port: 1433,
+    options: {
+        instanceName: "PROD_SQL_2026",
+        encrypt: false,
+        trustServerCertificate: true
+    },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
+// ================= CONNECT DATABASE =================
+let dbConn;
+
+async function connectDB() {
+    try {
+        dbConn = await sql.connect(sqlConfig);
+        console.log("✅ SQL Server Connected");
+    } catch (err) {
+        console.log("❌ Database Connection Error:", err);
+    }
+}
+
+connectDB();
+
+// ================= ROUTES =================
+
+// Open HTML page
+app.get("/OCV_reject", (req, res) => {
+    res.sendFile(path.join(__dirname, "OCV_reject.html"));
+});
+
+// API to fetch data
+app.get("/api/get_ocv_reject_data", async (req, res) => {
+
+    try {
+
+        const result = await dbConn.request().query(`
+            SELECT
+                cell_qrcode,
+                voltage,
+                ir,
+                today_date,
+                updated_time,
+                machine_location,
+                shift,
+                used_on_line,
+                kvalue,
+                grade,
+                cell_capacity,
+                cell_class
+            FROM taco_treceability.ocv_machine_data_mirror_rejection
+            ORDER BY today_date DESC, updated_time DESC
+        `);
+
+        res.json({
+            success: true,
+            totalCount: result.recordset.length,
+            data: result.recordset
+        });
+
+    } catch (err) {
+
+        console.log("SQL Error:", err);
+
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+});
+
+// ================= START SERVER =================
+
+server.listen(5510, "0.0.0.0", () => {
+    console.log("=====================================");
+    console.log("Server Running on Port : 5510");
+    console.log("Open Browser:");
+    console.log("http://localhost:5510/OCV_reject");
+    console.log("=====================================");
+});
+
+
+html
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>OCV Reject Data</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        .top-section {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 40px;
+            font-size: 18px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background: #007bff;
+            color: white;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        #totalCount {
+            margin-top: 15px;
+            font-size: 22px;
+            font-weight: bold;
+            color: green;
+        }
+
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            background: white;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #343a40;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+
+        th,
+        td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        tr:nth-child(even) {
+            background: #f2f2f2;
+        }
+
+        tr:hover {
+            background: #d8ebff;
+        }
+
+        #loading {
+            text-align: center;
+            color: red;
+            font-size: 18px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>OCV Rejection Records</h1>
+
+    <div class="top-section">
+        <button onclick="loadData()">Scan</button>
+
+        <div id="totalCount">
+            Total Records : 0
+        </div>
+
+        <div id="loading"></div>
+    </div>
+
+    <div class="table-container">
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Sr No</th>
+                    <th>Cell QR Code</th>
+                    <th>Voltage</th>
+                    <th>IR</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Machine Location</th>
+                    <th>Shift</th>
+                    <th>Used On Line</th>
+                    <th>K Value</th>
+                    <th>Grade</th>
+                    <th>Capacity</th>
+                    <th>Class</th>
+                </tr>
+            </thead>
+
+            <tbody id="tableBody">
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+    <script>
+
+        async function loadData() {
+
+            document.getElementById("loading").innerHTML = "Loading Data...";
+            document.getElementById("tableBody").innerHTML = "";
+
+            try {
+
+                const response = await fetch("/api/get_ocv_reject_data");
+                const result = await response.json();
+
+                document.getElementById("loading").innerHTML = "";
+
+                if (!result.success) {
+                    alert("Unable to fetch data");
+                    return;
+                }
+
+                document.getElementById("totalCount").innerHTML =
+                    "Total Records : " + result.totalCount;
+
+                let html = "";
+
+                result.data.forEach((row, index) => {
+
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${row.cell_qrcode || ""}</td>
+                            <td>${row.voltage || ""}</td>
+                            <td>${row.ir || ""}</td>
+                            <td>${formatDate(row.today_date)}</td>
+                            <td>${row.updated_time || ""}</td>
+                            <td>${row.machine_location || ""}</td>
+                            <td>${row.shift || ""}</td>
+                            <td>${row.used_on_line || ""}</td>
+                            <td>${row.kvalue || ""}</td>
+                            <td>${row.grade || ""}</td>
+                            <td>${row.cell_capacity || ""}</td>
+                            <td>${row.cell_class || ""}</td>
+                        </tr>
+                    `;
+                });
+
+                document.getElementById("tableBody").innerHTML = html;
+
+            } catch (err) {
+
+                console.log(err);
+
+                document.getElementById("loading").innerHTML =
+                    "Error while loading data";
+            }
+        }
+
+        function formatDate(dateStr) {
+
+            if (!dateStr) return "";
+
+            const d = new Date(dateStr);
+
+            return d.toLocaleDateString("en-GB");
+        }
+
+    </script>
+
+</body>
+
+</html>
