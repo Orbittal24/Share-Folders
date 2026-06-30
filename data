@@ -1,472 +1,478 @@
-js
-const express = require("express");
-const sql = require("mssql");
-const path = require("path");
-const http = require("http");
-const { Server } = require("socket.io");
+import pyodbc
+import time
+import redis
+import json
+import re
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+# -----------------------------------
+# REDIS CONFIG
+# -----------------------------------
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 31
+redis_password = "Gotion@123Strong!"
 
-// ================= DATABASE CONFIG =================
+r = redis.StrictRedis(
+    host=redis_host,
+    port=redis_port,
+    password=redis_password,
+    db=redis_db,
+    decode_responses=True
+)
 
-const sqlConfig = {
-    user: "user_mis",
-    password: "admin@123",
-    database: "taco_treceability",
-    server: "10.9.4.29",
-    port: 1433,
-    options: {
-        instanceName: "PROD_SQL_2026",
-        encrypt: false,
-        trustServerCertificate: true
-    },
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000
-    }
-};
+DUPLICATE_TTL_SECONDS = 3 * 24 * 60 * 60
 
-let dbConn;
+# RETRY CONFIG
+MAX_RETRY = 3
+RETRY_KEY_PREFIX = "retry:"
 
-// ================= DATABASE CONNECTION =================
+# -----------------------------------
+# ERROR TYPES
+# -----------------------------------
+class DataValidationError(Exception):
+    """Raised when the record itself is malformed (bad QR, bad date code)."""
+    pass
 
-async function connectDB() {
-    try {
-        dbConn = await sql.connect(sqlConfig);
-        console.log("SQL Server Connected...");
-    } catch (err) {
-        console.log("DB Connection Error :", err);
-    }
+class TransientError(Exception):
+    """Raised on SQL/Redis/connection failures that are not the record's fault."""
+    pass
+
+# -----------------------------------
+# SAFE STRING
+# -----------------------------------
+def safe(val):
+    return "" if val is None else str(val)
+
+def extract_capacity(val):
+    if val is None:
+        return ""
+
+    val_str = str(val)
+    match = re.search(r"\d+(\.\d+)?", val_str)
+
+    if match:
+        return match.group(0)
+
+    return ""
+
+# -----------------------------------
+# DB CONFIG
+# -----------------------------------
+sqlConfig1 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "taco_treceability",
+    "user": "user_mis",
+    "password": "admin@123",
 }
 
-connectDB();
+sqlConfig2 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "ocv_inventory_master",
+    "user": "user_mis",
+    "password": "admin@123",
+}
 
-// ================= ROUTES =================
+# -----------------------------------
+# CONNECT DB
+# -----------------------------------
+def connect_db(config):
+    conn = pyodbc.connect(
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={config['server']};"
+        f"DATABASE={config['database']};"
+        f"UID={config['user']};"
+        f"PWD={config['password']};"
+        f"TrustServerCertificate=yes;"
+    )
+    conn.autocommit = False
+    return conn
 
-app.get("/OCV_reject", (req, res) => {
-    res.sendFile(path.join(__dirname, "OCV_reject.html"));
-});
+# -----------------------------------
+# DATE MAPS
+# -----------------------------------
+yearMap = {
+    "B": 21, "C": 22, "D": 23, "E": 24, "F": 25, "G": 26, "H": 27, "J": 28,
+    "K": 29, "L": 30, "M": 31, "N": 32, "P": 33, "R": 34, "S": 35, "T": 36,
+    "V": 37, "W": 38, "X": 39, "Y": 40,
+    "1": 41, "2": 42, "3": 43, "4": 44, "5": 45, "6": 46, "7": 47, "8": 48,
+    "9": 49, "A": 50,
+}
 
-// For Scan Button
-app.get("/api/get_ocv_reject_data", async (req, res) => {
+monthMap = {"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,"A":10,"B":11,"C":12}
 
-    try {
+dayMap = {
+    "1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
+    "A":10,"B":11,"C":12,"D":13,"E":14,"F":15,"G":16,"H":17,
+    "J":18,"K":19,"L":20,"M":21,"N":22,"P":23,"R":24,"S":25,
+    "T":26,"V":27,"W":28,"X":29,"Y":30,"0":31
+}
 
-        const result = await dbConn.request().query(`
-            SELECT
-                sr_no,
-                cell_qrcode,
-                voltage,
-                ir,
-                today_date,
-                updated_time,
-                machine_location,
-                shift,
-                used_on_line,
-                kvalue,
-                grade,
-                cell_capacity,
-                cell_class
-            FROM taco_treceability.ocv_machine_data_mirror_rejection
-            ORDER BY sr_no
-        `);
+# -----------------------------------
+# ENSURE TABLE
+# -----------------------------------
+def ensure_table(dst_cursor, tableName):
+    dst_cursor.execute(f"""
+    IF NOT EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME = '{tableName}'
+    )
+    BEGIN
+        CREATE TABLE {tableName} (
+            sr_no INT IDENTITY(1,1) PRIMARY KEY,
+            cellqr NVARCHAR(50),
+            voltage NVARCHAR(50),
+            ir NVARCHAR(50),
+            class_grade NVARCHAR(30),
+            capacity NVARCHAR(50),
+            thickness NVARCHAR(50),
+            k_value NVARCHAR(50),
+            negative_voltage NVARCHAR(50),
+            cell_status NVARCHAR(20),
+            ocv_mc_no NVARCHAR(40),
+            first_para_time DATETIME,
+            last_para_time DATETIME,
+            laser_status VARCHAR(50),
+            batch VARCHAR(100),
+            plant_code VARCHAR(50)
+        )
+    END
+    """)
 
-        res.json({
-            success: true,
-            totalCount: result.recordset.length,
-            data: result.recordset
-        });
+# -----------------------------------
+# ENSURE REJECTION TABLE HAS AUDIT COLUMNS
+# -----------------------------------
+def ensure_rejection_columns(src_cursor):
+    src_cursor.execute("""
+    IF NOT EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME='ocv_machine_data_mirror_rejection' AND COLUMN_NAME='reject_reason'
+    )
+    BEGIN
+        ALTER TABLE taco_treceability.ocv_machine_data_mirror_rejection
+        ADD reject_reason NVARCHAR(200) NULL, retry_count INT NULL, rejected_at DATETIME NULL
+    END
+    """)
 
-    } catch (err) {
+# -----------------------------------
+# MOVE TO REJECTION
+# -----------------------------------
+def move_to_rejection(src_conn, row, reason, retry_count):
+    cursor = src_conn.cursor()
+    try:
+        cursor.execute("""
+        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
+        (
+            cell_qrcode, voltage, ir, today_date, updated_time,
+            machine_location, shift, used_on_line, kvalue,
+            grade, cell_capacity, cell_class,
+            reject_reason, retry_count, rejected_at
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,GETDATE())
+        """,
+        (
+            row.cell_qrcode,
+            row.voltage,
+            row.ir,
+            row.today_date,
+            row.updated_time,
+            row.machine_location,
+            row.shift,
+            row.used_on_line,
+            row.kvalue,
+            row.grade,
+            row.cell_capacity,
+            row.cell_class,
+            reason,
+            retry_count
+        ))
 
-        console.log(err);
+        src_conn.commit()
+        print("MOVED TO REJECTION :", row.cell_qrcode, "| reason:", reason)
+        return True
 
-        res.json({
-            success: false,
-            message: err.message
-        });
-    }
-});
+    except Exception as e:
+        print("REJECTION INSERT FAILED :", e)
+        src_conn.rollback()
+        return False
 
-// ================= SOCKET.IO =================
+# -----------------------------------
+# HANDLE FAILURE (RETRY LOGIC, SPLIT BY ERROR TYPE)
+# -----------------------------------
+def handle_failure(src_conn, row, error):
+    qr = safe(row.cell_qrcode)
+    retry_key = RETRY_KEY_PREFIX + qr
 
-io.on("connection", (socket) => {
+    is_data_error = isinstance(error, DataValidationError)
+    reason = str(error)
 
-    console.log("Client Connected :", socket.id);
+    try:
+        retry_count = r.get(retry_key)
+        retry_count = int(retry_count) if retry_count else 0
 
-    socket.on("shift_to_mirror", async () => {
+        if is_data_error:
+            # Genuine bad record — counts toward MAX_RETRY
+            retry_count += 1
 
-        try {
+            if retry_count >= MAX_RETRY:
+                print(f"MAX RETRY REACHED ({retry_count}) :", qr, "| reason:", reason)
 
-            const result = await dbConn.request().query(`
-                SELECT sr_no
-                FROM taco_treceability.ocv_machine_data_mirror_rejection
-                ORDER BY sr_no
-            `);
+                if move_to_rejection(src_conn, row, reason, retry_count):
+                    cursor = src_conn.cursor()
+                    cursor.execute("""
+                    DELETE FROM taco_treceability.ocv_machine_data_mirror
+                    WHERE cell_qrcode=?
+                    """, qr)
 
-            const rows = result.recordset;
+                    src_conn.commit()
+                    print("DELETED AFTER REJECTION :", qr)
 
-            if (rows.length === 0) {
+                    r.delete(retry_key)
 
-                socket.emit("shift_completed", {
-                    success: true,
-                    total: 0
-                });
+            else:
+                r.setex(retry_key, 3600, retry_count)
+                print(f"DATA ERROR RETRY {retry_count}/{MAX_RETRY} :", qr, "| reason:", reason)
 
-                return;
+        else:
+            # Transient/infra error — does NOT count toward rejection.
+            # Record stays untouched in source; just log + track for monitoring.
+            print("TRANSIENT ERROR (not counted toward rejection) :", qr, "| reason:", reason)
+
+            transient_key = "transient_fail:" + qr
+            t_count = r.incr(transient_key)
+            r.expire(transient_key, 3600)
+            if t_count >= 10:
+                print(f"WARNING: {qr} has failed {t_count} times due to transient errors — investigate DB/Redis health")
+
+    except Exception as e:
+        print("RETRY HANDLER ERROR :", e)
+
+# -----------------------------------
+# PARSE DATE CODE (case-insensitive, with diagnostics)
+# -----------------------------------
+def parse_date_code(qr):
+    code12_13 = qr[12:14].upper()
+    dateCode_raw = qr[8:11] if code12_13 == "BV" else qr[14:17]
+    dateCode = dateCode_raw.upper()
+
+    if len(dateCode) < 3:
+        raise DataValidationError(f"dateCode too short: '{dateCode_raw}' (qr={qr})")
+
+    yearValue = yearMap.get(dateCode[0])
+    monthValue = monthMap.get(dateCode[1])
+    dayValue = dayMap.get(dateCode[2])
+
+    if not yearValue or not monthValue or not dayValue:
+        raise DataValidationError(
+            f"date mapping failed: dateCode='{dateCode_raw}' "
+            f"(year_char='{dateCode[0]}'->{yearValue}, "
+            f"month_char='{dateCode[1]}'->{monthValue}, "
+            f"day_char='{dateCode[2]}'->{dayValue}) qr={qr}"
+        )
+
+    return dateCode, code12_13, yearValue, monthValue, dayValue
+
+# -----------------------------------
+# PROCESS RECORD
+# -----------------------------------
+def process_record(src_conn, dst_conn):
+
+    src_cursor = src_conn.cursor()
+    dst_cursor = dst_conn.cursor()
+
+    row = None
+
+    try:
+        try:
+            src_cursor.execute("""
+            SELECT TOP 1 *
+            FROM taco_treceability.ocv_machine_data_mirror
+            WHERE machine_location='line3_line4'
+            ORDER BY sr_no ASC
+            """)
+            row = src_cursor.fetchone()
+        except Exception as e:
+            raise TransientError(f"source select failed: {e}")
+
+        if not row:
+            print("No records...")
+            return
+
+        qr = safe(row.cell_qrcode)
+
+        print("\n========= NEW RECORD =========")
+        print("QR :", qr)
+
+        if len(qr) < 16:
+            raise DataValidationError(f"QR too short: {qr}")
+
+        dateCode, code12_13, yearValue, monthValue, dayValue = parse_date_code(qr)
+
+        year = 2000 + yearValue
+        month = f"{monthValue:02d}"
+        day = f"{dayValue:02d}"
+
+        tableName = f"ocvcell_inventory_data_{year}_{month}_{day}"
+
+        print("TABLE :", tableName)
+
+        try:
+            ensure_table(dst_cursor, tableName)
+        except Exception as e:
+            raise TransientError(f"ensure_table failed: {e}")
+
+        capacity_val = extract_capacity(row.cell_capacity)
+
+        try:
+            dst_cursor.execute(f"SELECT cellqr FROM {tableName} WHERE cellqr=?", qr)
+            exists = dst_cursor.fetchone()
+
+            if exists:
+                dst_cursor.execute(f"""
+                UPDATE {tableName}
+                SET voltage=?, ir=?, class_grade=?, capacity=?,
+                    k_value=?, ocv_mc_no=?, first_para_time=?,
+                    last_para_time=?, batch=?, plant_code=?
+                WHERE cellqr=?
+                """,
+                (
+                    safe(row.voltage),
+                    safe(row.ir),
+                    safe(row.cell_class),
+                    capacity_val,
+                    safe(row.kvalue),
+                    safe(row.machine_location),
+                    row.today_date,
+                    row.today_date,
+                    dateCode,
+                    code12_13,
+                    qr
+                ))
+                print("UPDATED :", qr)
+
+            else:
+                dst_cursor.execute(f"""
+                INSERT INTO {tableName}
+                (cellqr, voltage, ir, class_grade, capacity, thickness,
+                 k_value, negative_voltage, cell_status, ocv_mc_no,
+                 first_para_time, last_para_time, laser_status, batch, plant_code)
+                VALUES (?,?,?,?,?,NULL,?,NULL,'OK',?,?,?,NULL,?,?)
+                """,
+                (
+                    qr,
+                    safe(row.voltage),
+                    safe(row.ir),
+                    safe(row.cell_class),
+                    capacity_val,
+                    safe(row.kvalue),
+                    safe(row.machine_location),
+                    row.today_date,
+                    row.today_date,
+                    dateCode,
+                    code12_13
+                ))
+                print("INSERTED :", qr)
+
+            dst_conn.commit()
+            print("SQL SUCCESS :", qr)
+
+        except Exception as sql_error:
+            print("SQL FAILED :", sql_error)
+            dst_conn.rollback()
+            raise TransientError(f"destination SQL failed: {sql_error}")
+
+        # REDIS
+        try:
+            redis_payload = {
+                "cellqr": qr,
+                "voltage": safe(row.voltage),
+                "ir": safe(row.ir),
+                "class_grade": safe(row.cell_class),
+                "capacity": capacity_val,
+                "k_value": safe(row.kvalue),
+                "ocv_mc_no": safe(row.machine_location),
+                "first_para_time": str(row.today_date),
+                "last_para_time": str(row.today_date),
+                "batch": dateCode,
+                "plant_code": code12_13
             }
 
-            let shiftedCount = 0;
-
-            for (const row of rows) {
-
-                try {
-
-                    // Insert exact row from rejection table
-                    const insertResult = await dbConn.request().query(`
-                        INSERT INTO taco_treceability.ocv_machine_data_mirror_testing
-                        (
-                            sr_no,
-                            cell_qrcode,
-                            voltage,
-                            ir,
-                            today_date,
-                            updated_time,
-                            machine_location,
-                            shift,
-                            used_on_line,
-                            kvalue,
-                            grade,
-                            cell_capacity,
-                            cell_class
-                        )
-
-                        SELECT
-                            sr_no,
-                            cell_qrcode,
-                            voltage,
-                            ir,
-                            today_date,
-                            updated_time,
-                            machine_location,
-                            shift,
-                            used_on_line,
-                            kvalue,
-                            grade,
-                            cell_capacity,
-                            cell_class
-                        FROM taco_treceability.ocv_machine_data_mirror_rejection
-                        WHERE sr_no = ${row.sr_no}
-                    `);
-
-                    // Insert Acknowledgement
-                    if (insertResult.rowsAffected[0] > 0) {
-
-                        // Delete only inserted row
-                        const deleteResult = await dbConn.request().query(`
-                            DELETE
-                            FROM taco_treceability.ocv_machine_data_mirror_rejection
-                            WHERE sr_no = ${row.sr_no}
-                        `);
-
-                        if (deleteResult.rowsAffected[0] > 0) {
-
-                            shiftedCount++;
-
-                            socket.emit("shift_progress", {
-                                shifted: shiftedCount,
-                                total: rows.length
-                            });
-
-                            console.log(
-                                `Shifted Record SR NO : ${row.sr_no}`
-                            );
-                        }
-                    }
-
-                } catch (err) {
-
-                    console.log(
-                        `Error shifting SR NO ${row.sr_no}`,
-                        err.message
-                    );
-                }
-            }
-
-            socket.emit("shift_completed", {
-                success: true,
-                total: shiftedCount
-            });
-
-        } catch (err) {
-
-            console.log("Shift Error :", err);
-
-            socket.emit("shift_completed", {
-                success: false
-            });
-        }
-    });
-
-    socket.on("disconnect", () => {
-        console.log("Client Disconnected :", socket.id);
-    });
-
-});
-
-// ================= SERVER START =================
-
-server.listen(5510, "0.0.0.0", () => {
-
-    console.log("====================================");
-    console.log("Server Running On Port : 5510");
-    console.log("http://localhost:5510/OCV_reject");
-    console.log("====================================");
-});
-
-html
-<!DOCTYPE html>
-<html>
-
-<head>
-
-    <meta charset="UTF-8">
-    <title>OCV Rejection Data</title>
-
-    <style>
-
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background: #f5f5f5;
-        }
-
-        h1 {
-            text-align: center;
-        }
-
-        .button-section {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        button {
-            padding: 12px 30px;
-            margin: 5px;
-            border: none;
-            border-radius: 5px;
-            color: white;
-            font-size: 16px;
-            cursor: pointer;
-        }
-
-        .scanBtn {
-            background: #007bff;
-        }
-
-        .shiftBtn {
-            background: #28a745;
-        }
-
-        #totalCount {
-            font-size: 22px;
-            font-weight: bold;
-            color: blue;
-            margin-top: 10px;
-        }
-
-        #loading {
-            margin-top: 10px;
-            font-size: 20px;
-            color: red;
-            font-weight: bold;
-        }
-
-        .table-container {
-            max-height: 700px;
-            overflow: auto;
-            background: white;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th {
-            background: #343a40;
-            color: white;
-            position: sticky;
-            top: 0;
-        }
-
-        th, td {
-            border: 1px solid #ccc;
-            padding: 8px;
-            text-align: center;
-            white-space: nowrap;
-        }
-
-        tr:nth-child(even) {
-            background: #f0f0f0;
-        }
-
-    </style>
-
-</head>
-
-<body>
-
-    <h1>OCV Rejection Records</h1>
-
-    <div class="button-section">
-
-        <button class="scanBtn" onclick="loadData()">
-            Scan
-        </button>
-
-        <button class="shiftBtn" onclick="shiftData()">
-            Shift To Mirror
-        </button>
-
-        <div id="totalCount">
-            Total Records : 0
-        </div>
-
-        <div id="loading"></div>
-
-    </div>
-
-    <div class="table-container">
-
-        <table>
-
-            <thead>
-                <tr>
-                    <th>Sr No</th>
-                    <th>Cell QR</th>
-                    <th>Voltage</th>
-                    <th>IR</th>
-                    <th>Date</th>
-                    <th>Time</th>
-                    <th>Machine</th>
-                    <th>Shift</th>
-                    <th>Used On Line</th>
-                    <th>K Value</th>
-                    <th>Grade</th>
-                    <th>Capacity</th>
-                    <th>Class</th>
-                </tr>
-            </thead>
-
-            <tbody id="tableBody"></tbody>
-
-        </table>
-
-    </div>
-
-    <script src="/socket.io/socket.io.js"></script>
-
-    <script>
-
-        const socket = io();
-
-        async function loadData() {
-
-            document.getElementById("loading").innerHTML =
-                "Loading Data...";
-
-            try {
-
-                const response =
-                    await fetch("/api/get_ocv_reject_data");
-
-                const result = await response.json();
-
-                document.getElementById("loading").innerHTML = "";
-
-                if (!result.success) {
-                    alert("Unable to load data");
-                    return;
-                }
-
-                document.getElementById("totalCount").innerHTML =
-                    "Total Records : " + result.totalCount;
-
-                let html = "";
-
-                result.data.forEach((row, index) => {
-
-                    html += `
-                        <tr>
-                            <td>${index + 1}</td>
-                            <td>${row.cell_qrcode || ""}</td>
-                            <td>${row.voltage || ""}</td>
-                            <td>${row.ir || ""}</td>
-                            <td>${row.today_date || ""}</td>
-                            <td>${row.updated_time || ""}</td>
-                            <td>${row.machine_location || ""}</td>
-                            <td>${row.shift || ""}</td>
-                            <td>${row.used_on_line || ""}</td>
-                            <td>${row.kvalue || ""}</td>
-                            <td>${row.grade || ""}</td>
-                            <td>${row.cell_capacity || ""}</td>
-                            <td>${row.cell_class || ""}</td>
-                        </tr>
-                    `;
-                });
-
-                document.getElementById("tableBody").innerHTML = html;
-
-            } catch (err) {
-
-                console.log(err);
-
-                document.getElementById("loading").innerHTML =
-                    "Error Loading Data";
-            }
-        }
-
-        function shiftData() {
-
-            if (!confirm("Do you want to shift all records?"))
-                return;
-
-            document.getElementById("loading").innerHTML =
-                "Shifting records...";
-
-            socket.emit("shift_to_mirror");
-        }
-
-        socket.on("shift_progress", (data) => {
-
-            document.getElementById("loading").innerHTML =
-                `Shifting ${data.shifted} / ${data.total}`;
-        });
-
-        socket.on("shift_completed", (data) => {
-
-            document.getElementById("loading").innerHTML = "";
-
-            if (data.success) {
-
-                alert(
-                    `Successfully shifted ${data.total} records`
-                );
-
-                location.reload();
-
-            } else {
-
-                alert("Data shifting failed");
-            }
-        });
-
-    </script>
-
-</body>
-
-</html>
+            r.setex(f"cell:{qr}", DUPLICATE_TTL_SECONDS, json.dumps(redis_payload))
+
+            print("REDIS SUCCESS :", redis_payload)
+
+        except Exception as redis_error:
+            # Record is already committed to dst SQL — don't reject it.
+            # Redis is a cache layer, not source of truth, so log and continue
+            # so the source row still gets deleted below.
+            print("REDIS FAILED (non-fatal, record already persisted) :", redis_error)
+
+        # DELETE FROM SOURCE
+        try:
+            src_cursor.execute("""
+            DELETE FROM taco_treceability.ocv_machine_data_mirror
+            WHERE cell_qrcode=?
+            """, qr)
+
+            src_conn.commit()
+            print("SOURCE DELETED :", qr)
+
+        except Exception as del_error:
+            src_conn.rollback()
+            raise TransientError(f"source delete failed: {del_error}")
+
+    except DataValidationError as e:
+        print("DATA VALIDATION ERROR :", e)
+        if row:
+            handle_failure(src_conn, row, e)
+
+    except TransientError as e:
+        print("TRANSIENT ERROR :", e)
+        if row:
+            handle_failure(src_conn, row, e)
+        # back off before hitting the same row again instead of hammering it
+        time.sleep(1.0)
+
+    except Exception as e:
+        # Unclassified — treat conservatively as transient so we never
+        # wrongly reject a record we don't understand the failure mode for
+        print("UNEXPECTED ERROR (treated as transient) :", e)
+        if row:
+            handle_failure(src_conn, row, TransientError(str(e)))
+        time.sleep(1.0)
+
+# -----------------------------------
+# MAIN LOOP
+# -----------------------------------
+def start():
+    src_conn = connect_db(sqlConfig1)
+    dst_conn = connect_db(sqlConfig2)
+
+    try:
+        ensure_rejection_columns(src_conn.cursor())
+        src_conn.commit()
+    except Exception as e:
+        print("ENSURE REJECTION COLUMNS FAILED :", e)
+        src_conn.rollback()
+
+    print("SYSTEM STARTED")
+
+    while True:
+        try:
+            process_record(src_conn, dst_conn)
+
+        except Exception as main_error:
+            print("MAIN LOOP ERROR :", main_error)
+
+            try:
+                src_conn = connect_db(sqlConfig1)
+                dst_conn = connect_db(sqlConfig2)
+                print("DB RECONNECTED")
+            except:
+                print("RECONNECT FAILED")
+
+        time.sleep(0.1)
+
+# -----------------------------------
+# START
+# -----------------------------------
+start()
