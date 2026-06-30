@@ -1,4 +1,98 @@
 js
+const express = require("express");
+const sql = require("mssql");
+const path = require("path");
+const http = require("http");
+const { Server } = require("socket.io");
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+// ================= DATABASE CONFIG =================
+
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin@123",
+    database: "taco_treceability",
+    server: "10.9.4.29",
+    port: 1433,
+    options: {
+        instanceName: "PROD_SQL_2026",
+        encrypt: false,
+        trustServerCertificate: true
+    },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
+let dbConn;
+
+// ================= DATABASE CONNECTION =================
+
+async function connectDB() {
+    try {
+        dbConn = await sql.connect(sqlConfig);
+        console.log("SQL Server Connected...");
+    } catch (err) {
+        console.log("DB Connection Error :", err);
+    }
+}
+
+connectDB();
+
+// ================= ROUTES =================
+
+app.get("/OCV_reject", (req, res) => {
+    res.sendFile(path.join(__dirname, "OCV_reject.html"));
+});
+
+// For Scan Button
+app.get("/api/get_ocv_reject_data", async (req, res) => {
+
+    try {
+
+        const result = await dbConn.request().query(`
+            SELECT
+                sr_no,
+                cell_qrcode,
+                voltage,
+                ir,
+                today_date,
+                updated_time,
+                machine_location,
+                shift,
+                used_on_line,
+                kvalue,
+                grade,
+                cell_capacity,
+                cell_class
+            FROM taco_treceability.ocv_machine_data_mirror_rejection
+            ORDER BY sr_no
+        `);
+
+        res.json({
+            success: true,
+            totalCount: result.recordset.length,
+            data: result.recordset
+        });
+
+    } catch (err) {
+
+        console.log(err);
+
+        res.json({
+            success: false,
+            message: err.message
+        });
+    }
+});
+
+// ================= SOCKET.IO =================
+
 io.on("connection", (socket) => {
 
     console.log("Client Connected :", socket.id);
@@ -7,22 +101,8 @@ io.on("connection", (socket) => {
 
         try {
 
-            // Fetch all records
             const result = await dbConn.request().query(`
-                SELECT
-                    sr_no,
-                    cell_qrcode,
-                    voltage,
-                    ir,
-                    today_date,
-                    updated_time,
-                    machine_location,
-                    shift,
-                    used_on_line,
-                    kvalue,
-                    grade,
-                    cell_capacity,
-                    cell_class
+                SELECT sr_no
                 FROM taco_treceability.ocv_machine_data_mirror_rejection
                 ORDER BY sr_no
             `);
@@ -41,12 +121,11 @@ io.on("connection", (socket) => {
 
             let shiftedCount = 0;
 
-            // Shift records one by one
             for (const row of rows) {
 
                 try {
 
-                    // Insert exact record into mirror table
+                    // Insert exact row from rejection table
                     const insertResult = await dbConn.request().query(`
                         INSERT INTO taco_treceability.ocv_machine_data_mirror_testing
                         (
@@ -83,10 +162,10 @@ io.on("connection", (socket) => {
                         WHERE sr_no = ${row.sr_no}
                     `);
 
-                    // Check acknowledgement from SQL Server
+                    // Insert Acknowledgement
                     if (insertResult.rowsAffected[0] > 0) {
 
-                        // Delete only after successful insert
+                        // Delete only inserted row
                         const deleteResult = await dbConn.request().query(`
                             DELETE
                             FROM taco_treceability.ocv_machine_data_mirror_rejection
@@ -103,7 +182,7 @@ io.on("connection", (socket) => {
                             });
 
                             console.log(
-                                `Shifted SR NO : ${row.sr_no}`
+                                `Shifted Record SR NO : ${row.sr_no}`
                             );
                         }
                     }
@@ -111,7 +190,7 @@ io.on("connection", (socket) => {
                 } catch (err) {
 
                     console.log(
-                        `Error shifting SR NO : ${row.sr_no}`,
+                        `Error shifting SR NO ${row.sr_no}`,
                         err.message
                     );
                 }
@@ -127,8 +206,7 @@ io.on("connection", (socket) => {
             console.log("Shift Error :", err);
 
             socket.emit("shift_completed", {
-                success: false,
-                message: err.message
+                success: false
             });
         }
     });
@@ -139,45 +217,256 @@ io.on("connection", (socket) => {
 
 });
 
+// ================= SERVER START =================
+
+server.listen(5510, "0.0.0.0", () => {
+
+    console.log("====================================");
+    console.log("Server Running On Port : 5510");
+    console.log("http://localhost:5510/OCV_reject");
+    console.log("====================================");
+});
 
 html
-<script src="/socket.io/socket.io.js"></script>
+<!DOCTYPE html>
+<html>
 
-<script>
-    const socket = io();
+<head>
 
-    function shiftData() {
+    <meta charset="UTF-8">
+    <title>OCV Rejection Data</title>
 
-        if (!confirm("Do you want to shift all records?"))
-            return;
+    <style>
 
-        document.getElementById("loading").innerHTML =
-            "Shifting records...";
-
-        socket.emit("shift_to_mirror");
-    }
-
-    socket.on("shift_progress", (data) => {
-
-        document.getElementById("loading").innerHTML =
-            `Shifting ${data.shifted} / ${data.total}`;
-    });
-
-    socket.on("shift_completed", (data) => {
-
-        document.getElementById("loading").innerHTML = "";
-
-        if (data.success) {
-
-            alert(
-                `Successfully shifted ${data.total} records`
-            );
-
-            location.reload();
-
-        } else {
-
-            alert("Data shifting failed");
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
         }
-    });
-</script>
+
+        h1 {
+            text-align: center;
+        }
+
+        .button-section {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 30px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .scanBtn {
+            background: #007bff;
+        }
+
+        .shiftBtn {
+            background: #28a745;
+        }
+
+        #totalCount {
+            font-size: 22px;
+            font-weight: bold;
+            color: blue;
+            margin-top: 10px;
+        }
+
+        #loading {
+            margin-top: 10px;
+            font-size: 20px;
+            color: red;
+            font-weight: bold;
+        }
+
+        .table-container {
+            max-height: 700px;
+            overflow: auto;
+            background: white;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #343a40;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        tr:nth-child(even) {
+            background: #f0f0f0;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+    <h1>OCV Rejection Records</h1>
+
+    <div class="button-section">
+
+        <button class="scanBtn" onclick="loadData()">
+            Scan
+        </button>
+
+        <button class="shiftBtn" onclick="shiftData()">
+            Shift To Mirror
+        </button>
+
+        <div id="totalCount">
+            Total Records : 0
+        </div>
+
+        <div id="loading"></div>
+
+    </div>
+
+    <div class="table-container">
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Sr No</th>
+                    <th>Cell QR</th>
+                    <th>Voltage</th>
+                    <th>IR</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Machine</th>
+                    <th>Shift</th>
+                    <th>Used On Line</th>
+                    <th>K Value</th>
+                    <th>Grade</th>
+                    <th>Capacity</th>
+                    <th>Class</th>
+                </tr>
+            </thead>
+
+            <tbody id="tableBody"></tbody>
+
+        </table>
+
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+
+        const socket = io();
+
+        async function loadData() {
+
+            document.getElementById("loading").innerHTML =
+                "Loading Data...";
+
+            try {
+
+                const response =
+                    await fetch("/api/get_ocv_reject_data");
+
+                const result = await response.json();
+
+                document.getElementById("loading").innerHTML = "";
+
+                if (!result.success) {
+                    alert("Unable to load data");
+                    return;
+                }
+
+                document.getElementById("totalCount").innerHTML =
+                    "Total Records : " + result.totalCount;
+
+                let html = "";
+
+                result.data.forEach((row, index) => {
+
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${row.cell_qrcode || ""}</td>
+                            <td>${row.voltage || ""}</td>
+                            <td>${row.ir || ""}</td>
+                            <td>${row.today_date || ""}</td>
+                            <td>${row.updated_time || ""}</td>
+                            <td>${row.machine_location || ""}</td>
+                            <td>${row.shift || ""}</td>
+                            <td>${row.used_on_line || ""}</td>
+                            <td>${row.kvalue || ""}</td>
+                            <td>${row.grade || ""}</td>
+                            <td>${row.cell_capacity || ""}</td>
+                            <td>${row.cell_class || ""}</td>
+                        </tr>
+                    `;
+                });
+
+                document.getElementById("tableBody").innerHTML = html;
+
+            } catch (err) {
+
+                console.log(err);
+
+                document.getElementById("loading").innerHTML =
+                    "Error Loading Data";
+            }
+        }
+
+        function shiftData() {
+
+            if (!confirm("Do you want to shift all records?"))
+                return;
+
+            document.getElementById("loading").innerHTML =
+                "Shifting records...";
+
+            socket.emit("shift_to_mirror");
+        }
+
+        socket.on("shift_progress", (data) => {
+
+            document.getElementById("loading").innerHTML =
+                `Shifting ${data.shifted} / ${data.total}`;
+        });
+
+        socket.on("shift_completed", (data) => {
+
+            document.getElementById("loading").innerHTML = "";
+
+            if (data.success) {
+
+                alert(
+                    `Successfully shifted ${data.total} records`
+                );
+
+                location.reload();
+
+            } else {
+
+                alert("Data shifting failed");
+            }
+        });
+
+    </script>
+
+</body>
+
+</html>
