@@ -1,124 +1,36 @@
-socket.on('get_station_status', async function (barcode) {
+const axios = require("axios");
 
-    try {
+if (status.includes("INTERLOCK")) {
 
-        /* ===========================
-           INTERLOCK API
-        =========================== */
+    valueupdate = 0;
 
-        const response = await axios.post(
-            "https://mismainapp.tataautocomp.com:3241/station_interlock",
-            {
-                station_id: 29,          // OR 3024
-                line_id: 3,
-                customer_qrcode: barcode
-            }
-        );
+    Swal.fire({
+        title: "Interlock Pending",
+        text: "Previous station process is pending.",
+        icon: "warning",
+        confirmButtonText: "OK",
+        allowOutsideClick: false
+    }).then(() => {
+        window.location.href = "/";
+    });
 
-        console.log("Interlock Response :", response.data);
+}
+else if (status.includes("NOT")) {
 
-        let interlockOK = true;
+    valueupdate = 0;
 
-        if (
-            response.data &&
-            response.data.length > 0 &&
-            response.data[0].rows
-        ) {
+    Swal.fire({
+        title: `Cell scanning is Pending for module ${barcode}`,
+        icon: "info",
+        confirmButtonText: "OK",
+        allowOutsideClick: false
+    }).then(() => {
+        window.location.href = "/";
+    });
 
-            const rows = response.data[0].rows;
+}
+else {
 
-            for (const row of rows) {
+    valueupdate = 1;
 
-                const value = Object.values(row)[0];
-
-                if (
-                    value &&
-                    value.toString().toUpperCase() !== "OK"
-                ) {
-                    interlockOK = false;
-                    break;
-                }
-            }
-        }
-
-        /* ===========================
-           IF INTERLOCK FAILS
-        =========================== */
-
-        if (!interlockOK) {
-
-            socket.emit(
-                "set_station_status",
-                "INTERLOCK NOT OK",
-                barcode,
-                ""
-            );
-
-            return;
-        }
-
-        /* ===========================
-           EXISTING CODE
-           (UNCHANGED)
-        =========================== */
-
-        sql.connect(sqlConfig, function (err) {
-
-            request = new sql.Request();
-
-            var dbQuery = `
-                SELECT *
-                FROM taco_treceability.taco_treceability.station_status
-                WHERE ModuleBarcode='${barcode}'
-            `;
-
-            request.query(dbQuery, function (err, recordset) {
-
-                if (err)
-                    console.log(err);
-
-                var result = recordset.recordset;
-
-                var status = "NOT OK";
-                var FinalQRCode;
-
-                if (result.length > 0) {
-
-                    status = result[0].ModulePrintStatus;
-                    FinalQRCode = result[0].FinalQRCode;
-
-                    socket.emit(
-                        "set_station_status",
-                        status,
-                        barcode,
-                        FinalQRCode
-                    );
-
-                } else {
-
-                    socket.emit(
-                        "set_station_status",
-                        status,
-                        barcode,
-                        FinalQRCode
-                    );
-                }
-
-            });
-
-        });
-
-    }
-    catch (err) {
-
-        console.log("Interlock Error :", err.message);
-
-        socket.emit(
-            "set_station_status",
-            "INTERLOCK NOT OK",
-            barcode,
-            ""
-        );
-    }
-
-});
+}
