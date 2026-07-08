@@ -2,40 +2,51 @@ socket.on('get_station_status', async function (barcode) {
 
     try {
 
-        // ================= INTERLOCK API =================
+        /* =======================
+           INTERLOCK API CHECK
+        ======================== */
 
         const response = await axios.post(
             "https://mismainapp.tataautocomp.com:3241/station_interlock",
             {
-                station_id: 29,   // or 3024
+                station_id: 29,          // Change to 3024 if required
                 line_id: 3,
                 customer_qrcode: barcode
             }
         );
 
-        console.log(response.data);
-
-        // >>>>>>>>>>>>>>> PASTE THE CODE HERE <<<<<<<<<<<<<<
+        console.log("Interlock Response :", response.data);
 
         let interlockOK = true;
         let pendingStation = "";
 
-        const rows = response.data[0].rows;
+        if (
+            response.data &&
+            response.data.length > 0 &&
+            response.data[0].rows
+        ) {
 
-        for (const row of rows) {
+            const rows = response.data[0].rows;
 
-            const stationName = Object.keys(row)[0];
-            const stationStatus = Object.values(row)[0];
+            for (const row of rows) {
 
-            if (
-                stationStatus &&
-                stationStatus.toString().toUpperCase() !== "OK"
-            ) {
-                interlockOK = false;
-                pendingStation = stationName;
-                break;
+                const stationName = Object.keys(row)[0];
+                const stationStatus = Object.values(row)[0];
+
+                if (
+                    stationStatus &&
+                    stationStatus.toString().toUpperCase() !== "OK"
+                ) {
+                    interlockOK = false;
+                    pendingStation = stationName;
+                    break;
+                }
             }
         }
+
+        /* =======================
+           INTERLOCK FAILED
+        ======================== */
 
         if (!interlockOK) {
 
@@ -50,9 +61,16 @@ socket.on('get_station_status', async function (barcode) {
             return;
         }
 
-        // >>>>>>>>>>>>>>> EXISTING SQL CODE STARTS HERE <<<<<<<<<<<<<<
+        /* =======================
+           YOUR EXISTING SQL CODE
+        ======================== */
 
         sql.connect(sqlConfig, function (err) {
+
+            if (err) {
+                console.log(err);
+                return;
+            }
 
             request = new sql.Request();
 
@@ -61,12 +79,17 @@ socket.on('get_station_status', async function (barcode) {
 
             request.query(dbQuery, function (err, recordset) {
 
-                if (err) console.log(err);
+                if (err) {
+                    console.log(err);
+                    return;
+                }
 
                 var result = recordset.recordset;
 
-                var status = 'NOT OK';
-                var FinalQRCode;
+                console.log("result::", result);
+
+                var status = "NOT OK";
+                var FinalQRCode = "";
 
                 if (result.length > 0) {
 
@@ -77,7 +100,8 @@ socket.on('get_station_status', async function (barcode) {
                         "set_station_status",
                         status,
                         barcode,
-                        FinalQRCode
+                        FinalQRCode,
+                        ""
                     );
 
                 } else {
@@ -86,18 +110,19 @@ socket.on('get_station_status', async function (barcode) {
                         "set_station_status",
                         status,
                         barcode,
-                        FinalQRCode
+                        FinalQRCode,
+                        ""
                     );
-
                 }
 
             });
 
         });
 
-    } catch (err) {
+    }
+    catch (err) {
 
-        console.log(err);
+        console.log("Interlock API Error :", err.message);
 
         socket.emit(
             "set_station_status",
@@ -106,6 +131,41 @@ socket.on('get_station_status', async function (barcode) {
             "",
             "Interlock API Error"
         );
+
     }
 
 });
+
+
+
+
+
+socket.on('set_station_status', function (status, barcode, FinalQRCode, pendingStation) {
+
+
+
+
+if (status.includes("INTERLOCK")) {
+
+    valueupdate = 0;
+
+    Swal.fire({
+        title: "Interlock Pending",
+        html: `
+            <div style="font-size:18px;">
+                <b>Pending Station</b><br><br>
+                <span style="color:red;font-size:22px;font-weight:bold;">
+                    ${pendingStation}
+                </span>
+            </div>
+        `,
+        icon: "warning",
+        confirmButtonText: "OK",
+        allowOutsideClick: false
+    }).then(() => {
+
+        location.reload();
+
+    });
+
+}
