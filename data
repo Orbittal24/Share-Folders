@@ -1,36 +1,32 @@
-const axios = require("axios");
+let interlockOK = true;
+let pendingStation = "";
 
-if (status.includes("INTERLOCK")) {
+const rows = response.data[0].rows;
 
-    valueupdate = 0;
+for (const row of rows) {
 
-    Swal.fire({
-        title: "Interlock Pending",
-        text: "Previous station process is pending.",
-        icon: "warning",
-        confirmButtonText: "OK",
-        allowOutsideClick: false
-    }).then(() => {
-        window.location.href = "/";
-    });
+    const stationName = Object.keys(row)[0];
+    const stationStatus = Object.values(row)[0];
 
+    if (
+        stationStatus &&
+        stationStatus.toString().toUpperCase() !== "OK"
+    ) {
+        interlockOK = false;
+        pendingStation = stationName;
+        break;
+    }
 }
-else if (status.includes("NOT")) {
 
-    valueupdate = 0;
+if (!interlockOK) {
 
-    Swal.fire({
-        title: `Cell scanning is Pending for module ${barcode}`,
-        icon: "info",
-        confirmButtonText: "OK",
-        allowOutsideClick: false
-    }).then(() => {
-        window.location.href = "/";
-    });
+    socket.emit(
+        "set_station_status",
+        "INTERLOCK NOT OK",
+        barcode,
+        "",
+        pendingStation
+    );
 
-}
-else {
-
-    valueupdate = 1;
-
+    return;
 }
