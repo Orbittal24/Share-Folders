@@ -1,4 +1,124 @@
-except Exception as e:
-        # Ignore "already exists" error
-        if "already exists" not in str(e):
-            raise
+socket.on('get_station_status', async function (barcode) {
+
+    try {
+
+        /* ===========================
+           INTERLOCK API
+        =========================== */
+
+        const response = await axios.post(
+            "https://mismainapp.tataautocomp.com:3241/station_interlock",
+            {
+                station_id: 29,          // OR 3024
+                line_id: 3,
+                customer_qrcode: barcode
+            }
+        );
+
+        console.log("Interlock Response :", response.data);
+
+        let interlockOK = true;
+
+        if (
+            response.data &&
+            response.data.length > 0 &&
+            response.data[0].rows
+        ) {
+
+            const rows = response.data[0].rows;
+
+            for (const row of rows) {
+
+                const value = Object.values(row)[0];
+
+                if (
+                    value &&
+                    value.toString().toUpperCase() !== "OK"
+                ) {
+                    interlockOK = false;
+                    break;
+                }
+            }
+        }
+
+        /* ===========================
+           IF INTERLOCK FAILS
+        =========================== */
+
+        if (!interlockOK) {
+
+            socket.emit(
+                "set_station_status",
+                "INTERLOCK NOT OK",
+                barcode,
+                ""
+            );
+
+            return;
+        }
+
+        /* ===========================
+           EXISTING CODE
+           (UNCHANGED)
+        =========================== */
+
+        sql.connect(sqlConfig, function (err) {
+
+            request = new sql.Request();
+
+            var dbQuery = `
+                SELECT *
+                FROM taco_treceability.taco_treceability.station_status
+                WHERE ModuleBarcode='${barcode}'
+            `;
+
+            request.query(dbQuery, function (err, recordset) {
+
+                if (err)
+                    console.log(err);
+
+                var result = recordset.recordset;
+
+                var status = "NOT OK";
+                var FinalQRCode;
+
+                if (result.length > 0) {
+
+                    status = result[0].ModulePrintStatus;
+                    FinalQRCode = result[0].FinalQRCode;
+
+                    socket.emit(
+                        "set_station_status",
+                        status,
+                        barcode,
+                        FinalQRCode
+                    );
+
+                } else {
+
+                    socket.emit(
+                        "set_station_status",
+                        status,
+                        barcode,
+                        FinalQRCode
+                    );
+                }
+
+            });
+
+        });
+
+    }
+    catch (err) {
+
+        console.log("Interlock Error :", err.message);
+
+        socket.emit(
+            "set_station_status",
+            "INTERLOCK NOT OK",
+            barcode,
+            ""
+        );
+    }
+
+});
