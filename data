@@ -1,32 +1,111 @@
-let interlockOK = true;
-let pendingStation = "";
+socket.on('get_station_status', async function (barcode) {
 
-const rows = response.data[0].rows;
+    try {
 
-for (const row of rows) {
+        // ================= INTERLOCK API =================
 
-    const stationName = Object.keys(row)[0];
-    const stationStatus = Object.values(row)[0];
+        const response = await axios.post(
+            "https://mismainapp.tataautocomp.com:3241/station_interlock",
+            {
+                station_id: 29,   // or 3024
+                line_id: 3,
+                customer_qrcode: barcode
+            }
+        );
 
-    if (
-        stationStatus &&
-        stationStatus.toString().toUpperCase() !== "OK"
-    ) {
-        interlockOK = false;
-        pendingStation = stationName;
-        break;
+        console.log(response.data);
+
+        // >>>>>>>>>>>>>>> PASTE THE CODE HERE <<<<<<<<<<<<<<
+
+        let interlockOK = true;
+        let pendingStation = "";
+
+        const rows = response.data[0].rows;
+
+        for (const row of rows) {
+
+            const stationName = Object.keys(row)[0];
+            const stationStatus = Object.values(row)[0];
+
+            if (
+                stationStatus &&
+                stationStatus.toString().toUpperCase() !== "OK"
+            ) {
+                interlockOK = false;
+                pendingStation = stationName;
+                break;
+            }
+        }
+
+        if (!interlockOK) {
+
+            socket.emit(
+                "set_station_status",
+                "INTERLOCK NOT OK",
+                barcode,
+                "",
+                pendingStation
+            );
+
+            return;
+        }
+
+        // >>>>>>>>>>>>>>> EXISTING SQL CODE STARTS HERE <<<<<<<<<<<<<<
+
+        sql.connect(sqlConfig, function (err) {
+
+            request = new sql.Request();
+
+            var dbQuery = `SELECT * FROM taco_treceability.taco_treceability.station_status
+                           WHERE ModuleBarcode='${barcode}'`;
+
+            request.query(dbQuery, function (err, recordset) {
+
+                if (err) console.log(err);
+
+                var result = recordset.recordset;
+
+                var status = 'NOT OK';
+                var FinalQRCode;
+
+                if (result.length > 0) {
+
+                    status = result[0].ModulePrintStatus;
+                    FinalQRCode = result[0].FinalQRCode;
+
+                    socket.emit(
+                        "set_station_status",
+                        status,
+                        barcode,
+                        FinalQRCode
+                    );
+
+                } else {
+
+                    socket.emit(
+                        "set_station_status",
+                        status,
+                        barcode,
+                        FinalQRCode
+                    );
+
+                }
+
+            });
+
+        });
+
+    } catch (err) {
+
+        console.log(err);
+
+        socket.emit(
+            "set_station_status",
+            "INTERLOCK NOT OK",
+            barcode,
+            "",
+            "Interlock API Error"
+        );
     }
-}
 
-if (!interlockOK) {
-
-    socket.emit(
-        "set_station_status",
-        "INTERLOCK NOT OK",
-        barcode,
-        "",
-        pendingStation
-    );
-
-    return;
-}
+});
