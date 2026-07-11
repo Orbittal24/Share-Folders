@@ -1,4 +1,3 @@
-EXEC sp_rename 
-    'taco_treceability.ALT_screwing_Station_Master.User_Name',
-    'Station_Name',
-    'COLUMN';
+UPDATE taco_treceability.ALT_screwing_Station_Master
+SET Station_Name = REPLACE(Station_Name, '_PC', '_')
+WHERE Station_Name LIKE '%_PC%';
