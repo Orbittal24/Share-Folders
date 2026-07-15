@@ -1,0 +1,70 @@
+WITH LatestPackCompletion AS
+(
+    SELECT
+        pack_no,
+        pack_id,
+        MAX(completion_time) AS LatestCompletionTime
+    FROM [taco_treceability_station_status_history].[dbo].[module_completion_14_07_2026]
+    WHERE station_name = 'voltage_ir_status'
+    GROUP BY pack_no, pack_id
+),
+
+PackCounts AS
+(
+    SELECT
+        pack_id,
+        DATEDIFF(HOUR,0,LatestCompletionTime) AS HourBucket,
+        COUNT(*) AS PackCount
+    FROM LatestPackCompletion
+    GROUP BY
+        pack_id,
+        DATEDIFF(HOUR,0,LatestCompletionTime)
+),
+
+ModuleCounts AS
+(
+    SELECT
+        pack_id,
+        DATEDIFF(HOUR,0,completion_time) AS HourBucket,
+        COUNT(*) AS ModuleCount
+    FROM [taco_treceability_station_status_history].[dbo].[module_completion_14_07_2026]
+    WHERE station_name='voltage_ir_status'
+    GROUP BY
+        pack_id,
+        DATEDIFF(HOUR,0,completion_time)
+)
+
+SELECT
+    mp.Pack_Name,
+    CONVERT(VARCHAR(5), DATEADD(HOUR,x.HourBucket,0),108)
+        + ' - ' +
+    CONVERT(VARCHAR(5), DATEADD(MINUTE,59,DATEADD(HOUR,x.HourBucket,0)),108)
+        AS HourRange,
+    SUM(x.PackCount) AS PackCount,
+    SUM(x.ModuleCount) AS ModuleCount
+FROM
+(
+    SELECT
+        pack_id,
+        HourBucket,
+        PackCount,
+        0 AS ModuleCount
+    FROM PackCounts
+
+    UNION ALL
+
+    SELECT
+        pack_id,
+        HourBucket,
+        0,
+        ModuleCount
+    FROM ModuleCounts
+) x
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_pack] mp
+    ON x.pack_id = mp.Pack_ID
+GROUP BY
+    mp.Pack_Name,
+    x.HourBucket
+ORDER BY
+    x.HourBucket,
+    mp.Pack_Name;

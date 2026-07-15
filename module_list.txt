@@ -1,0 +1,16 @@
+SELECT
+   
+    mp.Pack_Name,
+    mm.Module_Name,
+    mch.pack_no,
+    mch.line_id,
+    
+    mch.completion_time
+    
+FROM [taco_treceability_station_status_history].[dbo].[module_completion_14_07_2026] mch
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_pack] mp
+    ON mch.pack_id = mp.Pack_ID
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_module] mm
+    ON mch.module_id = mm.Module_ID
+WHERE mch.station_name = 'voltage_ir_status'
+ORDER BY mch.completion_time DESC;
