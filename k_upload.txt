@@ -1,0 +1,153 @@
+/// 7 March 2022 3:21 PM Added 3 points to cross check stop prod, set serial pack no, swal
+
+var sql = require('mssql');
+var async = require("async");
+var moment = require('moment');
+
+var express = require("express");
+var app = express();
+
+var https = require("https");
+var socketio = require("socket.io");
+var util = require("util");
+var fs = require("fs");
+
+// SSL Certificate
+const sslOptions = {
+    key: fs.readFileSync("./cert/server.key"),
+    cert: fs.readFileSync("./cert/server.crt")
+};
+
+// Create HTTPS Server
+const httpsServer = https.createServer(sslOptions, app);
+
+// Socket.IO over HTTPS
+const io = socketio(httpsServer, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
+// app.use(cors());
+
+const { resolve } = require('path');
+const nrc = require('node-run-cmd');
+
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin@123",
+    database: "taco_treceability",
+    server: "10.9.4.29",
+    port: 1433,
+    options: {
+        instanceName: "PROD_SQL_2026",
+        encrypt: false,
+        trustServerCertificate: true
+    },
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
+// Initialize SQL Connection
+var dbConn = new sql.ConnectionPool(sqlConfig);
+
+console.log("Connecting to SQL Server...");
+
+dbConn.connect()
+    .then(function () {
+        console.log("SQL Connected Successfully");
+    })
+    .catch(function (err) {
+        console.log("SQL Connection Error:", err);
+    });
+
+// HTTPS Server Listen
+httpsServer.listen(6999, "0.0.0.0", function () {
+    console.log("HTTPS Server Running on https://0.0.0.0:6999");
+});
+
+//////////////////////////////////////////////////////
+// TCP SERVER
+//////////////////////////////////////////////////////
+
+const net = require('net');
+
+const port = 6969;
+const host = 'localhost';
+
+const server = net.createServer();
+
+server.listen(port, host, () => {
+    console.log('TCP Server is running on port ' + port);
+});
+
+let sockets = [];
+
+server.on('connection', function (sock) {
+
+    console.log('CONNECTED: ' + sock.remoteAddress + ':' + sock.remotePort);
+
+    sockets.push(sock);
+
+    sock.on('data', function (data) {
+
+        console.log('DATA ' + sock.remoteAddress + ': ' + data);
+
+        sockets.forEach(function (clientSocket) {
+            clientSocket.write(
+                sock.remoteAddress +
+                ':' +
+                sock.remotePort +
+                " said " +
+                data +
+                '\n'
+            );
+        });
+
+    });
+
+    sock.on('close', function () {
+
+        console.log('DISCONNECTED: ' + sock.remoteAddress + ':' + sock.remotePort);
+
+        sockets = sockets.filter(function (s) {
+            return s !== sock;
+        });
+
+    });
+
+    sock.on('error', function (err) {
+        console.log("Socket Error:", err);
+    });
+
+});
+
+//////////////////////////////////////////////////////
+
+var adminDashboard = require('./app');
+adminDashboard.includeCode(app, io, sql, express, sqlConfig);
+
+var app_import_data = require('./app_import_data');
+app_import_data.includeCode(io, app, sql, sqlConfig, express);
+
+var app_k_value = require('./app_k_value');
+app_k_value.includeCode(io, app, sql, sqlConfig, express);
+
+var app_capacity = require('./app_capacity');
+app_capacity.includeCode(io, app, sql, sqlConfig, express);
+
+//////////////////////////////////////////////////////
+
+io.on('connection', (socket) => {
+
+    console.log("Socket Connected :", socket.id);
+
+    socket.on('disconnect', () => {
+        console.log("Socket Disconnected :", socket.id);
+    });
+
+});
