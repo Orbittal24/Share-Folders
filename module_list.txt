@@ -16,6 +16,13 @@ WHERE mch.station_name = 'voltage_ir_status'
 ORDER BY mch.completion_time DESC;
 
 
+SELECT DISTINCT a.module_barcode
+FROM pdu_register_05_26 a
+INNER JOIN pdu_register_06_26 b
+    ON a.module_barcode = b.module_barcode
+ORDER BY a.module_barcode;
+
+
 
 
 BDU	BMS	SMOKE SENSOR	COOLING INLET	COOLING OUTLET	MAIN HARNEESS	RELAY
