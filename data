@@ -1,3 +1,14 @@
-SELECT *
-FROM taco_treceability.Process_Sequence_Master
-WHERE Process_ID = 1986;
+SELECT
+            Station_ID,
+            Station_Name
+        FROM taco_treceability.master_station
+        WHERE Station_Name NOT IN ('IR ALT PC1', 'IR ALT PC2')
+
+        UNION ALL
+
+        SELECT
+            Station_ID,
+            Station_Name
+        FROM taco_treceability.master_station_ALT_screwing
+
+        ORDER BY Station_Name
