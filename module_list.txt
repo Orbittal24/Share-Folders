@@ -171,11 +171,12 @@ const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 const W3CWebSocket = require('websocket').w3cwebsocket;
 
-// =======================
-// Serial Port Configuration
-// =======================
+// =====================
+// Serial Port
+// =====================
+
 const port = new SerialPort({
-    path: 'COM4',              // Change if required
+    path: 'COM4',          // Change COM Port if required
     baudRate: 9600,
     dataBits: 8,
     stopBits: 1,
@@ -189,36 +190,64 @@ const parser = port.pipe(
     })
 );
 
-// =======================
-// WebSocket Configuration
-// =======================
-const ws = new W3CWebSocket(
-    'ws://10.9.4.28:6355',
-    'echo-protocol'
-);
+// =====================
+// WebSocket
+// =====================
 
-ws.onopen = function () {
-    console.log("Connected to WebSocket Server");
-};
+let ws = null;
+let wsConnected = false;
 
-ws.onmessage = function (message) {
-    console.log("Server:", message.data);
-};
+function connectWebSocket() {
 
-ws.onerror = function (err) {
-    console.log("WebSocket Error:", err.message || err);
-};
+    console.log("Connecting to WebSocket Server...");
 
-ws.onclose = function () {
-    console.log("WebSocket Closed");
-};
+    ws = new W3CWebSocket("ws://10.9.4.28:6355", "echo-protocol");
 
-// =======================
+    ws.onopen = function () {
+
+        wsConnected = true;
+
+        console.log("==================================");
+        console.log("Connected to WebSocket Server");
+        console.log("==================================");
+
+    };
+
+    ws.onmessage = function (message) {
+
+        console.log("Server Reply:", message.data);
+
+    };
+
+    ws.onerror = function (err) {
+
+        console.log("WebSocket Error:", err.message || err);
+
+    };
+
+    ws.onclose = function () {
+
+        console.log("WebSocket Closed");
+
+        wsConnected = false;
+
+        // Reconnect after 3 seconds
+        setTimeout(connectWebSocket, 3000);
+
+    };
+}
+
+connectWebSocket();
+
+// =====================
 // Serial Port Events
-// =======================
-port.on('open', () => {
+// =====================
 
+port.on("open", () => {
+
+    console.log("==================================");
     console.log("COM4 Opened");
+    console.log("==================================");
 
     port.write("*IDN?\n");
     port.write(":MEASure:RESistance?\n");
@@ -232,24 +261,41 @@ port.on('open', () => {
 
 });
 
-port.on('error', (err) => {
-    console.log("Serial Port Error:", err.message);
+port.on("error", (err) => {
+
+    console.log("Serial Error:", err.message);
+
 });
 
-// =======================
-// Receive Data From Instrument
-// =======================
-parser.on('data', function (mydata) {
+// =====================
+// Receive Instrument Data
+// =====================
 
-    console.log("Serial:", mydata);
+parser.on("data", (data) => {
 
-    if (ws.readyState === ws.OPEN) {
+    data = data.trim();
 
-        ws.sendUTF
-            ? ws.sendUTF(mydata)
-            : ws.send(mydata);
+    console.log("Instrument:", data);
 
-        console.log("Sent:", mydata);
+    if (!wsConnected) {
+
+        console.log("WebSocket not connected.");
+
+        return;
+
+    }
+
+    try {
+
+        ws.send(data);
+
+        console.log("Sent to Server:", data);
+
+    }
+    catch (err) {
+
+        console.log("Send Error:", err.message);
+
     }
 
 });
