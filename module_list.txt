@@ -355,3 +355,15 @@ connection.on('message', function (message) {
     });
 
 });
+
+
+
+///////////////////
+
+
+Please find below the cell serial numbers:
+•	03HCB00LG210BVG250211914
+•	03HCB00LG210BVG250475182
+•	03HCB00LG210BVG250567846
+•	03HCB00LG210BVG240146431
+
