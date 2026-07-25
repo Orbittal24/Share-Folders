@@ -167,13 +167,16 @@ Cell Data
 03HCB01B0000BRG510627934
 
 
-
 const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
+const W3CWebSocket = require('websocket').w3cwebsocket;
 
+// =======================
+// Serial Port Configuration
+// =======================
 const port = new SerialPort({
-    path: 'COM4',          // Change if using another COM port
-    baudRate: 9600,        // Change to your instrument baud rate
+    path: 'COM4',              // Change if required
+    baudRate: 9600,
     dataBits: 8,
     stopBits: 1,
     parity: 'none',
@@ -186,26 +189,70 @@ const parser = port.pipe(
     })
 );
 
-var W3CWebSocket = require('websocket').w3cwebsocket;
-var dataString = '';
+// =======================
+// WebSocket Configuration
+// =======================
+const ws = new W3CWebSocket(
+    'ws://10.9.4.28:6355',
+    'echo-protocol'
+);
 
+ws.onopen = function () {
+    console.log("Connected to WebSocket Server");
+};
+
+ws.onmessage = function (message) {
+    console.log("Server:", message.data);
+};
+
+ws.onerror = function (err) {
+    console.log("WebSocket Error:", err.message || err);
+};
+
+ws.onclose = function () {
+    console.log("WebSocket Closed");
+};
+
+// =======================
+// Serial Port Events
+// =======================
 port.on('open', () => {
-    console.log('COM Port Opened');
+
+    console.log("COM4 Opened");
 
     port.write("*IDN?\n");
     port.write(":MEASure:RESistance?\n");
     port.write(":MEMory:STATe ON\n");
 
     setInterval(() => {
+
         port.write(":FETch?\n");
+
     }, 1000);
+
 });
 
 port.on('error', (err) => {
     console.log("Serial Port Error:", err.message);
 });
 
-parser.on('data', (data) => {
-    console.log("replyfromtester:", data);
-    dataString = data;
+// =======================
+// Receive Data From Instrument
+// =======================
+parser.on('data', function (mydata) {
+
+    console.log("replyfromtester:", mydata);
+
+    if (ws.readyState === 1) {
+
+        ws.send(mydata);
+
+        console.log("Sent to WebSocket:", mydata);
+
+    } else {
+
+        console.log("WebSocket not connected.");
+
+    }
+
 });
