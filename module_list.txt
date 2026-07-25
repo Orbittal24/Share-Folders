@@ -367,11 +367,10 @@ Please find below the cell serial numbers:
 •	03HCB00LG210BVG250567846
 •	03HCB00LG210BVG240146431
 
-DECLARE @CellQR NVARCHAR(100) = '03HCB00LG210BVG250211914';
+DECLARE @CellQR NVARCHAR(100) = '03HCB01B0000BRFBP0621702';
 DECLARE @SQL NVARCHAR(MAX) = '';
 
-SELECT @SQL = @SQL +
-'
+SELECT @SQL = @SQL + '
 SELECT
     ''' + TABLE_NAME + ''' AS TableName,
     sr_no,
@@ -401,15 +400,16 @@ SELECT
     current_dateTime,
     updated_dateTime
 FROM ' + QUOTENAME(TABLE_NAME) + '
-WHERE cellqr = ''' + @CellQR + '''
-UNION ALL'
+WHERE cellqr LIKE ''%' + @CellQR + '%''
+UNION ALL
+'
 FROM INFORMATION_SCHEMA.TABLES
 WHERE TABLE_NAME LIKE 'pack_history_%';
 
--- Remove the last UNION ALL
-SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL'));
+-- Remove last UNION ALL
+SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL' + CHAR(13) + CHAR(10)));
 
--- Print the generated SQL for debugging
-PRINT @SQL;
+-- For debugging
+-- PRINT @SQL;
 
-EXEC (@SQL);
+EXEC sp_executesql @SQL;
