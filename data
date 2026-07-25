@@ -1,14 +1,7 @@
-SELECT
-            Station_ID,
-            Station_Name
-        FROM taco_treceability.master_station
-        WHERE Station_Name NOT IN ('IR ALT PC1', 'IR ALT PC2')
-
-        UNION ALL
-
-        SELECT
-            Station_ID,
-            Station_Name
-        FROM taco_treceability.master_station_ALT_screwing
-
-        ORDER BY Station_Name
+if (globfinal_qrcode) {
+    if (globfinal_qrcode.includes("DJ2032-")) {
+        packname = "UPP 27.8";
+    } else if (globfinal_qrcode.includes("DJ2031-")) {
+        packname = "UPP 39.3";
+    }
+}
