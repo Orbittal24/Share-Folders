@@ -367,3 +367,47 @@ Please find below the cell serial numbers:
 •	03HCB00LG210BVG250567846
 •	03HCB00LG210BVG240146431
 
+
+DECLARE @CellQR NVARCHAR(100) = '03HCB00LG210BVG250211914';
+DECLARE @SQL NVARCHAR(MAX) = '';
+
+SELECT @SQL = @SQL + '
+SELECT
+    ''' + TABLE_NAME + ''' AS TableName,
+    sr_no,
+    pack_name,
+    pack_id,
+    line_id,
+    pack_no,
+    module_barcode,
+    module_number,
+    module_name,
+    cellqr,
+    module_status,
+    cellqr_status,
+    cell_ir,
+    cell_voltage,
+    cell_kvalue,
+    cell_negativeVolatge,
+    cell_class_grade,
+    cell_capacity,
+    cell_thickness,
+    cell_laserStatus,
+    cell_count,
+    cell_batch,
+    cell_plantCode,
+    ocv_scanned_time,
+    ocv_mc_no,
+    current_dateTime,
+    updated_dateTime
+FROM ' + QUOTENAME(TABLE_NAME) + '
+WHERE cellqr = ''' + @CellQR + '''
+UNION ALL
+'
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME LIKE 'pack_history_%';
+
+-- Remove last UNION ALL
+SET @SQL = LEFT(@SQL, LEN(@SQL) - 10);
+
+EXEC sp_executesql @SQL;
