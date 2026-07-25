@@ -241,18 +241,15 @@ port.on('error', (err) => {
 // =======================
 parser.on('data', function (mydata) {
 
-    console.log("replyfromtester:", mydata);
+    console.log("Serial:", mydata);
 
-    if (ws.readyState === 1) {
+    if (ws.readyState === ws.OPEN) {
 
-        ws.send(mydata);
+        ws.sendUTF
+            ? ws.sendUTF(mydata)
+            : ws.send(mydata);
 
-        console.log("Sent to WebSocket:", mydata);
-
-    } else {
-
-        console.log("WebSocket not connected.");
-
+        console.log("Sent:", mydata);
     }
 
 });
