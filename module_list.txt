@@ -299,3 +299,52 @@ parser.on("data", (data) => {
     }
 
 });
+
+
+///////////////////////
+
+
+wsServer.on('request', function (request) {
+
+    console.log("=================================");
+    console.log("New Client Connected");
+    console.log("Origin:", request.origin);
+    console.log("=================================");
+
+    const connection = request.accept('echo-protocol', request.origin);
+
+    connection.sendUTF("MIS received Line-1 Data!");
+
+    connection.on('message', function (message) {
+
+        console.log("Message Type:", message.type);
+
+        if (message.type === 'utf8') {
+
+            console.log("Received Data:", message.utf8Data);
+
+            irTestingData = message.utf8Data;
+            globArr = message.utf8Data;
+
+        } else {
+
+            console.log("Non UTF8 Message:", message);
+
+        }
+
+    });
+
+    connection.on('error', function (err) {
+
+        console.log("Socket Error:", err);
+
+    });
+
+    connection.on('close', function (code, desc) {
+
+        console.log("Client Closed");
+        console.log(code, desc);
+
+    });
+
+});
