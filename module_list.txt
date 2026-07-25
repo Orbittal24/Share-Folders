@@ -315,24 +315,31 @@ wsServer.on('request', function (request) {
 
     connection.sendUTF("MIS received Line-1 Data!");
 
-    connection.on('message', function (message) {
+connection.on('message', function (message) {
 
-        console.log("Message Type:", message.type);
+    console.log("==================================");
+    console.log("Message Received");
+    console.log(message);
+    console.log("Type:", message.type);
+    console.log("==================================");
 
-        if (message.type === 'utf8') {
+    if (message.type === 'utf8') {
 
-            console.log("Received Data:", message.utf8Data);
+        console.log("UTF8 Data:", message.utf8Data);
 
-            irTestingData = message.utf8Data;
-            globArr = message.utf8Data;
+        irTestingData = message.utf8Data;
+        globArr = message.utf8Data;
 
-        } else {
+    } else if (message.type === 'binary') {
 
-            console.log("Non UTF8 Message:", message);
+        console.log("Binary Length:", message.binaryData.length);
+        console.log(message.binaryData.toString());
 
-        }
+    } else {
 
-    });
+        console.log("Unknown Message");
+    }
+});
 
     connection.on('error', function (err) {
 
