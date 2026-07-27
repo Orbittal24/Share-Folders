@@ -413,3 +413,36 @@ SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL' + CHAR(13) + CHAR(10)));
 -- PRINT @SQL;
 
 EXEC sp_executesql @SQL;
+
+
+
+
+
+
+////////////////////////////
+;WITH PackNumbers AS
+(
+    SELECT 15001 AS PackNo
+    UNION ALL
+    SELECT PackNo + 1
+    FROM PackNumbers
+    WHERE PackNo < 20000
+)
+INSERT INTO Pack_duplicate_checker
+(
+    Line_Id,
+    Pack_ID,
+    Pack_No,
+    pack_creation_Date,
+    new_series,
+    auto_reset_date
+)
+SELECT
+    7,
+    29,
+    RIGHT('000000' + CAST(PackNo AS VARCHAR(6)), 6),  -- Generates 015001 to 020000
+    '2026-07-01 00:00:00.0000000',
+    'NA',
+    NULL
+FROM PackNumbers
+OPTION (MAXRECURSION 0);
