@@ -1,47 +1,28 @@
-SELECT
-    SUM(Size_Bytes) AS Total_Bytes,
-    CAST(SUM(Size_Bytes)/1024.0 AS DECIMAL(10,2)) AS Total_KB,
-    CAST(SUM(Size_Bytes)/1024.0/1024.0 AS DECIMAL(10,4)) AS Total_MB
-FROM
-(
-    -- Size from TrayAssemblyBoltingCount
-    SELECT
-        SUM(
-              ISNULL(DATALENGTH(Process_ID),0)
-            + ISNULL(DATALENGTH([Time]),0)
-            + ISNULL(DATALENGTH([Line]),0)
-            + ISNULL(DATALENGTH(BOM_ID),0)
-            + ISNULL(DATALENGTH(Running_Count),0)
-            + ISNULL(DATALENGTH(Pack_Number),0)
-            + ISNULL(DATALENGTH(Module_barcode),0)
-            + ISNULL(DATALENGTH(Pack_ID),0)
-            + ISNULL(DATALENGTH(Process_Status),0)
-            + ISNULL(DATALENGTH(BOM_QR),0)
-            + ISNULL(DATALENGTH(Torque_Array),0)
-            + ISNULL(DATALENGTH(Angle_Array),0)
-            + ISNULL(DATALENGTH(Target_Count),0)
-        ) AS Size_Bytes
-    FROM taco_treceability.[TrayAssemblyBoltingCount_22-06-26_30-06-26]
-    WHERE Pack_Number = '000075'
+const axios = require("axios");
 
-    UNION ALL
+socket.on("get_station_status", async function (barcode) {
+    try {
+        const response = await axios.get(
+            `https://mismainapp.tataautocomp.com:3241/fetch_nomenclature/${barcode}`
+        );
 
-    -- Size from Process_Register
-    SELECT
-        SUM(
-              ISNULL(DATALENGTH(Process_ID),0)
-            + ISNULL(DATALENGTH([Time]),0)
-            + ISNULL(DATALENGTH([Line]),0)
-            + ISNULL(DATALENGTH(Pack_temp_number),0)
-            + ISNULL(DATALENGTH(Module_barcode),0)
-            + ISNULL(DATALENGTH(Module_name),0)
-            + ISNULL(DATALENGTH(Pack_ID),0)
-            + ISNULL(DATALENGTH(Running_Count),0)
-            + ISNULL(DATALENGTH(Process_Status),0)
-            + ISNULL(DATALENGTH(Torque_Array),0)
-            + ISNULL(DATALENGTH(Angle_Array),0)
-            + ISNULL(DATALENGTH(Target_Count),0)
-        )
-    FROM taco_treceability.[Process_Register_29-05-26_07-06-26]
-    WHERE Pack_temp_number = '000075'
-) AS T;
+        const result = response.data;
+
+        let status = "NOT OK";
+        let FinalQRCode;
+
+        if (Array.isArray(result) && result.length > 0) {
+            status = "OK";
+            FinalQRCode = result[0].Pack_No;
+        }
+
+        console.log("API Result:", result);
+
+        socket.emit("set_station_status", status, barcode, FinalQRCode);
+
+    } catch (err) {
+        console.error("API Error:", err.message);
+
+        socket.emit("set_station_status", "NOT OK", barcode, undefined);
+    }
+});
