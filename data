@@ -1,7 +1,6 @@
-if (globfinal_qrcode) {
-    if (globfinal_qrcode.includes("DJ2032-")) {
-        packname = "UPP 27.8";
-    } else if (globfinal_qrcode.includes("DJ2031-")) {
-        packname = "UPP 39.3";
-    }
-}
+SELECT 
+    Pack_ID,
+    COUNT(*) AS Record_Count
+FROM taco_treceability.Process_Master
+GROUP BY Pack_ID
+ORDER BY Record_Count DESC;
