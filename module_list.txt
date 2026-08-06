@@ -503,3 +503,176 @@ SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL'));
 -- PRINT @SQL;
 
 EXEC sp_executesql @SQL;
+
+
+
+////////////////////////////////////////
+const WebSocket = require("ws");
+const { exec } = require("child_process");
+
+const WS_URL = "wss://misapp.tataautocomp.com:3250/bms-flashing/ws";
+
+const socket = new WebSocket(WS_URL, {
+    rejectUnauthorized: false
+});
+
+// =====================
+// CONNECTED
+// =====================
+socket.on("open", () => {
+
+    console.log("✅ Connected to WebSocket Server");
+
+    socket.send(JSON.stringify({
+        type: "status",
+        status: "READY"
+    }));
+});
+
+// =====================
+// RECEIVE MESSAGE
+// =====================
+socket.on("message", (message) => {
+
+    const text = message.toString();
+
+    console.log("Received:", text);
+
+    // Ignore CONNECTED message
+    if (text.startsWith("CONNECTED:")) {
+        console.log("Client Registered");
+        return;
+    }
+
+    let data;
+
+    try {
+        data = JSON.parse(text);
+    } catch (err) {
+        console.log("Invalid JSON");
+        return;
+    }
+
+    // Ignore connection messages
+    if (data.type === "connection") {
+        console.log("Connection Message");
+        return;
+    }
+
+    // Ignore status messages
+    if (data.type === "status") {
+        console.log("Status:", data.status);
+        return;
+    }
+
+    // Only process flash command
+    if (data.type !== "flash") {
+        console.log("Ignoring message type:", data.type);
+        return;
+    }
+
+    const firmwareName = data.firmware_name;
+    const hexFile = data.hex_file;
+    const jobId = data.job_id;
+
+    if (!hexFile) {
+        console.log("HEX filename missing.");
+        return;
+    }
+
+    console.log("--------------------------------");
+    console.log("Job ID   :", jobId);
+    console.log("Firmware :", firmwareName);
+    console.log("HEX File :", hexFile);
+    console.log("--------------------------------");
+
+    const command =
+        `"C:\\Program Files (x86)\\BAL Embedded Software\\BALNETClientTool\\BALNETClientTool.exe"` +
+        ` 2 0x76 "C:\\bajaj_3w\\${hexFile}"`;
+
+    console.log("Executing:");
+    console.log(command);
+
+    // Notify backend
+    socket.send(JSON.stringify({
+        type: "status",
+        status: "RUNNING"
+    }));
+
+    exec(command, (error, stdout, stderr) => {
+
+        console.log("===== EXEC CALLBACK =====");
+
+        if (error) {
+
+            console.log("ERROR:");
+            console.log(error);
+
+            socket.send(JSON.stringify({
+                type: "complete",
+                job_id: jobId,
+                status: "FAILED",
+                message: error.message
+            }));
+
+            socket.send(JSON.stringify({
+                type: "status",
+                status: "READY"
+            }));
+
+            return;
+        }
+
+        if (stderr && stderr.trim() !== "") {
+
+            console.log("STDERR:");
+            console.log(stderr);
+
+            socket.send(JSON.stringify({
+                type: "complete",
+                job_id: jobId,
+                status: "FAILED",
+                message: stderr
+            }));
+
+            socket.send(JSON.stringify({
+                type: "status",
+                status: "READY"
+            }));
+
+            return;
+        }
+
+        console.log("STDOUT:");
+        console.log(stdout);
+
+        socket.send(JSON.stringify({
+            type: "complete",
+            job_id: jobId,
+            status: "SUCCESS",
+            message: stdout
+        }));
+
+        socket.send(JSON.stringify({
+            type: "status",
+            status: "READY"
+        }));
+
+        console.log("✅ Flash completed.");
+    });
+
+});
+
+// =====================
+// ERROR
+// =====================
+socket.on("error", (err) => {
+    console.log("WebSocket Error:", err);
+});
+
+// =====================
+// CLOSED
+// =====================
+socket.on("close", () => {
+    console.log("WebSocket Closed");
+});
