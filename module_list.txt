@@ -680,7 +680,8 @@ socket.on("close", () => {
 
 DECLARE @SQL NVARCHAR(MAX) = '';
 
-SELECT @SQL = @SQL + '
+SELECT @SQL = @SQL +
+'
 SELECT
     ''' + TABLE_NAME + ''' AS TableName,
     id,
@@ -698,15 +699,19 @@ SELECT
     defect_solved_time,
     rework_timestamp
 FROM ' + QUOTENAME(TABLE_SCHEMA) + '.' + QUOTENAME(TABLE_NAME) + '
-WHERE pack_id = ''18''
-UNION ALL'
+WHERE pack_id = 18
+UNION ALL
+'
 FROM INFORMATION_SCHEMA.TABLES
 WHERE TABLE_NAME LIKE 'rework_register%';
 
--- Remove the last UNION ALL
-SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL'));
-
--- Uncomment to see the generated query
--- PRINT @SQL;
-
-EXEC sp_executesql @SQL;
+IF LEN(@SQL) > 0
+BEGIN
+    SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL' + CHAR(13) + CHAR(10)));
+    PRINT @SQL;
+    EXEC sp_executesql @SQL;
+END
+ELSE
+BEGIN
+    PRINT 'No matching tables found.';
+END
