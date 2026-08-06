@@ -446,3 +446,31 @@ SELECT
     NULL
 FROM PackNumbers
 OPTION (MAXRECURSION 0);
+
+
+
+///////////////////////////////////////////////////////////
+
+DECLARE @SQL NVARCHAR(MAX) = '';
+
+SELECT @SQL = @SQL + '
+SELECT
+    id,
+    pack_name,
+    pack_no,
+    plant_code,
+    live_batches,
+    current_date_time,
+    ''' + TABLE_NAME + ''' AS SourceTable
+FROM ' + QUOTENAME(TABLE_SCHEMA) + '.' + QUOTENAME(TABLE_NAME) + '
+WHERE pack_name LIKE ''Bajaj%''
+UNION ALL
+'
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME LIKE 'running_pack_cell_details_%'
+  AND TABLE_TYPE = 'BASE TABLE';
+
+-- Remove the last UNION ALL
+SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL'));
+
+EXEC sp_executesql @SQL;
