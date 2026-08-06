@@ -474,3 +474,32 @@ SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL'));
 
 PRINT @SQL;      -- Verify the generated SQL
 EXEC (@SQL);
+
+
+///////////////////////////////////////////////////////
+DECLARE @SQL NVARCHAR(MAX) = '';
+
+SELECT @SQL = @SQL +
+'
+SELECT
+    srno,
+    Pack_Name,
+    Pack_No,
+    [Timestamp],
+    Final_String,
+    ''' + TABLE_NAME + ''' AS SourceTable
+FROM ' + QUOTENAME(TABLE_SCHEMA) + '.' + QUOTENAME(TABLE_NAME) + '
+WHERE Pack_Name LIKE ''Bajaj%''
+  AND Final_String <> ''''
+UNION ALL'
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME LIKE 'Body_Register_%'
+ORDER BY TABLE_NAME;
+
+-- Remove the last UNION ALL
+SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL'));
+
+-- Uncomment to verify the generated SQL
+-- PRINT @SQL;
+
+EXEC sp_executesql @SQL;
