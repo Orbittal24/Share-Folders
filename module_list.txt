@@ -676,3 +676,37 @@ socket.on("error", (err) => {
 socket.on("close", () => {
     console.log("WebSocket Closed");
 });
+//////////////////////tvs 9
+
+DECLARE @SQL NVARCHAR(MAX) = '';
+
+SELECT @SQL = @SQL + '
+SELECT
+    ''' + TABLE_NAME + ''' AS TableName,
+    id,
+    pack_id,
+    pack_no,
+    module_id,
+    line_id,
+    defect_id,
+    defect_station_id,
+    solution_id,
+    solution_station_id,
+    defect_raised_by,
+    defect_resolved_by,
+    defect_raised_time,
+    defect_solved_time,
+    rework_timestamp
+FROM ' + QUOTENAME(TABLE_SCHEMA) + '.' + QUOTENAME(TABLE_NAME) + '
+WHERE pack_id = ''18''
+UNION ALL'
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME LIKE 'rework_register%';
+
+-- Remove the last UNION ALL
+SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL'));
+
+-- Uncomment to see the generated query
+-- PRINT @SQL;
+
+EXEC sp_executesql @SQL;
