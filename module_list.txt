@@ -714,3 +714,436 @@ ELSE
 BEGIN
     PRINT 'No matching tables found.';
 END;
+///////////////////////////compression script///////////////////////
+
+socket.on(
+    'search_module_compression_scriptcode',
+    async function (
+        modulebarcode,
+        loadvalue,
+        forcevalue,
+        line,
+        operator_name,
+        reason
+    ) {
+
+        try {
+
+            // =========================================================
+            // LINE / TABLE INFORMATION
+            // =========================================================
+
+            var tablename = line.split('.');
+
+            console.log("Module Barcode:", modulebarcode);
+            console.log("Line:", line);
+            console.log("Table Name Part:", tablename[1]);
+
+
+            // =========================================================
+            // DATE
+            // =========================================================
+
+            const date = new Date();
+
+            const year = date.getUTCFullYear();
+            const month = date.getUTCMonth() + 1;
+            const day = date.getUTCDate();
+
+            var hour = date.getHours();
+            var minutes = date.getMinutes();
+            var seconds = date.getSeconds();
+
+            var YYYY = year;
+            var MM = (month < 10 ? "0" + month : month);
+            var DD = (day < 10 ? "0" + day : day);
+
+            var newdate =
+                YYYY + "-" +
+                MM + "-" +
+                DD + " " +
+                hour + ":" +
+                minutes + ":" +
+                seconds;
+
+
+            // =========================================================
+            // STEP 1: CALL NOMENCLATURE API
+            // =========================================================
+
+            const apiUrl =
+                "https://mismainapp.tataautocomp.com:3241/fetch_nomenclature/" +
+                encodeURIComponent(modulebarcode);
+
+            console.log("Calling Nomenclature API:");
+            console.log(apiUrl);
+
+
+            const apiResponse = await axios.get(
+                apiUrl,
+                {
+                    headers: {
+                        accept: "application/json"
+                    },
+                    timeout: 10000
+                }
+            );
+
+
+            // =========================================================
+            // STEP 2: CHECK API RESPONSE
+            // =========================================================
+
+            if (
+                !apiResponse.data ||
+                !Array.isArray(apiResponse.data) ||
+                apiResponse.data.length === 0
+            ) {
+
+                console.log(
+                    "Module not found in nomenclature API:",
+                    modulebarcode
+                );
+
+                socket.emit(
+                    "search_module_compression_scriptcode1",
+                    "NOT FOUND"
+                );
+
+                return;
+            }
+
+
+            // =========================================================
+            // STEP 3: GET DATA FROM API
+            // =========================================================
+
+            const moduleData = apiResponse.data[0];
+
+
+            // Pack Name from API
+            const PackName = moduleData.pack_name;
+
+
+            // FinalQRCode = Pack_No from API
+            const FinalQRCode = moduleData.Pack_No;
+
+
+            // Module QR from API
+            const ModuleQR = moduleData.Module_QR;
+
+
+            console.log("--------------------------------------");
+            console.log("Nomenclature API Data");
+            console.log("--------------------------------------");
+            console.log("Module QR    :", ModuleQR);
+            console.log("Final QR Code:", FinalQRCode);
+            console.log("Pack Name    :", PackName);
+            console.log("Pack ID      :", moduleData.Pack_ID);
+            console.log("Module ID    :", moduleData.Module_ID);
+            console.log("Line ID      :", moduleData.Line_ID);
+            console.log("--------------------------------------");
+
+
+            // =========================================================
+            // STEP 4: VALIDATE REQUIRED API DATA
+            // =========================================================
+
+            if (!FinalQRCode || !PackName) {
+
+                console.log(
+                    "Required data missing from nomenclature API"
+                );
+
+                console.log("FinalQRCode:", FinalQRCode);
+                console.log("PackName:", PackName);
+
+                socket.emit(
+                    "search_module_compression_scriptcode1",
+                    "NOT FOUND"
+                );
+
+                return;
+            }
+
+
+            // =========================================================
+            // STEP 5: SELECT COMPRESSION TABLE
+            // =========================================================
+
+            let compressionTable;
+
+            if (tablename[1] == 1) {
+
+                compressionTable =
+                    "taco_treceability.taco_treceability.module_compression_details";
+
+                console.log(
+                    "Using Table: module_compression_details"
+                );
+
+            }
+            else {
+
+                compressionTable =
+                    "taco_treceability.taco_treceability.module_compression_details2";
+
+                console.log(
+                    "Using Table: module_compression_details2"
+                );
+            }
+
+
+            // =========================================================
+            // STEP 6: CONNECT SQL
+            // =========================================================
+
+            await sql.connect(sqlConfig);
+
+
+            // =========================================================
+            // STEP 7: CHECK MODULE ALREADY EXISTS
+            // =========================================================
+
+            const checkRequest = new sql.Request();
+
+            const checkResult = await checkRequest
+                .input(
+                    "modulebarcode",
+                    sql.VarChar,
+                    modulebarcode
+                )
+                .query(`
+                    SELECT *
+                    FROM ${compressionTable}
+                    WHERE module_number = @modulebarcode
+                `);
+
+
+            // =========================================================
+            // STEP 8: UPDATE EXISTING MODULE
+            // =========================================================
+
+            if (checkResult.recordset.length > 0) {
+
+                console.log(
+                    "Module already exists. Updating data..."
+                );
+
+                const updateRequest = new sql.Request();
+
+                await updateRequest
+                    .input(
+                        "loadvalue",
+                        sql.VarChar,
+                        loadvalue
+                    )
+                    .input(
+                        "forcevalue",
+                        sql.VarChar,
+                        forcevalue
+                    )
+                    .input(
+                        "modulebarcode",
+                        sql.VarChar,
+                        modulebarcode
+                    )
+                    .query(`
+                        UPDATE ${compressionTable}
+                        SET
+                            preload_value = @loadvalue,
+                            force_value = @forcevalue
+                        WHERE module_number = @modulebarcode
+                    `);
+
+                console.log(
+                    "Compression data updated successfully"
+                );
+
+            }
+
+
+            // =========================================================
+            // STEP 9: INSERT NEW MODULE
+            // =========================================================
+
+            else {
+
+                console.log(
+                    "Module does not exist. Inserting new data..."
+                );
+
+                const insertRequest = new sql.Request();
+
+                await insertRequest
+                    .input(
+                        "final_qrcode",
+                        sql.VarChar,
+                        FinalQRCode
+                    )
+                    .input(
+                        "module_number",
+                        sql.VarChar,
+                        modulebarcode
+                    )
+                    .input(
+                        "product_type",
+                        sql.VarChar,
+                        PackName
+                    )
+                    .input(
+                        "preload_value",
+                        sql.VarChar,
+                        loadvalue
+                    )
+                    .input(
+                        "force_value",
+                        sql.VarChar,
+                        forcevalue
+                    )
+                    .input(
+                        "today_date",
+                        sql.VarChar,
+                        newdate
+                    )
+                    .input(
+                        "line",
+                        sql.VarChar,
+                        line
+                    )
+                    .input(
+                        "jobstatus",
+                        sql.Int,
+                        1
+                    )
+                    .query(`
+                        INSERT INTO ${compressionTable}
+                        (
+                            final_qrcode,
+                            module_number,
+                            product_type,
+                            preload_value,
+                            force_value,
+                            today_date,
+                            line,
+                            jobstatus
+                        )
+                        VALUES
+                        (
+                            @final_qrcode,
+                            @module_number,
+                            @product_type,
+                            @preload_value,
+                            @force_value,
+                            @today_date,
+                            @line,
+                            @jobstatus
+                        )
+                    `);
+
+                console.log(
+                    "Compression data inserted successfully"
+                );
+            }
+
+
+            // =========================================================
+            // STEP 10: INSERT MANUAL ENTRY DETAILS
+            // =========================================================
+
+            const manualRequest = new sql.Request();
+
+            await manualRequest
+                .input(
+                    "module_number",
+                    sql.VarChar,
+                    modulebarcode
+                )
+                .input(
+                    "operator_name",
+                    sql.VarChar,
+                    operator_name
+                )
+                .input(
+                    "reason",
+                    sql.VarChar,
+                    reason
+                )
+                .query(`
+                    INSERT INTO taco_treceability.taco_treceability.module_compression_manual_entry_details
+                    (
+                        module_number,
+                        operator_name,
+                        reason
+                    )
+                    VALUES
+                    (
+                        @module_number,
+                        @operator_name,
+                        @reason
+                    )
+                `);
+
+            console.log(
+                "Manual entry details inserted successfully"
+            );
+
+
+            // =========================================================
+            // STEP 11: SEND SUCCESS RESPONSE
+            // =========================================================
+
+            socket.emit(
+                "search_module_compression_scriptcode1",
+                "SAVE"
+            );
+
+            console.log(
+                "======================================"
+            );
+
+            console.log(
+                "Compression operation completed successfully"
+            );
+
+            console.log(
+                "Module Barcode:",
+                modulebarcode
+            );
+
+            console.log(
+                "Final QR Code:",
+                FinalQRCode
+            );
+
+            console.log(
+                "Pack Name:",
+                PackName
+            );
+
+            console.log(
+                "======================================"
+            );
+
+        }
+        catch (err) {
+
+            // =========================================================
+            // ERROR HANDLING
+            // =========================================================
+
+            console.error(
+                "Error in search_module_compression_scriptcode:"
+            );
+
+            console.error(err);
+
+
+            socket.emit(
+                "search_module_compression_scriptcode1",
+                "ERROR"
+            );
+        }
+
+    }
+);
