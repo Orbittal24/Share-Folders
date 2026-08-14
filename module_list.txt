@@ -1147,3 +1147,26 @@ socket.on(
 
     }
 );
+///////////////////////////////////////////////////////////////
+DECLARE @SQL NVARCHAR(MAX) = '';
+
+SELECT @SQL = @SQL + '
+SELECT SrNo, Pack_No, Timestamp, ''' + TABLE_NAME + ''' AS TableName
+FROM taco_treceability.[' + TABLE_NAME + ']
+WHERE Pack_ID = ''21''
+UNION ALL
+'
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'dbo'
+  AND TABLE_NAME LIKE 'FinalQRCode_register[_]%';
+
+SET @SQL = LEFT(@SQL, LEN(@SQL) - 11);
+
+SET @SQL = '
+SELECT TOP (200) *
+FROM (
+' + @SQL + '
+) AS AllData
+ORDER BY Timestamp DESC;';
+
+EXEC sp_executesql @SQL;
