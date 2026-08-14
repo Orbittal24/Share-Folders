@@ -1148,27 +1148,46 @@ socket.on(
     }
 );
 ///////////////////////////////////////////////////////////////
+USE taco_treceability;
+
 DECLARE @SQL NVARCHAR(MAX) = '';
 
-SELECT @SQL = @SQL + '
-SELECT SrNo, Pack_No, Timestamp, ''' + TABLE_NAME + ''' AS TableName
-FROM taco_treceability.dbo.[' + TABLE_NAME + ']
+SELECT @SQL = @SQL + 
+'
+SELECT 
+    SrNo,
+    Pack_No,
+    Timestamp,
+    ''' + REPLACE(t.name, '''', '''''') + ''' AS TableName
+FROM dbo.' + QUOTENAME(t.name) + '
 WHERE Pack_ID = ''21''
 UNION ALL
 '
-FROM taco_treceability.INFORMATION_SCHEMA.TABLES
-WHERE TABLE_SCHEMA = 'dbo'
-  AND TABLE_NAME LIKE 'FinalQRCode_register[_]%';
+FROM sys.tables t
+INNER JOIN sys.schemas s 
+    ON t.schema_id = s.schema_id
+WHERE s.name = 'dbo'
+  AND t.name LIKE 'FinalQRCode_register[_]%';
 
--- Check whether tables were found
-IF LEN(@SQL) = 0
+IF @SQL = ''
 BEGIN
     PRINT 'No FinalQRCode_register_ tables found.';
     RETURN;
 END;
 
--- Remove the last UNION ALL
 SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL' + CHAR(13) + CHAR(10)));
 
--- Execute
+SET @SQL = '
+SELECT TOP (200)
+    SrNo,
+    Pack_No,
+    Timestamp,
+    TableName
+FROM
+(
+    ' + @SQL + '
+) AS AllData
+ORDER BY Timestamp DESC;
+';
+
 EXEC sp_executesql @SQL;
