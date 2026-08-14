@@ -1152,21 +1152,23 @@ DECLARE @SQL NVARCHAR(MAX) = '';
 
 SELECT @SQL = @SQL + '
 SELECT SrNo, Pack_No, Timestamp, ''' + TABLE_NAME + ''' AS TableName
-FROM taco_treceability.[' + TABLE_NAME + ']
+FROM taco_treceability.dbo.[' + TABLE_NAME + ']
 WHERE Pack_ID = ''21''
 UNION ALL
 '
-FROM INFORMATION_SCHEMA.TABLES
+FROM taco_treceability.INFORMATION_SCHEMA.TABLES
 WHERE TABLE_SCHEMA = 'dbo'
   AND TABLE_NAME LIKE 'FinalQRCode_register[_]%';
 
-SET @SQL = LEFT(@SQL, LEN(@SQL) - 11);
+-- Check whether tables were found
+IF LEN(@SQL) = 0
+BEGIN
+    PRINT 'No FinalQRCode_register_ tables found.';
+    RETURN;
+END;
 
-SET @SQL = '
-SELECT TOP (200) *
-FROM (
-' + @SQL + '
-) AS AllData
-ORDER BY Timestamp DESC;';
+-- Remove the last UNION ALL
+SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL' + CHAR(13) + CHAR(10)));
 
+-- Execute
 EXEC sp_executesql @SQL;
