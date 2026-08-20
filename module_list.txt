@@ -1176,3 +1176,21 @@ ELSE
 BEGIN
     PRINT 'No FinalQRCode_register_ tables found.';
 END;
+
+
+///////////////////////////
+DECLARE @CellQR NVARCHAR(100) = '03HCB01B0000BRFBP0621702';
+DECLARE @SQL NVARCHAR(MAX) = '';
+
+SELECT @SQL = @SQL + 
+    'SELECT TOP 1 ''' + TABLE_NAME + ''' AS TableName, sr_no, pack_name, pack_id, line_id, pack_no, module_ba 
+     FROM ' + QUOTENAME(TABLE_SCHEMA) + '.' + QUOTENAME(TABLE_NAME) + 
+    ' WHERE pack_id = ''48'' AND (sr_no = @CellQR OR pack_name = @CellQR OR pack_id = @CellQR OR line_id = @CellQR OR pack_no = @CellQR);'
+FROM INFORMATION_SCHEMA.TABLES t
+INNER JOIN INFORMATION_SCHEMA.COLUMNS c 
+    ON t.TABLE_NAME = c.TABLE_NAME 
+    AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
+WHERE t.TABLE_TYPE = 'BASE TABLE'
+    AND c.COLUMN_NAME = 'pack_id';  -- Only tables that have pack_id column
+
+EXEC sp_executesql @SQL, N'@CellQR NVARCHAR(100)', @CellQR;
