@@ -1,120 +1,52 @@
-import asyncio
+const net = require("net");
 
-# ============================================================
-# TCP SERVER CONFIGURATION
-# ============================================================
+const HOST = "10.9.4.28";
+const PORT = 5391;
 
-HOST = "0.0.0.0"
-PORT = 5391
+console.log("==========================================");
+console.log("TCP CLIENT TEST");
+console.log("==========================================");
+console.log("Connecting to:", HOST);
+console.log("Port:", PORT);
+console.log("==========================================");
 
+const client = new net.Socket();
 
-# ============================================================
-# HANDLE TCP CLIENT
-# ============================================================
+client.connect(PORT, HOST, () => {
 
-async def handle_client(reader, writer):
+    console.log("");
+    console.log("==========================================");
+    console.log("✅ CONNECTED SUCCESSFULLY");
+    console.log("==========================================");
 
-    client_address = writer.get_extra_info("peername")
+    // Send test line number
+    client.write("3");
 
-    print("")
-    print("================================================")
-    print("✅ TCP CLIENT CONNECTED")
-    print("================================================")
-    print(f"Client : {client_address}")
-    print("================================================")
-
-    try:
-
-        while True:
-
-            data = await reader.read(1024)
-
-            if not data:
-                print(
-                    f"❌ Client disconnected : {client_address}"
-                )
-                break
-
-            message = data.decode("utf-8").strip()
-
-            print("")
-            print("📥 DATA RECEIVED")
-            print("----------------")
-            print(f"Message : {message}")
-
-            # Send response to Node.js client
-            response = f"SERVER RECEIVED: {message}\n"
-
-            writer.write(response.encode("utf-8"))
-
-            await writer.drain()
-
-            print(
-                f"📤 RESPONSE SENT : {response.strip()}"
-            )
-
-    except Exception as e:
-
-        print("")
-        print("❌ CLIENT ERROR")
-        print(f"Error : {e}")
-
-    finally:
-
-        writer.close()
-
-        await writer.wait_closed()
-
-        print("")
-        print("================================================")
-        print("🔌 TCP CLIENT CONNECTION CLOSED")
-        print("================================================")
+    console.log("📤 Sent: 3");
+});
 
 
-# ============================================================
-# START TCP SERVER
-# ============================================================
+client.on("data", (data) => {
 
-async def main():
+    console.log("");
+    console.log("📥 Server response:");
+    console.log(data.toString());
 
-    print("")
-    print("================================================")
-    print("🚀 TCP SERVER STARTING")
-    print("================================================")
-    print(f"Host : {HOST}")
-    print(f"Port : {PORT}")
-    print("================================================")
-
-    server = await asyncio.start_server(
-        handle_client,
-        HOST,
-        PORT
-    )
-
-    print("")
-    print("================================================")
-    print("✅ TCP SERVER CREATED SUCCESSFULLY")
-    print("================================================")
-    print(f"Listening : {HOST}:{PORT}")
-    print("Waiting for clients...")
-    print("================================================")
-    print("")
-
-    async with server:
-
-        await server.serve_forever()
+});
 
 
-# ============================================================
-# RUN SERVER
-# ============================================================
+client.on("close", () => {
 
-if __name__ == "__main__":
+    console.log("");
+    console.log("❌ Connection closed");
 
-    try:
-        asyncio.run(main())
+});
 
-    except KeyboardInterrupt:
 
-        print("")
-        print("🛑 TCP SERVER STOPPED")
+client.on("error", (err) => {
+
+    console.log("");
+    console.log("❌ TCP ERROR:");
+    console.log(err.message);
+
+});
