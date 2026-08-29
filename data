@@ -1,4 +1,3 @@
-```javascript
 const net = require("net");
 const { SerialPort } = require("serialport");
 const XLSX = require("xlsx");
@@ -11,26 +10,32 @@ const os = require("os");
 // MAIN SERVER TCP CONFIGURATION
 // ============================================================
 
-// FastAPI backend server IP
 const SERVER_IP = "10.9.4.28";
 
-// TCP server port
-const SERVER_PORT = 5000;
+// IMPORTANT:
+// This MUST match the port used by main.py
+const SERVER_PORT = 5391;
 
 
 // ============================================================
 // TEST MODE
 // ============================================================
 //
-// true  = Test TCP + Excel comparison without COM port
-// false = Use real COM port and physical buzzer
+// true  = COM port completely disabled
+//         TCP + Excel comparison + simulated buzzer
 //
+// false = Real COM relay + physical buzzer
+//
+
 const TEST_MODE = true;
 
 
 // ============================================================
 // SERIAL RELAY CONFIGURATION
 // ============================================================
+//
+// Used only when TEST_MODE = false
+//
 
 const SERIAL_PORT = "COM4";
 
@@ -47,19 +52,20 @@ const PARITY = "none";
 // EXCEL CONFIGURATION
 // ============================================================
 //
-// Excel file:
+// File:
+// C:\Users\<USERNAME>\Desktop\buzzer_line.xlsx
 //
-// C:\Users\useradmin\Desktop\buzzer_line.xlsx
+// Sheet:
+// Sheet1
 //
-// Expected format:
-//
-// Sheet Name: Sheet1
-//
-// Cell A1 contains the line number.
+// Cell:
+// A1
 //
 // Example:
 //
-// A1 = 1
+// A1 = 3
+//
+// No header is required.
 //
 
 const EXCEL_FILE_NAME = "buzzer_line.xlsx";
@@ -79,7 +85,6 @@ const LINE_CELL = "A1";
 // BUZZER CONFIGURATION
 // ============================================================
 
-// Buzzer duration = 10 seconds
 const BUZZER_DURATION = 10000;
 
 
@@ -96,8 +101,9 @@ const SERIAL_RECONNECT_DELAY = 3000;
 // RELAY COMMANDS
 // ============================================================
 
-// RELAY ON
+// Relay ON
 // A0 01 01 A2
+
 const RELAY_ON_COMMAND = Buffer.from([
     0xA0,
     0x01,
@@ -106,8 +112,9 @@ const RELAY_ON_COMMAND = Buffer.from([
 ]);
 
 
-// RELAY OFF
+// Relay OFF
 // A0 01 00 A1
+
 const RELAY_OFF_COMMAND = Buffer.from([
     0xA0,
     0x01,
@@ -136,13 +143,8 @@ let receivedBuffer = "";
 
 
 // ============================================================
-// READ LINE NUMBER FROM LOCAL EXCEL
+// READ LINE NUMBER FROM EXCEL
 // ============================================================
-//
-// Reads:
-//
-// Sheet1!A1
-//
 
 function readLocalExcelLine() {
 
@@ -151,7 +153,10 @@ function readLocalExcelLine() {
     );
 
 
-    // Check Excel file exists
+    // --------------------------------------------------------
+    // CHECK FILE
+    // --------------------------------------------------------
+
     if (!fs.existsSync(EXCEL_FILE_PATH)) {
 
         throw new Error(
@@ -160,14 +165,24 @@ function readLocalExcelLine() {
     }
 
 
-    // Read Excel workbook
+    // --------------------------------------------------------
+    // READ WORKBOOK
+    // --------------------------------------------------------
+
     const workbook = XLSX.readFile(
         EXCEL_FILE_PATH
     );
 
 
-    // Check Sheet1 exists
-    if (!workbook.SheetNames.includes(SHEET_NAME)) {
+    // --------------------------------------------------------
+    // CHECK SHEET
+    // --------------------------------------------------------
+
+    if (
+        !workbook.SheetNames.includes(
+            SHEET_NAME
+        )
+    ) {
 
         throw new Error(
             `Excel sheet "${SHEET_NAME}" not found`
@@ -175,17 +190,26 @@ function readLocalExcelLine() {
     }
 
 
-    // Get worksheet
+    // --------------------------------------------------------
+    // GET SHEET
+    // --------------------------------------------------------
+
     const worksheet =
         workbook.Sheets[SHEET_NAME];
 
 
-    // Get A1
+    // --------------------------------------------------------
+    // GET A1
+    // --------------------------------------------------------
+
     const cell =
         worksheet[LINE_CELL];
 
 
-    // Validate A1
+    // --------------------------------------------------------
+    // CHECK A1
+    // --------------------------------------------------------
+
     if (
         !cell ||
         cell.v === undefined ||
@@ -199,7 +223,10 @@ function readLocalExcelLine() {
     }
 
 
-    // Convert to string
+    // --------------------------------------------------------
+    // CONVERT TO STRING
+    // --------------------------------------------------------
+
     const lineNo =
         String(cell.v).trim();
 
@@ -223,19 +250,23 @@ function readLocalExcelLine() {
 
 async function connectSerialRelay() {
 
-    // TEST MODE:
-    // Completely skip COM port connection
-    if (TEST_MODE) {
+    // --------------------------------------------------------
+    // TEST MODE
+    // --------------------------------------------------------
+    //
+    // NEVER attempt COM4 when TEST_MODE = true
+    //
 
-        console.log(
-            "[TEST MODE] COM port connection skipped."
-        );
+    if (TEST_MODE) {
 
         return false;
     }
 
 
-    // Already connected
+    // --------------------------------------------------------
+    // ALREADY CONNECTED
+    // --------------------------------------------------------
+
     if (
         serialPort &&
         serialPort.isOpen
@@ -245,7 +276,10 @@ async function connectSerialRelay() {
     }
 
 
-    // Connection already in progress
+    // --------------------------------------------------------
+    // CONNECTION ALREADY IN PROGRESS
+    // --------------------------------------------------------
+
     if (isSerialConnecting) {
 
         return false;
@@ -260,95 +294,112 @@ async function connectSerialRelay() {
     );
 
 
-    return new Promise((resolve) => {
+    return new Promise(
+        (resolve) => {
 
-        serialPort = new SerialPort({
-            path: SERIAL_PORT,
-            baudRate: BAUD_RATE,
-            dataBits: DATA_BITS,
-            stopBits: STOP_BITS,
-            parity: PARITY,
-            autoOpen: false,
-        });
-
-
-        // Serial data received
-        serialPort.on(
-            "data",
-            (data) => {
-
-                console.log(
-                    `[SERIAL RESPONSE] ${data
-                        .toString("hex")
-                        .toUpperCase()}`
-                );
-
-            }
-        );
+            serialPort =
+                new SerialPort({
+                    path: SERIAL_PORT,
+                    baudRate: BAUD_RATE,
+                    dataBits: DATA_BITS,
+                    stopBits: STOP_BITS,
+                    parity: PARITY,
+                    autoOpen: false,
+                });
 
 
-        // Serial error
-        serialPort.on(
-            "error",
-            (error) => {
+            // ------------------------------------------------
+            // SERIAL DATA
+            // ------------------------------------------------
 
-                console.error(
-                    `[SERIAL ERROR] ${error.message}`
-                );
+            serialPort.on(
+                "data",
+                (data) => {
 
-            }
-        );
+                    console.log(
+                        `[SERIAL RESPONSE] ${
+                            data
+                                .toString("hex")
+                                .toUpperCase()
+                        }`
+                    );
 
-
-        // Serial closed
-        serialPort.on(
-            "close",
-            () => {
-
-                console.log(
-                    "[SERIAL] Relay COM port closed"
-                );
-
-                isSerialConnecting = false;
-
-            }
-        );
+                }
+            );
 
 
-        // Open COM port
-        serialPort.open(
-            (error) => {
+            // ------------------------------------------------
+            // SERIAL ERROR
+            // ------------------------------------------------
 
-                isSerialConnecting = false;
-
-
-                if (error) {
+            serialPort.on(
+                "error",
+                (error) => {
 
                     console.error(
                         `[SERIAL ERROR] ${error.message}`
                     );
 
-                    resolve(false);
-
-                    return;
                 }
+            );
 
 
-                console.log(
-                    `[SERIAL] Connected successfully to ${SERIAL_PORT}`
-                );
+            // ------------------------------------------------
+            // SERIAL CLOSE
+            // ------------------------------------------------
 
-                resolve(true);
+            serialPort.on(
+                "close",
+                () => {
 
-            }
-        );
+                    console.log(
+                        "[SERIAL] Relay COM port closed"
+                    );
 
-    });
+                    isSerialConnecting = false;
+
+                }
+            );
+
+
+            // ------------------------------------------------
+            // OPEN COM PORT
+            // ------------------------------------------------
+
+            serialPort.open(
+                (error) => {
+
+                    isSerialConnecting = false;
+
+
+                    if (error) {
+
+                        console.error(
+                            `[SERIAL ERROR] ${error.message}`
+                        );
+
+                        resolve(false);
+
+                        return;
+                    }
+
+
+                    console.log(
+                        `[SERIAL] Connected successfully to ${SERIAL_PORT}`
+                    );
+
+                    resolve(true);
+
+                }
+            );
+
+        }
+    );
 }
 
 
 // ============================================================
-// ENSURE SERIAL RELAY IS CONNECTED
+// ENSURE SERIAL CONNECTION
 // ============================================================
 
 async function ensureSerialConnected() {
@@ -381,15 +432,23 @@ async function sendRelayCommand(
     commandName
 ) {
 
+    // --------------------------------------------------------
+    // TEST MODE
+    // --------------------------------------------------------
+
     if (TEST_MODE) {
 
         console.log(
-            `[TEST MODE] Command skipped: ${commandName}`
+            `[TEST MODE] Serial command skipped: ${commandName}`
         );
 
         return;
     }
 
+
+    // --------------------------------------------------------
+    // ENSURE CONNECTION
+    // --------------------------------------------------------
 
     const connected =
         await ensureSerialConnected();
@@ -403,6 +462,10 @@ async function sendRelayCommand(
     }
 
 
+    // --------------------------------------------------------
+    // SEND COMMAND
+    // --------------------------------------------------------
+
     return new Promise(
         (resolve, reject) => {
 
@@ -412,9 +475,11 @@ async function sendRelayCommand(
 
 
             console.log(
-                `[SERIAL] Command: ${command
-                    .toString("hex")
-                    .toUpperCase()}`
+                `[SERIAL] Command: ${
+                    command
+                        .toString("hex")
+                        .toUpperCase()
+                }`
             );
 
 
@@ -462,14 +527,19 @@ async function sendRelayCommand(
 // START BUZZER
 // ============================================================
 
-async function startBuzzer(lineNo) {
+async function startBuzzer(
+    lineNo
+) {
 
-    // Do not restart if already running
+    // --------------------------------------------------------
+    // ALREADY RUNNING
+    // --------------------------------------------------------
+
     if (isBuzzerRunning) {
 
         console.log(
             `[BUZZER] Already running. ` +
-            `New trigger for Line ${lineNo} ignored.`
+            `Line ${lineNo} trigger ignored.`
         );
 
         return;
@@ -480,11 +550,18 @@ async function startBuzzer(lineNo) {
 
 
     console.log("");
-    console.log("================================================");
+
+    console.log(
+        "================================================"
+    );
+
     console.log(
         `[BUZZER] STARTING FOR LINE: ${lineNo}`
     );
-    console.log("================================================");
+
+    console.log(
+        "================================================"
+    );
 
 
     // ========================================================
@@ -494,12 +571,21 @@ async function startBuzzer(lineNo) {
     if (TEST_MODE) {
 
         console.log("");
-        console.log("################################################");
-        console.log("🧪 TEST MODE - SIMULATED BUZZER");
-        console.log("################################################");
 
         console.log(
-            `[TEST BUZZER] LINE ${lineNo} MATCHED`
+            "################################################"
+        );
+
+        console.log(
+            "🧪 TEST MODE - SIMULATED BUZZER"
+        );
+
+        console.log(
+            "################################################"
+        );
+
+        console.log(
+            `[TEST BUZZER] Line ${lineNo} matched`
         );
 
         console.log(
@@ -507,14 +593,19 @@ async function startBuzzer(lineNo) {
         );
 
         console.log(
-            `[TEST BUZZER] RUNNING FOR ` +
-            `${BUZZER_DURATION / 1000} SECONDS`
+            `[TEST BUZZER] Running for ${
+                BUZZER_DURATION / 1000
+            } seconds`
         );
 
-        console.log("################################################");
+        console.log(
+            "################################################"
+        );
+
         console.log("");
 
 
+        // Clear previous timer
         if (buzzerTimer) {
 
             clearTimeout(
@@ -525,14 +616,17 @@ async function startBuzzer(lineNo) {
         }
 
 
-        buzzerTimer = setTimeout(
-            async () => {
+        // Simulate buzzer duration
+        buzzerTimer =
+            setTimeout(
+                async () => {
 
-                await stopBuzzer();
+                    await stopBuzzer();
 
-            },
-            BUZZER_DURATION
-        );
+                },
+                BUZZER_DURATION
+            );
+
 
         return;
     }
@@ -544,7 +638,6 @@ async function startBuzzer(lineNo) {
 
     try {
 
-        // Send ON command
         await sendRelayCommand(
             RELAY_ON_COMMAND,
             "RELAY ON"
@@ -552,11 +645,13 @@ async function startBuzzer(lineNo) {
 
 
         console.log(
-            `[BUZZER] ON for ` +
-            `${BUZZER_DURATION / 1000} seconds`
+            `[BUZZER] ON for ${
+                BUZZER_DURATION / 1000
+            } seconds`
         );
 
 
+        // Clear old timer
         if (buzzerTimer) {
 
             clearTimeout(
@@ -567,14 +662,16 @@ async function startBuzzer(lineNo) {
         }
 
 
-        buzzerTimer = setTimeout(
-            async () => {
+        // Stop after duration
+        buzzerTimer =
+            setTimeout(
+                async () => {
 
-                await stopBuzzer();
+                    await stopBuzzer();
 
-            },
-            BUZZER_DURATION
-        );
+                },
+                BUZZER_DURATION
+            );
 
     } catch (error) {
 
@@ -593,6 +690,10 @@ async function startBuzzer(lineNo) {
 
 async function stopBuzzer() {
 
+    // --------------------------------------------------------
+    // CLEAR TIMER
+    // --------------------------------------------------------
+
     if (buzzerTimer) {
 
         clearTimeout(
@@ -604,22 +705,31 @@ async function stopBuzzer() {
 
 
     console.log("");
-    console.log("================================================");
+
     console.log(
-        `[BUZZER] ${BUZZER_DURATION / 1000} SECONDS COMPLETED`
+        "================================================"
     );
+
     console.log(
-        "[BUZZER] TURNING OFF..."
+        "[BUZZER] TURNING OFF"
     );
-    console.log("================================================");
+
+    console.log(
+        "================================================"
+    );
 
 
+    // ========================================================
     // TEST MODE
+    // ========================================================
+
     if (TEST_MODE) {
 
         console.log(
-            "[TEST BUZZER] BUZZER STOPPED SUCCESSFULLY"
+            "🧪 [TEST BUZZER] SIMULATED BUZZER STOPPED"
         );
+
+        console.log("");
 
         isBuzzerRunning = false;
 
@@ -627,7 +737,10 @@ async function stopBuzzer() {
     }
 
 
+    // ========================================================
     // REAL MODE
+    // ========================================================
+
     try {
 
         await sendRelayCommand(
@@ -654,7 +767,7 @@ async function stopBuzzer() {
 
 
 // ============================================================
-// PROCESS RECEIVED BROADCAST LINE NUMBER
+// PROCESS BROADCAST LINE
 // ============================================================
 
 async function processBroadcast(
@@ -662,21 +775,34 @@ async function processBroadcast(
 ) {
 
     console.log("");
-    console.log("################################################");
+
+    console.log(
+        "################################################"
+    );
+
     console.log(
         `[TCP] RECEIVED BROADCAST LINE NO: ${receivedLineNo}`
     );
-    console.log("################################################");
+
+    console.log(
+        "################################################"
+    );
 
 
     try {
 
-        // Read Excel line number
+        // ----------------------------------------------------
+        // READ EXCEL
+        // ----------------------------------------------------
+
         const excelLine =
             readLocalExcelLine();
 
 
-        // Convert both values to strings
+        // ----------------------------------------------------
+        // CONVERT BOTH TO STRING
+        // ----------------------------------------------------
+
         const serverLine =
             String(
                 receivedLineNo
@@ -688,10 +814,23 @@ async function processBroadcast(
             ).trim();
 
 
+        // ----------------------------------------------------
+        // DISPLAY COMPARISON
+        // ----------------------------------------------------
+
         console.log("");
-        console.log("================================================");
-        console.log("LINE COMPARISON");
-        console.log("================================================");
+
+        console.log(
+            "================================================"
+        );
+
+        console.log(
+            "LINE COMPARISON"
+        );
+
+        console.log(
+            "================================================"
+        );
 
         console.log(
             `Broadcasted Line : ${serverLine}`
@@ -701,20 +840,35 @@ async function processBroadcast(
             `Excel A1 Line    : ${localLine}`
         );
 
-        console.log("================================================");
+        console.log(
+            "================================================"
+        );
 
 
         // ====================================================
-        // LINE DOES NOT MATCH
+        // MISMATCH
         // ====================================================
 
-        if (serverLine !== localLine) {
+        if (
+            serverLine !== localLine
+        ) {
 
             console.log("");
-            console.log("❌ [CLIENT] LINE NOT MATCHED");
 
             console.log(
-                "[CLIENT] BUZZER WILL REMAIN OFF"
+                "❌ [CLIENT] LINE NOT MATCHED"
+            );
+
+            console.log(
+                `[CLIENT] Broadcasted Line: ${serverLine}`
+            );
+
+            console.log(
+                `[CLIENT] Excel Line      : ${localLine}`
+            );
+
+            console.log(
+                "❌ [CLIENT] BUZZER WILL REMAIN OFF"
             );
 
             console.log("");
@@ -724,20 +878,31 @@ async function processBroadcast(
 
 
         // ====================================================
-        // LINE MATCHED
+        // MATCH
         // ====================================================
 
         console.log("");
-        console.log("✅ [CLIENT] LINE MATCHED SUCCESSFULLY");
 
         console.log(
-            "[CLIENT] STARTING BUZZER..."
+            "✅ [CLIENT] LINE MATCHED SUCCESSFULLY"
+        );
+
+        console.log(
+            `[CLIENT] Broadcasted Line: ${serverLine}`
+        );
+
+        console.log(
+            `[CLIENT] Excel Line      : ${localLine}`
+        );
+
+        console.log(
+            "🔔 [CLIENT] STARTING BUZZER..."
         );
 
         console.log("");
 
 
-        // Start test buzzer or real buzzer
+        // Start buzzer
         await startBuzzer(
             receivedLineNo
         );
@@ -747,11 +912,11 @@ async function processBroadcast(
         console.error("");
 
         console.error(
-            `[CLIENT ERROR] ${error.message}`
+            `[CLIENT EXCEL ERROR] ${error.message}`
         );
 
         console.error(
-            "[CLIENT] BUZZER WILL NOT START"
+            "❌ [CLIENT] BUZZER WILL NOT START"
         );
 
         console.error("");
@@ -765,7 +930,9 @@ async function processBroadcast(
 //
 // Expected:
 //
-// {"line_no": 1}\n
+// {"line_no": 3}
+//
+// The server sends newline after JSON.
 //
 
 async function processTcpMessage(
@@ -790,19 +957,28 @@ async function processTcpMessage(
         );
 
 
-        // Parse JSON
+        // ----------------------------------------------------
+        // PARSE JSON
+        // ----------------------------------------------------
+
         const parsed =
             JSON.parse(
                 trimmedMessage
             );
 
 
-        // Get broadcasted line_no
+        // ----------------------------------------------------
+        // GET LINE NUMBER
+        // ----------------------------------------------------
+
         const lineNo =
             parsed.line_no;
 
 
-        // Validate line_no
+        // ----------------------------------------------------
+        // VALIDATE
+        // ----------------------------------------------------
+
         if (
             lineNo === undefined ||
             lineNo === null ||
@@ -817,7 +993,10 @@ async function processTcpMessage(
         }
 
 
-        // Process line
+        // ----------------------------------------------------
+        // PROCESS LINE
+        // ----------------------------------------------------
+
         await processBroadcast(
             lineNo
         );
@@ -841,7 +1020,10 @@ async function processTcpMessage(
 
 function connectToMainServer() {
 
-    // Prevent duplicate connection
+    // --------------------------------------------------------
+    // PREVENT DUPLICATE CONNECTION
+    // --------------------------------------------------------
+
     if (
         tcpClient &&
         !tcpClient.destroyed
@@ -852,35 +1034,59 @@ function connectToMainServer() {
 
 
     console.log("");
-    console.log("================================================");
+
+    console.log(
+        "================================================"
+    );
+
     console.log(
         "[TCP] CONNECTING TO MAIN SERVER"
     );
+
     console.log(
         `[TCP] Server: ${SERVER_IP}:${SERVER_PORT}`
     );
-    console.log("================================================");
 
+    console.log(
+        "================================================"
+    );
+
+
+    // --------------------------------------------------------
+    // CREATE SOCKET
+    // --------------------------------------------------------
 
     tcpClient =
         new net.Socket();
 
 
-    // Connect
+    // --------------------------------------------------------
+    // CONNECT
+    // --------------------------------------------------------
+
     tcpClient.connect(
         SERVER_PORT,
         SERVER_IP,
         () => {
 
             console.log("");
-            console.log("================================================");
+
+            console.log(
+                "================================================"
+            );
+
             console.log(
                 "✅ [TCP] CONNECTED TO MAIN SERVER"
             );
+
             console.log(
-                `[TCP] Connected: ${SERVER_IP}:${SERVER_PORT}`
+                `[TCP] ${SERVER_IP}:${SERVER_PORT}`
             );
-            console.log("================================================");
+
+            console.log(
+                "================================================"
+            );
+
             console.log("");
 
         }
@@ -888,21 +1094,22 @@ function connectToMainServer() {
 
 
     // ========================================================
-    // RECEIVE DATA
+    // RECEIVE TCP DATA
     // ========================================================
 
     tcpClient.on(
         "data",
         async (data) => {
 
-            // Add received TCP data to buffer
+            // Add incoming data
             receivedBuffer +=
                 data.toString(
                     "utf8"
                 );
 
 
-            // Split using newline
+            // TCP is a stream.
+            // Split complete messages using newline.
             const messages =
                 receivedBuffer.split(
                     "\n"
@@ -955,14 +1162,17 @@ function connectToMainServer() {
                 "[TCP] Disconnected from main server"
             );
 
+
             tcpClient = null;
 
             receivedBuffer = "";
 
+
+            // Reconnect
             scheduleTcpReconnect();
+
         }
     );
-
 }
 
 
@@ -972,7 +1182,7 @@ function connectToMainServer() {
 
 function scheduleTcpReconnect() {
 
-    // Prevent multiple reconnect timers
+    // Prevent duplicate reconnect timers
     if (tcpReconnectTimer) {
 
         return;
@@ -980,8 +1190,9 @@ function scheduleTcpReconnect() {
 
 
     console.log(
-        `[TCP] Reconnecting in ` +
-        `${TCP_RECONNECT_DELAY / 1000} seconds...`
+        `[TCP] Reconnecting in ${
+            TCP_RECONNECT_DELAY / 1000
+        } seconds...`
     );
 
 
@@ -1005,7 +1216,8 @@ function scheduleTcpReconnect() {
 
 function startSerialReconnectCheck() {
 
-    // Completely disabled in TEST MODE
+    // TEST MODE:
+    // Completely disable serial reconnect
     if (TEST_MODE) {
 
         console.log(
@@ -1028,7 +1240,9 @@ function startSerialReconnectCheck() {
                     "[SERIAL] Relay disconnected. Trying to reconnect..."
                 );
 
+
                 await connectSerialRelay();
+
             }
 
         },
@@ -1044,11 +1258,19 @@ function startSerialReconnectCheck() {
 async function startApplication() {
 
     console.log("");
-    console.log("================================================");
+
+    console.log(
+        "================================================"
+    );
+
     console.log(
         "BUZZER TCP CLIENT STARTED"
     );
-    console.log("================================================");
+
+    console.log(
+        "================================================"
+    );
+
 
     console.log(
         `Main Server IP   : ${SERVER_IP}`
@@ -1059,14 +1281,24 @@ async function startApplication() {
     );
 
     console.log(
-        `Test Mode        : ${TEST_MODE ? "ON" : "OFF"}`
+        `Test Mode        : ${
+            TEST_MODE ? "ON" : "OFF"
+        }`
     );
 
+
+    // --------------------------------------------------------
+    // SERIAL INFORMATION
+    // --------------------------------------------------------
 
     if (TEST_MODE) {
 
         console.log(
-            "Serial Relay     : DISABLED FOR TESTING"
+            "Serial Relay     : DISABLED"
+        );
+
+        console.log(
+            "COM Port         : NOT USED"
         );
 
     } else {
@@ -1081,6 +1313,10 @@ async function startApplication() {
     }
 
 
+    // --------------------------------------------------------
+    // EXCEL INFORMATION
+    // --------------------------------------------------------
+
     console.log(
         `Excel File       : ${EXCEL_FILE_PATH}`
     );
@@ -1093,11 +1329,21 @@ async function startApplication() {
         `Excel Line Cell  : ${LINE_CELL}`
     );
 
+
+    // --------------------------------------------------------
+    // BUZZER INFORMATION
+    // --------------------------------------------------------
+
     console.log(
-        `Buzzer Duration  : ${BUZZER_DURATION / 1000} seconds`
+        `Buzzer Duration  : ${
+            BUZZER_DURATION / 1000
+        } seconds`
     );
 
-    console.log("================================================");
+
+    console.log(
+        "================================================"
+    );
 
 
     // ========================================================
@@ -1107,11 +1353,11 @@ async function startApplication() {
     if (TEST_MODE) {
 
         console.log(
-            "[TEST MODE] COM port connection disabled."
+            "[TEST MODE] COM connection skipped."
         );
 
         console.log(
-            "[TEST MODE] Ready for TCP + Excel comparison."
+            "[TEST MODE] Ready for TCP + Excel testing."
         );
 
     } else {
@@ -1127,6 +1373,7 @@ async function startApplication() {
                 console.log(
                     "[STARTUP] Sending RELAY OFF command..."
                 );
+
 
                 await sendRelayCommand(
                     RELAY_OFF_COMMAND,
@@ -1148,13 +1395,13 @@ async function startApplication() {
         }
 
 
-        // Start serial reconnect only in real mode
+        // Start serial reconnect
         startSerialReconnectCheck();
     }
 
 
     // ========================================================
-    // CONNECT TO MAIN TCP SERVER
+    // CONNECT TCP SERVER
     // ========================================================
 
     connectToMainServer();
@@ -1180,7 +1427,10 @@ async function shutdown(
     );
 
 
-    // Stop timer
+    // --------------------------------------------------------
+    // STOP BUZZER TIMER
+    // --------------------------------------------------------
+
     if (buzzerTimer) {
 
         clearTimeout(
@@ -1191,7 +1441,10 @@ async function shutdown(
     }
 
 
-    // Turn relay OFF only in real mode
+    // --------------------------------------------------------
+    // TURN OFF REAL RELAY
+    // --------------------------------------------------------
+
     if (
         !TEST_MODE &&
         serialPort &&
@@ -1214,7 +1467,10 @@ async function shutdown(
     }
 
 
-    // Close TCP connection
+    // --------------------------------------------------------
+    // CLOSE TCP
+    // --------------------------------------------------------
+
     if (
         tcpClient &&
         !tcpClient.destroyed
@@ -1224,7 +1480,10 @@ async function shutdown(
     }
 
 
-    // Close serial connection
+    // --------------------------------------------------------
+    // CLOSE SERIAL
+    // --------------------------------------------------------
+
     if (
         !TEST_MODE &&
         serialPort &&
@@ -1237,6 +1496,7 @@ async function shutdown(
                 serialPort.close(
                     () => resolve()
                 );
+
             }
         );
     }
@@ -1245,6 +1505,7 @@ async function shutdown(
     console.log(
         "[SYSTEM] Client stopped."
     );
+
 
     process.exit(0);
 }
@@ -1266,8 +1527,7 @@ process.on(
 
 
 // ============================================================
-// START CLIENT
+// START
 // ============================================================
 
 startApplication();
-```
