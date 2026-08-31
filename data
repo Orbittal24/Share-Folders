@@ -1,257 +1,470 @@
-<!DOCTYPE html>
-<html>
+const sql = require("mssql");
+const path = require("path");
+const https = require("https");
+const express = require("express");
+const fs = require("fs");
+const socketio = require("socket.io");
 
-<head>
+const app = express();
 
-    <meta charset="UTF-8">
-    <title>OCV XNG Rejection Data</title>
 
-    <style>
+// ============================================================
+// SSL CERTIFICATE
+// ============================================================
 
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background: #f5f5f5;
-        }
+const sslOptions = {
+    key: fs.readFileSync("./certs/server.key"),
+    cert: fs.readFileSync("./certs/server.pem")
+};
 
-        h1 {
-            text-align: center;
-        }
 
-        .button-section {
-            text-align: center;
-            margin-bottom: 20px;
-        }
+// ============================================================
+// HTTPS SERVER
+// ============================================================
 
-        button {
-            padding: 12px 30px;
-            margin: 5px;
-            border: none;
-            border-radius: 5px;
-            color: white;
-            font-size: 16px;
-            cursor: pointer;
-        }
+const httpsServer = https.createServer(sslOptions, app);
 
-        .scanBtn {
-            background: #007bff;
-        }
 
-        .shiftBtn {
-            background: #28a745;
-        }
+// ============================================================
+// SOCKET.IO
+// ============================================================
 
-        #totalCount {
-            font-size: 22px;
-            font-weight: bold;
-            color: green;
-            margin-top: 10px;
-        }
+const io = socketio(httpsServer, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
 
-        #loading {
-            margin-top: 10px;
-            font-size: 20px;
-            color: red;
-            font-weight: bold;
-        }
 
-        .table-container {
-            max-height: 700px;
-            overflow: auto;
-            background: white;
-        }
+// ============================================================
+// DATABASE CONFIG
+// ============================================================
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
+const sqlConfig = {
 
-        th {
-            background: #343a40;
-            color: white;
-            position: sticky;
-            top: 0;
-        }
+    user: "user_mis",
 
-        th, td {
-            border: 1px solid #ccc;
-            padding: 8px;
-            text-align: center;
-            white-space: nowrap;
-        }
+    password: "admin@123",
 
-        tr:nth-child(even) {
-            background: #f0f0f0;
-        }
+    database: "taco_treceability",
 
-    </style>
+    server: "10.9.4.29",
 
-</head>
+    port: 1433,
 
-<body>
+    options: {
 
-    <h1>OCV XNG Rejection Records</h1>
+        instanceName: "PROD_SQL_2026",
 
-    <div class="button-section">
+        encrypt: false,
 
-        <button class="scanBtn" onclick="loadData()">
-            Scan
-        </button>
+        trustServerCertificate: true
 
-        <button class="shiftBtn" onclick="shiftData()">
-            Shift To OCV XNG Mirror Table
-        </button>
+    },
 
-        <div id="totalCount">
-            Total Records : 0
-        </div>
+    pool: {
 
-        <div id="loading"></div>
+        max: 10,
 
-    </div>
+        min: 0,
 
-    <div class="table-container">
+        idleTimeoutMillis: 30000
 
-        <table>
+    }
 
-            <thead>
-                <tr>
-                    <th>Sr No</th>
-                    <th>Cell QR</th>
-                    <th>Voltage</th>
-                    <th>IR</th>
-                    <th>Date</th>
-                    <th>Time</th>
-                    <th>Machine</th>
-                    <th>Shift</th>
-                    <th>Used On Line</th>
-                    <th>K Value</th>
-                    <th>Grade</th>
-                    <th>Capacity</th>
-                    <th>Class</th>
-                    <th>Cell Thickness</th>
-                    <th>Cell Negative Voltage</th>
-                    <th>Laser Status</th>
-                </tr>
-            </thead>
+};
 
-            <tbody id="tableBody"></tbody>
 
-        </table>
+let dbConn;
 
-    </div>
 
-    <script src="/socket.io/socket.io.js"></script>
+// ============================================================
+// DATABASE CONNECTION
+// ============================================================
 
-    <script>
+async function connectDB() {
 
-        const socket = io();
+    try {
 
-        async function loadData() {
+        dbConn = await sql.connect(sqlConfig);
 
-            document.getElementById("loading").innerHTML =
-                "Loading Data...";
+        console.log("SQL Server Connected...");
 
-            try {
+    } catch (err) {
 
-                const response =
-                    await fetch("/api/get_ocv_reject_data");
+        console.log("DB Connection Error :", err);
 
-                const result = await response.json();
+    }
 
-                document.getElementById("loading").innerHTML = "";
+}
 
-                if (!result.success) {
+connectDB();
 
-                    alert("Unable to load data");
-                    return;
 
-                }
+// ============================================================
+// HTML ROUTE
+// ============================================================
 
-                document.getElementById("totalCount").innerHTML =
-                    "Total Records : " + result.totalCount;
+app.get("/OCV_reject", (req, res) => {
 
-                let html = "";
+    res.sendFile(
+        path.join(__dirname, "OCV_reject.html")
+    );
 
-                result.data.forEach((row, index) => {
+});
 
-                    html += `
-                        <tr>
-                            <td>${index + 1}</td>
-                            <td>${row.cell_qrcode || ""}</td>
-                            <td>${row.voltage || ""}</td>
-                            <td>${row.ir || ""}</td>
-                            <td>${row.today_date || ""}</td>
-                            <td>${row.updated_time || ""}</td>
-                            <td>${row.machine_location || ""}</td>
-                            <td>${row.shift || ""}</td>
-                            <td>${row.used_on_line || ""}</td>
-                            <td>${row.kvalue || ""}</td>
-                            <td>${row.grade || ""}</td>
-                            <td>${row.cell_capacity || ""}</td>
-                            <td>${row.cell_class || ""}</td>
-                            <td>${row.cell_thikness || ""}</td>
-                            <td>${row.cell_nigative_voltage || ""}</td>
-                            <td>${row.laser_status || ""}</td>
-                        </tr>
-                    `;
+
+// ============================================================
+// GET XNG OCV REJECTION DATA
+// ============================================================
+
+app.get("/api/get_ocv_reject_data", async (req, res) => {
+
+    try {
+
+        const result = await dbConn.request().query(`
+
+            SELECT
+
+                sr_no,
+                cell_qrcode,
+                voltage,
+                ir,
+                today_date,
+                updated_time,
+                machine_location,
+                shift,
+                used_on_line,
+                kvalue,
+                grade,
+                cell_capacity,
+                cell_class,
+                cell_thikness,
+                cell_nigative_voltage,
+                laser_status
+
+            FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
+
+            WHERE cell_qrcode LIKE '03%'
+
+            ORDER BY sr_no
+
+        `);
+
+
+        res.json({
+
+            success: true,
+
+            totalCount: result.recordset.length,
+
+            data: result.recordset
+
+        });
+
+
+    } catch (err) {
+
+        console.log("GET DATA ERROR :", err);
+
+
+        res.json({
+
+            success: false,
+
+            message: err.message
+
+        });
+
+    }
+
+});
+
+
+// ============================================================
+// SOCKET.IO
+// ============================================================
+
+io.on("connection", (socket) => {
+
+    console.log(
+        "Client Connected :",
+        socket.id
+    );
+
+
+    // ========================================================
+    // SHIFT REJECTION DATA TO XNG MIRROR
+    // ========================================================
+
+    socket.on("shift_to_mirror", async () => {
+
+        try {
+
+            // ------------------------------------------------
+            // GET ALL REJECTION RECORDS
+            // ------------------------------------------------
+
+            const result = await dbConn.request().query(`
+
+                SELECT
+
+                    sr_no
+
+                FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
+
+                WHERE cell_qrcode LIKE '03%'
+
+                ORDER BY sr_no
+
+            `);
+
+
+            const rows = result.recordset;
+
+
+            // ------------------------------------------------
+            // NO RECORDS
+            // ------------------------------------------------
+
+            if (rows.length === 0) {
+
+                socket.emit("shift_completed", {
+
+                    success: true,
+
+                    total: 0
 
                 });
 
-                document.getElementById("tableBody").innerHTML = html;
-
-            } catch (err) {
-
-                console.log(err);
-
-                document.getElementById("loading").innerHTML =
-                    "Error Loading Data";
-
-            }
-
-        }
-
-        function shiftData() {
-
-            if (!confirm("Do you want to shift all records?"))
                 return;
 
-            document.getElementById("loading").innerHTML =
-                "Shifting records...";
+            }
 
-            socket.emit("shift_to_mirror");
 
-        }
+            let shiftedCount = 0;
 
-        socket.on("shift_progress", (data) => {
 
-            document.getElementById("loading").innerHTML =
-                `Shifting ${data.shifted} / ${data.total}`;
+            // =================================================
+            // PROCESS EACH RECORD
+            // =================================================
 
-        });
+            for (const row of rows) {
 
-        socket.on("shift_completed", (data) => {
+                try {
 
-            document.getElementById("loading").innerHTML = "";
+                    // ------------------------------------------------
+                    // INSERT INTO XNG MIRROR
+                    // ------------------------------------------------
 
-            if (data.success) {
+                    const insertResult =
+                        await dbConn.request().query(`
 
-                alert(
-                    `Successfully shifted ${data.total} records`
-                );
+                            INSERT INTO taco_treceability.ocv_machine_data_xng_mirrior
 
-                location.reload();
+                            (
 
-            } else {
+                                cell_qrcode,
+                                voltage,
+                                ir,
+                                today_date,
+                                updated_time,
+                                machine_location,
+                                shift,
+                                used_on_line,
+                                kvalue,
+                                grade,
+                                cell_capacity,
+                                cell_class,
+                                cell_thikness,
+                                cell_nigative_voltage,
+                                laser_status
 
-                alert("Data shifting failed");
+                            )
+
+                            SELECT
+
+                                cell_qrcode,
+                                voltage,
+                                ir,
+                                today_date,
+                                updated_time,
+                                machine_location,
+                                shift,
+                                used_on_line,
+                                kvalue,
+                                grade,
+                                cell_capacity,
+                                cell_class,
+                                cell_thikness,
+                                cell_nigative_voltage,
+                                laser_status
+
+                            FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
+
+                            WHERE
+
+                                sr_no = ${row.sr_no}
+
+                                AND cell_qrcode LIKE '03%'
+
+                        `);
+
+
+                    // ------------------------------------------------
+                    // IF INSERT SUCCESSFUL
+                    // ------------------------------------------------
+
+                    if (
+                        insertResult.rowsAffected[0] > 0
+                    ) {
+
+                        // ------------------------------------------------
+                        // DELETE INSERTED RECORD
+                        // ------------------------------------------------
+
+                        const deleteResult =
+                            await dbConn.request().query(`
+
+                                DELETE
+
+                                FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
+
+                                WHERE
+
+                                    sr_no = ${row.sr_no}
+
+                                    AND cell_qrcode LIKE '03%'
+
+                            `);
+
+
+                        // ------------------------------------------------
+                        // IF DELETE SUCCESSFUL
+                        // ------------------------------------------------
+
+                        if (
+                            deleteResult.rowsAffected[0] > 0
+                        ) {
+
+                            shiftedCount++;
+
+
+                            // ------------------------------------------------
+                            // SEND PROGRESS TO FRONTEND
+                            // ------------------------------------------------
+
+                            socket.emit(
+                                "shift_progress",
+                                {
+
+                                    shifted: shiftedCount,
+
+                                    total: rows.length
+
+                                }
+                            );
+
+
+                            console.log(
+                                `Shifted XNG Record SR NO : ${row.sr_no}`
+                            );
+
+                        }
+
+                    }
+
+                } catch (err) {
+
+                    console.log(
+                        `Error shifting XNG SR NO ${row.sr_no} :`,
+                        err.message
+                    );
+
+                }
 
             }
 
-        });
 
-    </script>
+            // =================================================
+            // SHIFT COMPLETED
+            // =================================================
 
-</body>
+            socket.emit(
+                "shift_completed",
+                {
 
-</html>
+                    success: true,
+
+                    total: shiftedCount
+
+                }
+            );
+
+
+        } catch (err) {
+
+            console.log(
+                "XNG Shift Error :",
+                err
+            );
+
+
+            socket.emit(
+                "shift_completed",
+                {
+
+                    success: false
+
+                }
+            );
+
+        }
+
+    });
+
+
+    // ========================================================
+    // DISCONNECT
+    // ========================================================
+
+    socket.on("disconnect", () => {
+
+        console.log(
+            "Client Disconnected :",
+            socket.id
+        );
+
+    });
+
+});
+
+
+// ============================================================
+// START HTTPS SERVER
+// ============================================================
+
+httpsServer.listen(
+    5511,
+    "0.0.0.0",
+    function () {
+
+        console.log(
+            "===================================="
+        );
+
+        console.log(
+            "HTTPS Server Running"
+        );
+
+        console.log(
+            "https://0.0.0.0:5511"
+        );
+
+        console.log(
+            "===================================="
+        );
+
+    }
+);
