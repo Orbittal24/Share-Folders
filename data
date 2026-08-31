@@ -7,6 +7,38 @@ const os = require("os");
 
 
 // ============================================================
+// CELL SCANNING BUZZER - TCP CLIENT
+// ============================================================
+// Flow:
+//
+// Python TCP Server
+//        |
+//        | {"line_no":"3"}
+//        v
+// This Node.js client
+//        |
+//        v
+// Read Excel Sheet1!A1
+//        |
+//        v
+// Compare received line with Excel line
+//        |
+//        +---- NOT MATCHED ---> Buzzer OFF
+//        |
+//        +---- MATCHED -------> Buzzer ON
+//                              |
+//                              v
+//                           10 seconds
+//                              |
+//                              v
+//                           Buzzer OFF
+//
+// This client stays connected to the Python TCP server.
+// ============================================================
+
+
+
+// ============================================================
 // MAIN SERVER TCP CONFIGURATION
 // ============================================================
 
@@ -36,6 +68,7 @@ const PARITY = "none";
 //
 // false = Real COM4 relay is required.
 //
+// ============================================================
 
 const SIMULATE_SERIAL = true;
 
@@ -383,6 +416,7 @@ async function sendRelayCommand(
     if (SIMULATE_SERIAL) {
 
         console.log("");
+
         console.log(
             `[SIMULATION] ${commandName}`
         );
@@ -743,7 +777,6 @@ async function processBroadcast(
                 "[CLIENT] BUZZER WILL REMAIN OFF"
             );
 
-
             console.log("");
 
             return;
@@ -804,9 +837,11 @@ async function processBroadcast(
 // ============================================================
 //
 // Expected:
+//
 // {"line_no":"3"}
 //
 // followed by:
+//
 // \n
 //
 // ============================================================
@@ -935,9 +970,9 @@ function connectToMainServer() {
         new net.Socket();
 
 
-    // --------------------------------------------------------
+    // ========================================================
     // TCP CONNECT
-    // --------------------------------------------------------
+    // ========================================================
 
     tcpClient.connect(
         SERVER_PORT,
@@ -968,6 +1003,52 @@ function connectToMainServer() {
 
             console.log("");
 
+
+            // ====================================================
+            // CELL SCANNING BUZZER - CLIENT REGISTRATION
+            // ====================================================
+            //
+            // Tell the Python TCP server that this connection
+            // belongs to a buzzer client.
+            //
+            // The server can use this for logging/identification.
+            //
+            // IMPORTANT:
+            // The newline is required because the Python server
+            // uses newline-delimited TCP messages.
+            // ====================================================
+
+            const registrationMessage =
+                JSON.stringify({
+                    client_type: "buzzer",
+                    client_name: os.hostname()
+                }) + "\n";
+
+
+            try {
+
+                tcpClient.write(
+                    registrationMessage
+                );
+
+
+                console.log(
+                    `[TCP] Registration sent: ${registrationMessage.trim()}`
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    `[TCP REGISTRATION ERROR] ${error.message}`
+                );
+            }
+
+
+            // ====================================================
+            // END CELL SCANNING BUZZER - CLIENT REGISTRATION
+            // ====================================================
+
         }
     );
 
@@ -984,6 +1065,11 @@ function connectToMainServer() {
                 data.toString("utf8");
 
 
+            console.log(
+                `[TCP] Data received: ${data.toString("utf8").trim()}`
+            );
+
+
             // ------------------------------------------------
             // Split messages by newline
             // ------------------------------------------------
@@ -992,7 +1078,10 @@ function connectToMainServer() {
                 receivedBuffer.split("\n");
 
 
+            // ------------------------------------------------
             // Keep incomplete message
+            // ------------------------------------------------
+
             receivedBuffer =
                 messages.pop();
 
@@ -1005,9 +1094,14 @@ function connectToMainServer() {
                 const message of messages
             ) {
 
-                await processTcpMessage(
-                    message
-                );
+                if (
+                    message.trim()
+                ) {
+
+                    await processTcpMessage(
+                        message
+                    );
+                }
 
             }
 
@@ -1023,9 +1117,13 @@ function connectToMainServer() {
         "error",
         (error) => {
 
+            console.error("");
+
             console.error(
                 `[TCP ERROR] ${error.message}`
             );
+
+            console.error("");
 
         }
     );
@@ -1039,10 +1137,13 @@ function connectToMainServer() {
         "close",
         () => {
 
+            console.log("");
+
             console.log(
                 "[TCP] Disconnected from main server"
             );
 
+            console.log("");
 
             tcpClient = null;
 
@@ -1199,9 +1300,11 @@ async function startApplication() {
             "[TEST MODE] Serial relay simulation enabled."
         );
 
+
         console.log(
             "[TEST MODE] COM4 is NOT required."
         );
+
 
         console.log(
             "[TEST MODE] Relay commands will be simulated."
@@ -1311,6 +1414,7 @@ async function shutdown(
                 "[TEST MODE] Simulating RELAY OFF during shutdown."
             );
 
+
             await sendRelayCommand(
                 RELAY_OFF_COMMAND,
                 "RELAY OFF (SHUTDOWN)"
@@ -1387,6 +1491,7 @@ process.on(
     "SIGINT",
     () => shutdown("SIGINT")
 );
+
 
 process.on(
     "SIGTERM",
