@@ -1,1 +1,257 @@
-netstat -ano | findstr :1101
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta charset="UTF-8">
+    <title>OCV XNG Rejection Data</title>
+
+    <style>
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        .button-section {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 30px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .scanBtn {
+            background: #007bff;
+        }
+
+        .shiftBtn {
+            background: #28a745;
+        }
+
+        #totalCount {
+            font-size: 22px;
+            font-weight: bold;
+            color: green;
+            margin-top: 10px;
+        }
+
+        #loading {
+            margin-top: 10px;
+            font-size: 20px;
+            color: red;
+            font-weight: bold;
+        }
+
+        .table-container {
+            max-height: 700px;
+            overflow: auto;
+            background: white;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: #343a40;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        tr:nth-child(even) {
+            background: #f0f0f0;
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+    <h1>OCV XNG Rejection Records</h1>
+
+    <div class="button-section">
+
+        <button class="scanBtn" onclick="loadData()">
+            Scan
+        </button>
+
+        <button class="shiftBtn" onclick="shiftData()">
+            Shift To OCV XNG Mirror Table
+        </button>
+
+        <div id="totalCount">
+            Total Records : 0
+        </div>
+
+        <div id="loading"></div>
+
+    </div>
+
+    <div class="table-container">
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Sr No</th>
+                    <th>Cell QR</th>
+                    <th>Voltage</th>
+                    <th>IR</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Machine</th>
+                    <th>Shift</th>
+                    <th>Used On Line</th>
+                    <th>K Value</th>
+                    <th>Grade</th>
+                    <th>Capacity</th>
+                    <th>Class</th>
+                    <th>Cell Thickness</th>
+                    <th>Cell Negative Voltage</th>
+                    <th>Laser Status</th>
+                </tr>
+            </thead>
+
+            <tbody id="tableBody"></tbody>
+
+        </table>
+
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+
+        const socket = io();
+
+        async function loadData() {
+
+            document.getElementById("loading").innerHTML =
+                "Loading Data...";
+
+            try {
+
+                const response =
+                    await fetch("/api/get_ocv_reject_data");
+
+                const result = await response.json();
+
+                document.getElementById("loading").innerHTML = "";
+
+                if (!result.success) {
+
+                    alert("Unable to load data");
+                    return;
+
+                }
+
+                document.getElementById("totalCount").innerHTML =
+                    "Total Records : " + result.totalCount;
+
+                let html = "";
+
+                result.data.forEach((row, index) => {
+
+                    html += `
+                        <tr>
+                            <td>${index + 1}</td>
+                            <td>${row.cell_qrcode || ""}</td>
+                            <td>${row.voltage || ""}</td>
+                            <td>${row.ir || ""}</td>
+                            <td>${row.today_date || ""}</td>
+                            <td>${row.updated_time || ""}</td>
+                            <td>${row.machine_location || ""}</td>
+                            <td>${row.shift || ""}</td>
+                            <td>${row.used_on_line || ""}</td>
+                            <td>${row.kvalue || ""}</td>
+                            <td>${row.grade || ""}</td>
+                            <td>${row.cell_capacity || ""}</td>
+                            <td>${row.cell_class || ""}</td>
+                            <td>${row.cell_thikness || ""}</td>
+                            <td>${row.cell_nigative_voltage || ""}</td>
+                            <td>${row.laser_status || ""}</td>
+                        </tr>
+                    `;
+
+                });
+
+                document.getElementById("tableBody").innerHTML = html;
+
+            } catch (err) {
+
+                console.log(err);
+
+                document.getElementById("loading").innerHTML =
+                    "Error Loading Data";
+
+            }
+
+        }
+
+        function shiftData() {
+
+            if (!confirm("Do you want to shift all records?"))
+                return;
+
+            document.getElementById("loading").innerHTML =
+                "Shifting records...";
+
+            socket.emit("shift_to_mirror");
+
+        }
+
+        socket.on("shift_progress", (data) => {
+
+            document.getElementById("loading").innerHTML =
+                `Shifting ${data.shifted} / ${data.total}`;
+
+        });
+
+        socket.on("shift_completed", (data) => {
+
+            document.getElementById("loading").innerHTML = "";
+
+            if (data.success) {
+
+                alert(
+                    `Successfully shifted ${data.total} records`
+                );
+
+                location.reload();
+
+            } else {
+
+                alert("Data shifting failed");
+
+            }
+
+        });
+
+    </script>
+
+</body>
+
+</html>
