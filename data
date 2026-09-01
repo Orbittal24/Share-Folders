@@ -1,1140 +1,516 @@
-<!DOCTYPE html>
-<html lang="en">
-
-<head>
-
-    <meta charset="UTF-8">
-
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
-
-    <title>Restart OCV Services</title>
+// ============================================================
+// IR SCREWING SERVICE RESTART
+// HTTPS + SOCKET.IO BACKEND
+// ============================================================
 
 
-    <!-- =====================================================
-         ALL CSS IN THIS FILE
-         ===================================================== -->
+// ============================================================
+// IMPORT MODULES
+// ============================================================
 
-    <style>
+const express = require("express");
 
-        /* ====================================================
-           GLOBAL
-           ==================================================== */
+const https = require("https");
 
-        * {
-            box-sizing: border-box;
-        }
+const fs = require("fs");
 
+const path = require("path");
 
-        html,
-        body {
+const { exec } = require("child_process");
 
-            width: 100%;
-
-            margin: 0;
-
-            padding: 0;
-
-            font-family:
-                Arial,
-                Helvetica,
-                sans-serif;
-
-            background: #ffffff;
-
-        }
+const socketio = require("socket.io");
 
 
-        /* ====================================================
-           PAGE TITLE
-           ==================================================== */
+// ============================================================
+// EXPRESS APP
+// ============================================================
 
-        .page-title {
-
-            width: calc(100% - 12px);
-
-            margin: 12px 6px 14px 6px;
-
-            height: 30px;
-
-            display: flex;
-
-            align-items: center;
-
-        }
+const app = express();
 
 
-        .page-title h3 {
+// ============================================================
+// PORT
+// ============================================================
 
-            margin: 0;
-
-            padding: 0;
-
-            font-size: 20px;
-
-            font-weight: 600;
-
-            color: #111827;
-
-        }
+const PORT = 3998;
 
 
-        /* ====================================================
-           SERVICE CONTROL ROW
+// ============================================================
+// SSL CERTIFICATE
+// ============================================================
 
-           LABEL    = AUTO
-           DROPDOWN = REMAINING LARGE SPACE
-           START    = 17%
-           STOP     = 17%
+const sslOptions = {
 
-           EVERYTHING STAYS IN ONE ROW
-           ==================================================== */
+    key: fs.readFileSync(
+        path.join(
+            __dirname,
+            "certs",
+            "server.key"
+        )
+    ),
 
-        .service-control {
+    cert: fs.readFileSync(
+        path.join(
+            __dirname,
+            "certs",
+            "server.pem"
+        )
+    )
 
-            width: calc(100% - 12px);
+};
 
-            margin: 0 6px;
 
-            padding: 10px 8px;
+// ============================================================
+// CREATE HTTPS SERVER
+// ============================================================
 
-            min-height: 55px;
+const httpsServer = https.createServer(
+    sslOptions,
+    app
+);
 
-            display: grid;
 
-            grid-template-columns:
-                auto
-                minmax(0, 1fr)
-                17%
-                17%;
+// ============================================================
+// SOCKET.IO
+// SOCKET.IO WILL RUN ON HTTPS SERVER
+// ============================================================
 
-            column-gap: 8px;
+const io = socketio(
+    httpsServer,
+    {
+        cors: {
 
-            align-items: center;
+            origin: "*",
 
-            background: #f8f9fa;
-
-            border: 1px solid #d9dde2;
-
-            border-radius: 3px;
+            methods: [
+                "GET",
+                "POST"
+            ]
 
         }
+    }
+);
 
 
-        /* ====================================================
-           LABEL
-           ==================================================== */
+// ============================================================
+// SERVE STATIC FILES
+// ============================================================
 
-        .service-label {
+app.use(
+    express.static(__dirname)
+);
 
-            width: auto;
 
-            margin: 0;
+// ============================================================
+// OCV PAGE
+// ============================================================
 
-            padding: 0 8px;
+app.get(
+    "/ocv",
+    function (req, res) {
 
-            display: flex;
+        res.sendFile(
+            path.join(
+                __dirname,
+                "ocv.html"
+            )
+        );
 
-            align-items: center;
+    }
+);
 
-            justify-content: flex-start;
 
-            font-size: 15px;
+// ============================================================
+// ROOT PAGE
+// REDIRECT TO OCV
+// ============================================================
 
-            font-weight: 500;
+app.get(
+    "/",
+    function (req, res) {
 
-            color: #333333;
+        res.redirect("/ocv");
 
-            white-space: nowrap;
+    }
+);
 
-        }
 
+// ============================================================
+// SOCKET.IO CONNECTION
+// ============================================================
 
-        /* ====================================================
-           DROPDOWN CONTAINER
-           ==================================================== */
+io.on(
+    "connection",
+    function (socket) {
 
-        .dropdown-container {
 
-            width: 100%;
+        console.log(
+            "========================================"
+        );
 
-            min-width: 0;
+        console.log(
+            "HTTPS CLIENT CONNECTED"
+        );
 
-        }
+        console.log(
+            "Socket ID:",
+            socket.id
+        );
 
+        console.log(
+            "========================================"
+        );
 
-        /* ====================================================
-           SERVICE DROPDOWN
-           ==================================================== */
 
-        #dropdown {
+        // ====================================================
+        // EXECUTE COMMAND
+        // ====================================================
 
-            display: block;
+        socket.on(
+            "executeBat",
+            function (command, callback) {
 
-            width: 100%;
 
-            height: 42px;
+                console.log(
+                    "========================================"
+                );
 
-            margin: 0;
+                console.log(
+                    "COMMAND RECEIVED"
+                );
 
-            padding: 5px 12px;
+                console.log(
+                    "========================================"
+                );
 
-            border: 1px solid #80b7ff;
+                console.log(
+                    command
+                );
 
-            border-radius: 4px;
+                console.log(
+                    "========================================"
+                );
 
-            background-color: #ffffff;
 
-            color: #333333;
+                // =================================================
+                // VALIDATE COMMAND
+                // =================================================
 
-            font-size: 14px;
+                if (
+                    typeof command !== "string" ||
+                    command.trim() === ""
+                ) {
 
-            font-weight: 500;
+                    console.error(
+                        "Invalid command received."
+                    );
 
-            outline: none;
 
-            cursor: pointer;
+                    if (callback) {
 
-        }
+                        callback({
 
+                            success: false,
 
-        #dropdown:hover {
+                            error:
+                                "Invalid command."
 
-            border-color: #4d9cff;
+                        });
 
-        }
+                    }
 
+                    return;
 
-        #dropdown:focus {
+                }
 
-            border-color: #4d9cff;
 
-            outline: none;
+                // =================================================
+                // EXECUTE COMMAND
+                // =================================================
 
-            box-shadow:
-                0 0 0 2px
-                rgba(0, 123, 255, 0.15);
+                exec(
+                    command,
+                    function (
+                        error,
+                        stdout,
+                        stderr
+                    ) {
 
-        }
 
+                        // =========================================
+                        // COMMAND FAILED
+                        // =========================================
 
-        /* ====================================================
-           DROPDOWN OPTIONS
-           ==================================================== */
+                        if (error) {
 
-        #dropdown option {
 
-            font-size: 14px;
+                            console.error(
+                                "========================================"
+                            );
 
-            font-weight: 500;
+                            console.error(
+                                "COMMAND EXECUTION FAILED"
+                            );
 
-            padding: 6px;
+                            console.error(
+                                "========================================"
+                            );
 
-        }
 
+                            console.error(
+                                "Error:"
+                            );
 
-        /* ====================================================
-           BUTTON CONTAINER
-           ==================================================== */
+                            console.error(
+                                error.message
+                            );
 
-        .button-container {
 
-            width: 100%;
+                            console.error(
+                                "STDERR:"
+                            );
 
-            min-width: 0;
+                            console.error(
+                                stderr
+                            );
 
-        }
 
+                            console.error(
+                                "STDOUT:"
+                            );
 
-        /* ====================================================
-           START / STOP BUTTONS
-           ==================================================== */
+                            console.error(
+                                stdout
+                            );
 
-        #startButton,
-        #stopButton {
 
-            display: flex;
+                            // -------------------------------------
+                            // SEND ERROR TO CLIENT
+                            // -------------------------------------
 
-            align-items: center;
+                            if (callback) {
 
-            justify-content: center;
+                                callback({
 
-            width: 100%;
+                                    success: false,
 
-            height: 42px;
+                                    error:
+                                        stderr ||
+                                        error.message,
 
-            margin: 0;
+                                    stdout:
+                                        stdout || "",
 
-            padding: 0 15px;
+                                    stderr:
+                                        stderr || ""
 
-            border: none;
+                                });
 
-            border-radius: 4px;
+                            }
 
-            font-size: 15px;
 
-            font-weight: 600;
+                            return;
 
-            line-height: 1;
+                        }
 
-            cursor: pointer;
 
-            user-select: none;
+                        // =========================================
+                        // COMMAND SUCCESS
+                        // =========================================
 
-            transition:
-                background-color 0.15s ease,
-                transform 0.05s ease;
+                        console.log(
+                            "========================================"
+                        );
 
-        }
+                        console.log(
+                            "COMMAND EXECUTED SUCCESSFULLY"
+                        );
 
+                        console.log(
+                            "========================================"
+                        );
 
-        /* ====================================================
-           START BUTTON
-           ==================================================== */
 
-        #startButton {
+                        console.log(
+                            "STDOUT:"
+                        );
 
-            background-color: #28a745;
+                        console.log(
+                            stdout
+                        );
 
-            color: #ffffff;
 
-        }
+                        if (stderr) {
 
+                            console.log(
+                                "STDERR:"
+                            );
 
-        #startButton:hover {
+                            console.log(
+                                stderr
+                            );
 
-            background-color: #218838;
+                        }
 
-        }
 
+                        // -------------------------------------
+                        // SEND SUCCESS TO CLIENT
+                        // -------------------------------------
 
-        #startButton:active {
+                        if (callback) {
 
-            background-color: #1e7e34;
+                            callback({
 
-            transform: translateY(1px);
+                                success: true,
 
-        }
+                                stdout:
+                                    stdout || "",
 
+                                stderr:
+                                    stderr || ""
 
-        /* ====================================================
-           STOP BUTTON
-           ==================================================== */
+                            });
 
-        #stopButton {
+                        }
 
-            background-color: #dc3545;
-
-            color: #ffffff;
-
-        }
-
-
-        #stopButton:hover {
-
-            background-color: #c82333;
-
-        }
-
-
-        #stopButton:active {
-
-            background-color: #bd2130;
-
-            transform: translateY(1px);
-
-        }
-
-
-        /* ====================================================
-           SWEETALERT FONT SIZE
-           ==================================================== */
-
-        .swal2-title {
-
-            font-size: 24px !important;
-
-        }
-
-
-        .swal2-html-container {
-
-            font-size: 16px !important;
-
-        }
-
-
-        .swal2-input {
-
-            font-size: 16px !important;
-
-            height: 45px !important;
-
-        }
-
-
-        .swal2-confirm,
-        .swal2-cancel {
-
-            font-size: 15px !important;
-
-            padding:
-                10px 22px !important;
-
-        }
-
-
-        /* ====================================================
-           LARGE DESKTOP
-           ==================================================== */
-
-        @media (min-width: 1200px) {
-
-            .page-title h3 {
-
-                font-size: 21px;
+                    }
+                );
 
             }
+        );
 
 
-            .service-label {
+        // ====================================================
+        // CLIENT DISCONNECTED
+        // ====================================================
 
-                font-size: 15px;
-
-            }
-
-
-            #dropdown {
-
-                height: 44px;
-
-                font-size: 15px;
-
-            }
-
-
-            #dropdown option {
-
-                font-size: 15px;
-
-            }
-
-
-            #startButton,
-            #stopButton {
-
-                height: 44px;
-
-                font-size: 15px;
-
-            }
-
-        }
-
-
-        /* ====================================================
-           SMALL SCREEN
-           
-           STILL ONE ROW
-           ==================================================== */
-
-        @media (max-width: 700px) {
-
-            .service-control {
-
-                grid-template-columns:
-                    auto
-                    minmax(0, 1fr)
-                    80px
-                    80px;
-
-                column-gap: 5px;
-
-                padding: 7px;
-
-            }
-
-
-            .service-label {
-
-                font-size: 11px;
-
-                padding: 0 3px;
-
-            }
-
-
-            #dropdown {
-
-                height: 36px;
-
-                font-size: 11px;
-
-            }
-
-
-            #dropdown option {
-
-                font-size: 11px;
-
-            }
-
-
-            #startButton,
-            #stopButton {
-
-                height: 36px;
-
-                font-size: 12px;
-
-                padding: 0 5px;
-
-            }
-
-        }
-
-    </style>
-
-
-    <!-- =====================================================
-         SWEETALERT
-         ===================================================== -->
-
-    <script src="./style/sweetalert.js"></script>
-
-</head>
-
-
-<body>
-
-
-    <!-- =====================================================
-         PAGE TITLE
-         ===================================================== -->
-
-    <div class="page-title">
-
-        <h3>
-            IR Screwing Service Restart
-        </h3>
-
-    </div>
-
-
-
-    <!-- =====================================================
-         SERVICE CONTROL
-         
-         LABEL → DROPDOWN → START → STOP
-
-         NO EMPTY SPACE BETWEEN LABEL AND DROPDOWN
-         ===================================================== -->
-
-    <div class="service-control">
-
-
-        <!-- LABEL -->
-
-        <div class="service-label">
-
-            Choose an option:
-
-        </div>
-
-
-
-        <!-- LARGE DROPDOWN -->
-
-        <div class="dropdown-container">
-
-            <select id="dropdown">
-
-                <option value="">
-                    Select Service Name
-                </option>
-
-
-                <option value="ocv_cell_data_mirror_ocv_universal_line_1_2">
-                    ocv_cell_data_mirror_ocv_universal_line_1_2
-                </option>
-
-
-                <option value="ocv_cell_data_mirror_ocv_universal_line_3_4">
-                    ocv_cell_data_mirror_ocv_universal_line_3_4
-                </option>
-
-
-                <option value="ocv_cell_data_mirror_ocv_universal_line_5_6">
-                    ocv_cell_data_mirror_ocv_universal_line_5_6
-                </option>
-
-
-                <option value="ocv_cell_data_mirror_ocv_universal_line_7_8">
-                    ocv_cell_data_mirror_ocv_universal_line_7_8
-                </option>
-
-
-                <option value="ocv_cell_data_mirror_ocv_universal_line_A">
-                    ocv_cell_data_mirror_ocv_universal_line_A
-                </option>
-
-
-                <option value="ocv_cell_data_mirror_ocv_universal_XNG">
-                    ocv_cell_data_mirror_ocv_universal_XNG
-                </option>
-
-
-                <option value="ocv_cell_data_mirror_ocv_universal_bajaj_2w">
-                    ocv_cell_data_mirror_ocv_universal_bajaj_2w
-                </option>
-
-            </select>
-
-        </div>
-
-
-
-        <!-- START -->
-
-        <div class="button-container">
-
-            <button
-                id="startButton"
-                type="button">
-
-                Start
-
-            </button>
-
-        </div>
-
-
-
-        <!-- STOP -->
-
-        <div class="button-container">
-
-            <button
-                id="stopButton"
-                type="button">
-
-                Stop
-
-            </button>
-
-        </div>
-
-
-    </div>
-
-
-
-    <!-- =====================================================
-         SOCKET.IO
-         ===================================================== -->
-
-    <script src="./style/socket_io.js"></script>
-
-
-
-    <!-- =====================================================
-         JAVASCRIPT
-         ===================================================== -->
-
-    <script>
-
-        document.addEventListener(
-            "DOMContentLoaded",
+        socket.on(
+            "disconnect",
             function () {
 
 
-                // =================================================
-                // ELEMENTS
-                // =================================================
-
-                const dropdown =
-                    document.getElementById(
-                        "dropdown"
-                    );
-
-
-                const startButton =
-                    document.getElementById(
-                        "startButton"
-                    );
-
-
-                const stopButton =
-                    document.getElementById(
-                        "stopButton"
-                    );
-
-
-                // =================================================
-                // SOCKET.IO
-                // =================================================
-
-                const socket = io();
-
-
-                // =================================================
-                // START SERVICE
-                // =================================================
-
-                startButton.addEventListener(
-                    "click",
-                    function () {
-
-
-                        const selectedValue =
-                            dropdown.value;
-
-
-                        if (selectedValue === "") {
-
-                            Swal.fire({
-
-                                title:
-                                    "Select Service",
-
-                                text:
-                                    "Please select a service name first.",
-
-                                icon:
-                                    "warning"
-
-                            });
-
-                            return;
-
-                        }
-
-
-                        console.log(
-                            "Selected Service:",
-                            selectedValue
-                        );
-
-
-                        // -----------------------------------------
-                        // PASSCODE
-                        // -----------------------------------------
-
-                        Swal.fire({
-
-                            title:
-                                "Enter Passcode!",
-
-                            html:
-                                '<input ' +
-                                'id="password" ' +
-                                'type="password" ' +
-                                'class="swal2-input" ' +
-                                'placeholder="Enter Passcode">',
-
-                            showCancelButton:
-                                true,
-
-                            confirmButtonText:
-                                "Start",
-
-                            cancelButtonText:
-                                "Cancel",
-
-                            allowOutsideClick:
-                                false
-
-                        }).then(
-                            function (result) {
-
-
-                                if (!result.isConfirmed) {
-
-                                    return;
-
-                                }
-
-
-                                const password =
-                                    document.getElementById(
-                                        "password"
-                                    ).value;
-
-
-                                if (password === "") {
-
-                                    Swal.fire({
-
-                                        title:
-                                            "Password Required",
-
-                                        text:
-                                            "Please enter the passcode.",
-
-                                        icon:
-                                            "warning"
-
-                                    });
-
-                                    return;
-
-                                }
-
-
-                                if (password !== "service") {
-
-                                    Swal.fire({
-
-                                        title:
-                                            "Invalid Passcode",
-
-                                        text:
-                                            "Please enter the correct passcode.",
-
-                                        icon:
-                                            "error"
-
-                                    });
-
-                                    return;
-
-                                }
-
-
-                                // -----------------------------------------
-                                // PM2 START
-                                // -----------------------------------------
-
-                                const cmdname =
-                                    `pm2 start ${selectedValue} --interpreter=pythonw`;
-
-
-                                console.log(
-                                    "START COMMAND:",
-                                    cmdname
-                                );
-
-
-                                socket.emit(
-
-                                    "executeBat",
-
-                                    cmdname,
-
-                                    function (response) {
-
-
-                                        console.log(
-                                            "Server Response:",
-                                            response
-                                        );
-
-
-                                        if (
-                                            response &&
-                                            response.success
-                                        ) {
-
-                                            Swal.fire({
-
-                                                title:
-                                                    "PM2 Service Started",
-
-                                                text:
-                                                    `${selectedValue} has been started successfully.`,
-
-                                                icon:
-                                                    "success"
-
-                                            });
-
-                                        }
-
-                                        else {
-
-                                            Swal.fire({
-
-                                                title:
-                                                    "Failed to Start Service",
-
-                                                text:
-                                                    response?.error ||
-                                                    "Unable to start PM2 service.",
-
-                                                icon:
-                                                    "error"
-
-                                            });
-
-                                        }
-
-                                    }
-
-                                );
-
-                            }
-
-                        );
-
-                    }
-
+                console.log(
+                    "========================================"
                 );
 
-
-
-                // =================================================
-                // STOP SERVICE
-                // =================================================
-
-                stopButton.addEventListener(
-
-                    "click",
-
-                    function () {
-
-
-                        const selectedValue =
-                            dropdown.value;
-
-
-                        if (selectedValue === "") {
-
-                            Swal.fire({
-
-                                title:
-                                    "Select Service",
-
-                                text:
-                                    "Please select a service name first.",
-
-                                icon:
-                                    "warning"
-
-                            });
-
-                            return;
-
-                        }
-
-
-                        console.log(
-                            "Selected Service:",
-                            selectedValue
-                        );
-
-
-                        // -----------------------------------------
-                        // PASSCODE
-                        // -----------------------------------------
-
-                        Swal.fire({
-
-                            title:
-                                "Enter Passcode!",
-
-                            html:
-                                '<input ' +
-                                'id="password" ' +
-                                'type="password" ' +
-                                'class="swal2-input" ' +
-                                'placeholder="Enter Passcode">',
-
-                            showCancelButton:
-                                true,
-
-                            confirmButtonText:
-                                "Stop",
-
-                            cancelButtonText:
-                                "Cancel",
-
-                            allowOutsideClick:
-                                false
-
-                        }).then(
-
-                            function (result) {
-
-
-                                if (!result.isConfirmed) {
-
-                                    return;
-
-                                }
-
-
-                                const password =
-                                    document.getElementById(
-                                        "password"
-                                    ).value;
-
-
-                                if (password === "") {
-
-                                    Swal.fire({
-
-                                        title:
-                                            "Password Required",
-
-                                        text:
-                                            "Please enter the passcode.",
-
-                                        icon:
-                                            "warning"
-
-                                    });
-
-                                    return;
-
-                                }
-
-
-                                if (password !== "service") {
-
-                                    Swal.fire({
-
-                                        title:
-                                            "Invalid Passcode",
-
-                                        text:
-                                            "Please enter the correct passcode.",
-
-                                        icon:
-                                            "error"
-
-                                    });
-
-                                    return;
-
-                                }
-
-
-                                // -----------------------------------------
-                                // PM2 STOP
-                                // -----------------------------------------
-
-                                const cmdname =
-                                    `pm2 stop ${selectedValue}`;
-
-
-                                console.log(
-                                    "STOP COMMAND:",
-                                    cmdname
-                                );
-
-
-                                socket.emit(
-
-                                    "executeBat",
-
-                                    cmdname,
-
-                                    function (response) {
-
-
-                                        console.log(
-                                            "Server Response:",
-                                            response
-                                        );
-
-
-                                        if (
-                                            response &&
-                                            response.success
-                                        ) {
-
-                                            Swal.fire({
-
-                                                title:
-                                                    "PM2 Service Stopped",
-
-                                                text:
-                                                    `${selectedValue} has been stopped successfully.`,
-
-                                                icon:
-                                                    "success"
-
-                                            });
-
-                                        }
-
-                                        else {
-
-                                            Swal.fire({
-
-                                                title:
-                                                    "Failed to Stop Service",
-
-                                                text:
-                                                    response?.error ||
-                                                    "Unable to stop PM2 service.",
-
-                                                icon:
-                                                    "error"
-
-                                            });
-
-                                        }
-
-                                    }
-
-                                );
-
-                            }
-
-                        );
-
-                    }
-
+                console.log(
+                    "HTTPS CLIENT DISCONNECTED"
                 );
 
-
-
-                // =================================================
-                // SOCKET CONNECT
-                // =================================================
-
-                socket.on(
-                    "connect",
-                    function () {
-
-                        console.log(
-                            "Connected to server."
-                        );
-
-                        console.log(
-                            "Socket ID:",
-                            socket.id
-                        );
-
-                    }
+                console.log(
+                    "Socket ID:",
+                    socket.id
                 );
 
-
-
-                // =================================================
-                // SOCKET DISCONNECT
-                // =================================================
-
-                socket.on(
-                    "disconnect",
-                    function () {
-
-                        console.log(
-                            "Disconnected from server."
-                        );
-
-                    }
+                console.log(
+                    "========================================"
                 );
-
 
             }
-
         );
 
-    </script>
+    }
+);
 
 
-</body>
+// ============================================================
+// HTTPS SERVER ERROR
+// ============================================================
 
-</html>
+httpsServer.on(
+    "error",
+    function (error) {
+
+
+        console.error(
+            "========================================"
+        );
+
+        console.error(
+            "HTTPS SERVER ERROR"
+        );
+
+        console.error(
+            "========================================"
+        );
+
+
+        console.error(
+            error
+        );
+
+
+        // ---------------------------------------------
+        // PORT ALREADY IN USE
+        // ---------------------------------------------
+
+        if (
+            error.code === "EADDRINUSE"
+        ) {
+
+            console.error(
+                `Port ${PORT} is already in use.`
+            );
+
+            console.error(
+                "Stop the existing Node.js process and try again."
+            );
+
+        }
+
+    }
+);
+
+
+// ============================================================
+// START HTTPS SERVER
+// ============================================================
+
+httpsServer.listen(
+    PORT,
+    "0.0.0.0",
+    function () {
+
+
+        console.log(
+            "========================================"
+        );
+
+        console.log(
+            "IR SCREWING SERVICE RESTART SERVER"
+        );
+
+        console.log(
+            "========================================"
+        );
+
+        console.log(
+            "HTTPS SERVER STARTED"
+        );
+
+        console.log(
+            `Port: ${PORT}`
+        );
+
+        console.log(
+            `Local URL: https://localhost:${PORT}/ocv`
+        );
+
+        console.log(
+            `Network URL: https://<SERVER-IP>:${PORT}/ocv`
+        );
+
+        console.log(
+            "========================================"
+        );
+
+        console.log(
+            "Socket.IO running over HTTPS"
+        );
+
+        console.log(
+            "========================================"
+        );
+
+    }
+);
