@@ -12,7 +12,7 @@
 
 
     <!-- =====================================================
-         CSS
+         ALL CSS IN THIS FILE
          ===================================================== -->
 
     <style>
@@ -40,7 +40,7 @@
                 Helvetica,
                 sans-serif;
 
-            background-color: #ffffff;
+            background: #ffffff;
 
         }
 
@@ -53,8 +53,7 @@
 
             width: calc(100% - 56px);
 
-            margin:
-                25px 28px 18px 28px;
+            margin: 25px 28px 18px 28px;
 
             height: 35px;
 
@@ -81,9 +80,16 @@
 
 
         /* ====================================================
-           SERVICE CONTROL ROW
-           
-           EVERYTHING STAYS IN ONE ROW
+           MAIN CONTROL ROW
+
+           12 COLUMN GRID
+
+           LABEL    = 4
+           DROPDOWN = 4
+           START    = 2
+           STOP     = 2
+
+           TOTAL    = 12
            ==================================================== */
 
         .service-control {
@@ -92,83 +98,83 @@
 
             margin: 0 28px;
 
-            padding: 10px;
+            padding: 12px 10px;
 
-            min-height: 60px;
+            min-height: 62px;
 
-            display: flex;
+            display: grid;
 
-            flex-direction: row;
+            grid-template-columns:
+                4fr
+                4fr
+                2fr
+                2fr;
 
-            flex-wrap: nowrap;
+            column-gap: 10px;
 
             align-items: center;
 
-            gap: 10px;
-
-            background-color: #f8f9fa;
+            background: #f8f9fa;
 
             border: 1px solid #e1e4e8;
 
             border-radius: 3px;
-
-            white-space: nowrap;
 
         }
 
 
         /* ====================================================
            LABEL
+           
+           4 COLUMNS
            ==================================================== */
 
-        .service-control label {
+        .service-label {
 
-            width: 65px;
-
-            min-width: 65px;
+            width: 100%;
 
             margin: 0;
 
-            padding: 0;
+            padding: 0 10px;
 
-            font-size: 10px;
+            display: flex;
 
-            line-height: 13px;
+            align-items: center;
+
+            font-size: 13px;
+
+            font-weight: 500;
 
             color: #333333;
-
-            white-space: normal;
 
         }
 
 
         /* ====================================================
-           SERVICE DROPDOWN
+           DROPDOWN
+           
+           4 COLUMNS
            ==================================================== */
 
         #dropdown {
 
-            flex: 1 1 auto;
-
             width: 100%;
 
-            min-width: 0;
-
-            height: 38px;
-
-            padding: 5px 10px;
+            height: 40px;
 
             margin: 0;
 
+            padding: 5px 10px;
+
             border: 1px solid #bfc5cc;
 
-            border-radius: 3px;
+            border-radius: 4px;
 
             background-color: #ffffff;
 
             color: #555555;
 
-            font-size: 11px;
+            font-size: 12px;
 
             font-weight: 400;
 
@@ -179,25 +185,6 @@
         }
 
 
-        /* ====================================================
-           DROPDOWN OPTIONS
-           ==================================================== */
-
-        #dropdown option {
-
-            font-size: 11px;
-
-            font-weight: 400;
-
-            padding: 5px;
-
-        }
-
-
-        /* ====================================================
-           DROPDOWN FOCUS
-           ==================================================== */
-
         #dropdown:focus {
 
             border-color: #80bdff;
@@ -205,32 +192,44 @@
             outline: none;
 
             box-shadow:
-                0 0 0 1px
-                rgba(0, 123, 255, 0.15);
+                0 0 0 2px
+                rgba(0, 123, 255, 0.12);
 
         }
 
 
         /* ====================================================
-           COMMON BUTTON
+           DROPDOWN OPTIONS
+           ==================================================== */
+
+        #dropdown option {
+
+            font-size: 12px;
+
+            padding: 5px;
+
+        }
+
+
+        /* ====================================================
+           BUTTONS
+           
+           START = 2 COLUMNS
+           STOP  = 2 COLUMNS
            ==================================================== */
 
         #startButton,
         #stopButton {
 
-            width: 85px;
+            width: 100%;
 
-            min-width: 85px;
-
-            height: 38px;
-
-            flex-shrink: 0;
+            height: 40px;
 
             margin: 0;
 
-            padding: 0 12px;
+            padding: 0 15px;
 
-            display: inline-flex;
+            display: flex;
 
             align-items: center;
 
@@ -244,10 +243,6 @@
 
             font-weight: 600;
 
-            line-height: 1;
-
-            text-align: center;
-
             cursor: pointer;
 
             user-select: none;
@@ -260,7 +255,7 @@
 
 
         /* ====================================================
-           START BUTTON
+           START
            ==================================================== */
 
         #startButton {
@@ -289,7 +284,7 @@
 
 
         /* ====================================================
-           STOP BUTTON
+           STOP
            ==================================================== */
 
         #stopButton {
@@ -318,30 +313,25 @@
 
 
         /* ====================================================
-           SMALL SCREEN
-           STILL ONE ROW
+           KEEP ONE ROW ON NORMAL DESKTOP
            ==================================================== */
 
-        @media (max-width: 800px) {
+        @media (max-width: 700px) {
 
             .service-control {
 
-                gap: 7px;
+                column-gap: 5px;
 
                 padding: 8px;
 
             }
 
 
-            .service-control label {
+            .service-label {
 
-                width: 58px;
+                padding: 0 4px;
 
-                min-width: 58px;
-
-                font-size: 9px;
-
-                line-height: 12px;
+                font-size: 10px;
 
             }
 
@@ -350,19 +340,19 @@
 
                 font-size: 10px;
 
+                height: 36px;
+
             }
 
 
             #startButton,
             #stopButton {
 
-                width: 70px;
-
-                min-width: 70px;
-
                 height: 36px;
 
-                font-size: 12px;
+                font-size: 11px;
+
+                padding: 0 5px;
 
             }
 
@@ -372,7 +362,7 @@
 
 
     <!-- =====================================================
-         SWEETALERT
+         SWEET ALERT
          ===================================================== -->
 
     <script src="./style/sweetalert.js"></script>
@@ -398,97 +388,120 @@
 
 
     <!-- =====================================================
-         SERVICE CONTROL
-         
-         ONE SINGLE ROW
+         12 COLUMN SERVICE ROW
+
+         4 = LABEL
+         4 = DROPDOWN
+         2 = START
+         2 = STOP
          ===================================================== -->
 
     <div class="service-control">
 
 
-        <!-- LABEL -->
+        <!-- =================================================
+             COLUMN 1-4
+             LABEL
+             ================================================= -->
 
-        <label for="dropdown">
+        <div class="service-label">
 
             Choose an option:
 
-        </label>
-
-
-
-        <!-- SERVICE DROPDOWN -->
-
-        <select id="dropdown">
-
-            <option value="">
-                Select Service Name
-            </option>
-
-
-            <option value="ocv_cell_data_mirror_ocv_universal_line_1_2">
-                ocv_cell_data_mirror_ocv_universal_line_1_2
-            </option>
-
-
-            <option value="ocv_cell_data_mirror_ocv_universal_line_3_4">
-                ocv_cell_data_mirror_ocv_universal_line_3_4
-            </option>
-
-
-            <option value="ocv_cell_data_mirror_ocv_universal_line_5_6">
-                ocv_cell_data_mirror_ocv_universal_line_5_6
-            </option>
-
-
-            <option value="ocv_cell_data_mirror_ocv_universal_line_7_8">
-                ocv_cell_data_mirror_ocv_universal_line_7_8
-            </option>
-
-
-            <option value="ocv_cell_data_mirror_ocv_universal_line_A">
-                ocv_cell_data_mirror_ocv_universal_line_A
-            </option>
-
-
-            <option value="ocv_cell_data_mirror_ocv_universal_XNG">
-                ocv_cell_data_mirror_ocv_universal_XNG
-            </option>
-
-
-            <option value="ocv_cell_data_mirror_ocv_universal_bajaj_2w">
-                ocv_cell_data_mirror_ocv_universal_bajaj_2w
-            </option>
-
-
-        </select>
+        </div>
 
 
 
         <!-- =================================================
+             COLUMN 5-8
+             DROPDOWN
+             ================================================= -->
+
+        <div>
+
+            <select id="dropdown">
+
+                <option value="">
+                    Select Service Name
+                </option>
+
+
+                <option value="ocv_cell_data_mirror_ocv_universal_line_1_2">
+                    ocv_cell_data_mirror_ocv_universal_line_1_2
+                </option>
+
+
+                <option value="ocv_cell_data_mirror_ocv_universal_line_3_4">
+                    ocv_cell_data_mirror_ocv_universal_line_3_4
+                </option>
+
+
+                <option value="ocv_cell_data_mirror_ocv_universal_line_5_6">
+                    ocv_cell_data_mirror_ocv_universal_line_5_6
+                </option>
+
+
+                <option value="ocv_cell_data_mirror_ocv_universal_line_7_8">
+                    ocv_cell_data_mirror_ocv_universal_line_7_8
+                </option>
+
+
+                <option value="ocv_cell_data_mirror_ocv_universal_line_A">
+                    ocv_cell_data_mirror_ocv_universal_line_A
+                </option>
+
+
+                <option value="ocv_cell_data_mirror_ocv_universal_XNG">
+                    ocv_cell_data_mirror_ocv_universal_XNG
+                </option>
+
+
+                <option value="ocv_cell_data_mirror_ocv_universal_bajaj_2w">
+                    ocv_cell_data_mirror_ocv_universal_bajaj_2w
+                </option>
+
+
+            </select>
+
+        </div>
+
+
+
+        <!-- =================================================
+             COLUMN 9-10
              START BUTTON
              ================================================= -->
 
-        <button
-            id="startButton"
-            type="button">
+        <div>
 
-            Start
+            <button
+                id="startButton"
+                type="button">
 
-        </button>
+                Start
+
+            </button>
+
+        </div>
 
 
 
         <!-- =================================================
+             COLUMN 11-12
              STOP BUTTON
              ================================================= -->
 
-        <button
-            id="stopButton"
-            type="button">
+        <div>
 
-            Stop
+            <button
+                id="stopButton"
+                type="button">
 
-        </button>
+                Stop
+
+            </button>
+
+        </div>
 
 
     </div>
@@ -515,7 +528,7 @@
 
 
                 // =================================================
-                // GET ELEMENTS
+                // ELEMENTS
                 // =================================================
 
                 const dropdown =
@@ -537,7 +550,7 @@
 
 
                 // =================================================
-                // SOCKET.IO CONNECTION
+                // SOCKET.IO
                 // =================================================
 
                 const socket = io();
@@ -557,7 +570,7 @@
 
 
                         // -----------------------------------------
-                        // SERVICE NOT SELECTED
+                        // CHECK SERVICE
                         // -----------------------------------------
 
                         if (selectedValue === "") {
@@ -618,20 +631,12 @@
                             function (result) {
 
 
-                                // ---------------------------------
-                                // CANCEL
-                                // ---------------------------------
-
                                 if (!result.isConfirmed) {
 
                                     return;
 
                                 }
 
-
-                                // ---------------------------------
-                                // PASSWORD
-                                // ---------------------------------
 
                                 const password =
                                     document.getElementById(
@@ -664,7 +669,7 @@
 
 
                                 // ---------------------------------
-                                // CHECK PASSWORD
+                                // PASSWORD CHECK
                                 // ---------------------------------
 
                                 if (password !== "service") {
@@ -788,7 +793,7 @@
 
 
                         // -----------------------------------------
-                        // SERVICE NOT SELECTED
+                        // CHECK SERVICE
                         // -----------------------------------------
 
                         if (selectedValue === "") {
@@ -850,20 +855,12 @@
                             function (result) {
 
 
-                                // ---------------------------------
-                                // CANCEL
-                                // ---------------------------------
-
                                 if (!result.isConfirmed) {
 
                                     return;
 
                                 }
 
-
-                                // ---------------------------------
-                                // PASSWORD
-                                // ---------------------------------
 
                                 const password =
                                     document.getElementById(
@@ -896,7 +893,7 @@
 
 
                                 // ---------------------------------
-                                // CHECK PASSWORD
+                                // PASSWORD CHECK
                                 // ---------------------------------
 
                                 if (password !== "service") {
@@ -1005,7 +1002,7 @@
 
 
                 // =================================================
-                // SOCKET CONNECTED
+                // SOCKET CONNECT
                 // =================================================
 
                 socket.on(
@@ -1027,7 +1024,7 @@
 
 
                 // =================================================
-                // SOCKET DISCONNECTED
+                // SOCKET DISCONNECT
                 // =================================================
 
                 socket.on(
