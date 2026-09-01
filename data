@@ -1,1088 +1,1546 @@
-// ============================================================
-// OCV SERVICE RESTART
-// HTTPS + SOCKET.IO BACKEND + SQL STOP LOGGING
-// ============================================================
+<!DOCTYPE html>
+<html lang="en">
 
-const express = require("express");
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
-const { exec } = require("child_process");
-const socketio = require("socket.io");
-const sql = require("mssql");
+<head>
 
-// ============================================================
-// EXPRESS APP
-// ============================================================
+    <meta charset="UTF-8">
 
-const app = express();
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
 
-// ============================================================
-// PORT
-// ============================================================
+    <title>Restart OCV Services</title>
 
-const PORT = 3998;
 
-// ============================================================
-// SSL CERTIFICATE
-// ============================================================
+    <!-- =====================================================
+         CSS
+         ===================================================== -->
 
-const sslOptions = {
+    <style>
 
-    key: fs.readFileSync(
-        path.join(
-            __dirname,
-            "certs",
-            "server.key"
-        )
-    ),
+        /* ====================================================
+           GLOBAL
+           ==================================================== */
 
-    cert: fs.readFileSync(
-        path.join(
-            __dirname,
-            "certs",
-            "server.pem"
-        )
-    )
+        * {
+            box-sizing: border-box;
+        }
 
-};
 
-// ============================================================
-// SQL SERVER CONFIGURATION
-// ============================================================
+        html,
+        body {
 
-const sqlConfig = {
+            width: 100%;
 
-    user: "user_mis",
+            margin: 0;
 
-    password: "admin@123",
+            padding: 0;
 
-    database: "taco_treceability",
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
 
-    server: "10.9.4.29",
+            background: #ffffff;
 
-    port: 1433,
+        }
 
-    options: {
 
-        instanceName: "PROD_SQL_2026",
+        /* ====================================================
+           PAGE TITLE
+           ==================================================== */
 
-        encrypt: false,
+        .page-title {
 
-        trustServerCertificate: true
+            width:
+                calc(100% - 12px);
 
-    },
+            margin:
+                12px 6px 14px 6px;
 
-    pool: {
+            height: 30px;
 
-        max: 10,
+            display: flex;
 
-        min: 0,
+            align-items: center;
 
-        idleTimeoutMillis: 30000
+        }
 
-    }
 
-};
+        .page-title h3 {
 
-// ============================================================
-// SQL CONNECTION POOL
-// ============================================================
+            margin: 0;
 
-const dbConn =
-    new sql.ConnectionPool(sqlConfig);
+            padding: 0;
 
-dbConn.connect()
+            font-size: 20px;
 
-    .then(function () {
+            font-weight: 600;
 
-        console.log(
-            "========================================"
-        );
+            color: #111827;
 
-        console.log(
-            "SQL SERVER CONNECTED"
-        );
+        }
 
-        console.log(
-            "Database:",
-            sqlConfig.database
-        );
 
-        console.log(
-            "Server:",
-            sqlConfig.server
-        );
+        /* ====================================================
+           SERVICE CONTROL
+           ==================================================== */
 
-        console.log(
-            "========================================"
-        );
+        .service-control {
 
-    })
+            width:
+                calc(100% - 12px);
 
-    .catch(function (error) {
+            margin:
+                0 6px;
 
-        console.error(
-            "========================================"
-        );
+            padding:
+                10px 8px;
 
-        console.error(
-            "SQL SERVER CONNECTION FAILED"
-        );
+            min-height: 55px;
 
-        console.error(
-            "========================================"
-        );
+            display: grid;
 
-        console.error(error);
+            grid-template-columns:
+                auto
+                minmax(0, 1fr)
+                17%
+                17%;
 
-    });
+            column-gap: 8px;
 
+            align-items: center;
 
-// ============================================================
-// SQL CONNECTION ERROR
-// ============================================================
+            background: #f8f9fa;
 
-dbConn.on(
-    "error",
-    function (error) {
+            border:
+                1px solid #d9dde2;
 
-        console.error(
-            "SQL CONNECTION ERROR:"
-        );
+            border-radius: 3px;
 
-        console.error(error);
+        }
 
-    }
-);
 
+        /* ====================================================
+           LABEL
+           ==================================================== */
 
-// ============================================================
-// STATIC USER / PASSWORD MAPPING
-// ============================================================
+        .service-label {
 
-const users = {
+            width: auto;
 
-    "111": "vaibhav",
+            margin: 0;
 
-    "222": "abhishek",
+            padding:
+                0 8px;
 
-    "333": "suraj",
+            display: flex;
 
-    "444": "mahadu",
+            align-items: center;
 
-    "555": "aishwarya",
+            justify-content: flex-start;
 
-    "666": "indrajit"
+            font-size: 15px;
 
-};
+            font-weight: 500;
 
+            color: #333333;
 
-// ============================================================
-// ALLOWED SERVICES
-// ============================================================
+            white-space: nowrap;
 
-const allowedServices = [
+        }
 
-    "ocv_cell_data_mirror_ocv_universal_line_1_2",
 
-    "ocv_cell_data_mirror_ocv_universal_line_3_4",
+        /* ====================================================
+           DROPDOWN
+           ==================================================== */
 
-    "ocv_cell_data_mirror_ocv_universal_line_5_6",
+        .dropdown-container {
 
-    "ocv_cell_data_mirror_ocv_universal_line_7_8",
+            width: 100%;
 
-    "ocv_cell_data_mirror_ocv_universal_line_A",
+            min-width: 0;
 
-    "ocv_cell_data_mirror_ocv_universal_XNG",
+        }
 
-    "ocv_cell_data_mirror_ocv_universal_bajaj_2w"
 
-];
+        #dropdown {
 
+            display: block;
 
-// ============================================================
-// CREATE HTTPS SERVER
-// ============================================================
+            width: 100%;
 
-const httpsServer =
-    https.createServer(
-        sslOptions,
-        app
-    );
+            height: 42px;
 
+            margin: 0;
 
-// ============================================================
-// SOCKET.IO
-// ============================================================
+            padding:
+                5px 12px;
 
-const io =
-    socketio(
-        httpsServer,
-        {
+            border:
+                1px solid #80b7ff;
 
-            cors: {
+            border-radius: 4px;
 
-                origin: "*",
+            background-color:
+                #ffffff;
 
-                methods: [
-                    "GET",
-                    "POST"
-                ]
+            color:
+                #333333;
+
+            font-size: 14px;
+
+            font-weight: 500;
+
+            outline: none;
+
+            cursor: pointer;
+
+        }
+
+
+        #dropdown:hover {
+
+            border-color:
+                #4d9cff;
+
+        }
+
+
+        #dropdown:focus {
+
+            border-color:
+                #4d9cff;
+
+            outline: none;
+
+            box-shadow:
+                0 0 0 2px
+                rgba(
+                    0,
+                    123,
+                    255,
+                    0.15
+                );
+
+        }
+
+
+        #dropdown option {
+
+            font-size: 14px;
+
+            font-weight: 500;
+
+            padding: 6px;
+
+        }
+
+
+        /* ====================================================
+           BUTTON CONTAINER
+           ==================================================== */
+
+        .button-container {
+
+            width: 100%;
+
+            min-width: 0;
+
+        }
+
+
+        /* ====================================================
+           START / STOP BUTTON
+           ==================================================== */
+
+        #startButton,
+        #stopButton {
+
+            display: flex;
+
+            align-items: center;
+
+            justify-content: center;
+
+            width: 100%;
+
+            height: 42px;
+
+            margin: 0;
+
+            padding:
+                0 15px;
+
+            border: none;
+
+            border-radius: 4px;
+
+            font-size: 15px;
+
+            font-weight: 600;
+
+            line-height: 1;
+
+            cursor: pointer;
+
+            user-select: none;
+
+            transition:
+                background-color 0.15s ease,
+                transform 0.05s ease;
+
+        }
+
+
+        /* ====================================================
+           START
+           ==================================================== */
+
+        #startButton {
+
+            background-color:
+                #28a745;
+
+            color:
+                #ffffff;
+
+        }
+
+
+        #startButton:hover {
+
+            background-color:
+                #218838;
+
+        }
+
+
+        #startButton:active {
+
+            background-color:
+                #1e7e34;
+
+            transform:
+                translateY(1px);
+
+        }
+
+
+        /* ====================================================
+           STOP
+           ==================================================== */
+
+        #stopButton {
+
+            background-color:
+                #dc3545;
+
+            color:
+                #ffffff;
+
+        }
+
+
+        #stopButton:hover {
+
+            background-color:
+                #c82333;
+
+        }
+
+
+        #stopButton:active {
+
+            background-color:
+                #bd2130;
+
+            transform:
+                translateY(1px);
+
+        }
+
+
+        /* ====================================================
+           SWEETALERT
+           ==================================================== */
+
+        .swal2-title {
+
+            font-size:
+                24px !important;
+
+        }
+
+
+        .swal2-html-container {
+
+            font-size:
+                16px !important;
+
+        }
+
+
+        .swal2-input {
+
+            font-size:
+                16px !important;
+
+            height:
+                45px !important;
+
+        }
+
+
+        .swal2-textarea {
+
+            font-size:
+                16px !important;
+
+            min-height:
+                100px !important;
+
+            resize:
+                vertical;
+
+        }
+
+
+        .swal2-confirm,
+        .swal2-cancel {
+
+            font-size:
+                15px !important;
+
+            padding:
+                10px 22px !important;
+
+        }
+
+
+        /* ====================================================
+           LARGE DESKTOP
+           ==================================================== */
+
+        @media (min-width: 1200px) {
+
+            .page-title h3 {
+
+                font-size: 21px;
+
+            }
+
+
+            .service-label {
+
+                font-size: 15px;
+
+            }
+
+
+            #dropdown {
+
+                height: 44px;
+
+                font-size: 15px;
+
+            }
+
+
+            #dropdown option {
+
+                font-size: 15px;
+
+            }
+
+
+            #startButton,
+            #stopButton {
+
+                height: 44px;
+
+                font-size: 15px;
 
             }
 
         }
-    );
 
 
-// ============================================================
-// SERVE STATIC FILES
-// ============================================================
+        /* ====================================================
+           SMALL SCREEN
+           ==================================================== */
 
-app.use(
-    express.static(__dirname)
-);
+        @media (max-width: 700px) {
 
+            .service-control {
 
-// ============================================================
-// OCV PAGE
-// ============================================================
+                grid-template-columns:
+                    auto
+                    minmax(0, 1fr)
+                    80px
+                    80px;
 
-app.get(
-    "/ocv",
-    function (req, res) {
+                column-gap: 5px;
 
-        res.sendFile(
-            path.join(
-                __dirname,
-                "ocv.html"
-            )
-        );
+                padding: 7px;
 
-    }
-);
+            }
 
 
-// ============================================================
-// ROOT PAGE
-// ============================================================
+            .service-label {
 
-app.get(
-    "/",
-    function (req, res) {
+                font-size: 11px;
 
-        res.redirect("/ocv");
+                padding:
+                    0 3px;
 
-    }
-);
+            }
 
 
-// ============================================================
-// GET USER FROM PASSWORD
-// ============================================================
+            #dropdown {
 
-function getUserFromPassword(password) {
+                height: 36px;
 
-    if (
-        typeof password !== "string"
-    ) {
+                font-size: 11px;
 
-        return null;
+            }
 
-    }
 
-    password =
-        password.trim();
+            #dropdown option {
 
-    if (password === "") {
+                font-size: 11px;
 
-        return null;
+            }
 
-    }
 
-    return users[password] || null;
+            #startButton,
+            #stopButton {
 
-}
+                height: 36px;
 
+                font-size: 12px;
 
-// ============================================================
-// VALIDATE SERVICE
-// ============================================================
+                padding:
+                    0 5px;
 
-function isValidService(serviceName) {
+            }
 
-    return (
+        }
 
-        typeof serviceName === "string" &&
+    </style>
 
-        allowedServices.includes(
-            serviceName
-        )
 
-    );
+    <!-- =====================================================
+         SWEETALERT
+         ===================================================== -->
 
-}
+    <script src="./style/sweetalert.js"></script>
 
+</head>
 
-// ============================================================
-// INSERT STOP LOG
-// ============================================================
 
-async function insertStopLog(
-    password,
-    reason,
-    serviceName
-) {
+<body>
 
-    // -----------------------------------------
-    // GET USER
-    // -----------------------------------------
 
-    const userName =
-        getUserFromPassword(
-            password
-        );
+    <!-- =====================================================
+         PAGE TITLE
+         ===================================================== -->
 
+    <div class="page-title">
 
-    if (!userName) {
+        <h3>
+            OCV Service Restart
+        </h3>
 
-        throw new Error(
-            "Invalid passcode."
-        );
+    </div>
 
-    }
 
+    <!-- =====================================================
+         SERVICE CONTROL
+         ===================================================== -->
 
-    // -----------------------------------------
-    // VALIDATE SERVICE
-    // -----------------------------------------
+    <div class="service-control">
 
-    if (
-        !isValidService(
-            serviceName
-        )
-    ) {
 
-        throw new Error(
-            "Invalid service name."
-        );
+        <!-- LABEL -->
 
-    }
+        <div class="service-label">
 
+            Choose an option:
 
-    // -----------------------------------------
-    // VALIDATE REASON
-    // -----------------------------------------
+        </div>
 
-    if (
-        typeof reason !== "string" ||
-        reason.trim() === ""
-    ) {
 
-        throw new Error(
-            "Stop reason is required."
-        );
+        <!-- DROPDOWN -->
 
-    }
+        <div class="dropdown-container">
 
+            <select id="dropdown">
 
-    reason =
-        reason.trim();
 
+                <option value="">
 
-    // -----------------------------------------
-    // CHECK SQL CONNECTION
-    // -----------------------------------------
+                    Select Service Name
 
-    if (!dbConn.connected) {
+                </option>
 
-        throw new Error(
-            "SQL Server is not connected. Stop log was not inserted."
-        );
 
-    }
+                <option value="ocv_cell_data_mirror_ocv_universal_line_1_2">
 
+                    ocv_cell_data_mirror_ocv_universal_line_1_2
 
-    // -----------------------------------------
-    // SQL REQUEST
-    // -----------------------------------------
+                </option>
 
-    const request =
-        dbConn.request();
 
+                <option value="ocv_cell_data_mirror_ocv_universal_line_3_4">
 
-    request.input(
-        "userName",
-        sql.NVarChar(100),
-        userName
-    );
+                    ocv_cell_data_mirror_ocv_universal_line_3_4
 
+                </option>
 
-    request.input(
-        "reason",
-        sql.NVarChar(sql.MAX),
-        reason
-    );
 
+                <option value="ocv_cell_data_mirror_ocv_universal_line_5_6">
 
-    request.input(
-        "serviceName",
-        sql.NVarChar(200),
-        serviceName
-    );
+                    ocv_cell_data_mirror_ocv_universal_line_5_6
 
+                </option>
 
-    // -----------------------------------------
-    // INSERT
-    // -----------------------------------------
 
-    const query = `
+                <option value="ocv_cell_data_mirror_ocv_universal_line_7_8">
 
-        INSERT INTO
-            taco_treceability.ocv_service_log_stop
+                    ocv_cell_data_mirror_ocv_universal_line_7_8
 
-        (
-            [user],
-            reason,
-            service_name,
-            today_date
-        )
+                </option>
 
-        VALUES
 
-        (
-            @userName,
-            @reason,
-            @serviceName,
-            GETDATE()
-        )
+                <option value="ocv_cell_data_mirror_ocv_universal_line_A">
 
-    `;
+                    ocv_cell_data_mirror_ocv_universal_line_A
 
+                </option>
 
-    await request.query(
-        query
-    );
 
+                <option value="ocv_cell_data_mirror_ocv_universal_XNG">
 
-    // -----------------------------------------
-    // CONSOLE LOG
-    // -----------------------------------------
+                    ocv_cell_data_mirror_ocv_universal_XNG
 
-    console.log(
-        "========================================"
-    );
+                </option>
 
-    console.log(
-        "OCV STOP LOG INSERTED"
-    );
 
-    console.log(
-        "USER:",
-        userName
-    );
+                <option value="ocv_cell_data_mirror_ocv_universal_bajaj_2w">
 
-    console.log(
-        "REASON:",
-        reason
-    );
+                    ocv_cell_data_mirror_ocv_universal_bajaj_2w
 
-    console.log(
-        "SERVICE:",
-        serviceName
-    );
+                </option>
 
-    console.log(
-        "DATE:",
-        new Date()
-    );
 
-    console.log(
-        "========================================"
-    );
+            </select>
 
+        </div>
 
-    return userName;
 
-}
+        <!-- =================================================
+             START BUTTON
+             ================================================= -->
 
+        <div class="button-container">
 
-// ============================================================
-// SOCKET.IO CONNECTION
-// ============================================================
+            <button
+                id="startButton"
+                type="button">
 
-io.on(
-    "connection",
-    function (socket) {
+                Start
 
-        console.log(
-            "========================================"
-        );
+            </button>
 
-        console.log(
-            "HTTPS CLIENT CONNECTED"
-        );
+        </div>
 
-        console.log(
-            "Socket ID:",
-            socket.id
-        );
 
-        console.log(
-            "========================================"
-        );
+        <!-- =================================================
+             STOP BUTTON
+             ================================================= -->
 
+        <div class="button-container">
 
-        // ====================================================
-        // PASSWORD VALIDATION
-        // ====================================================
+            <button
+                id="stopButton"
+                type="button">
 
-        socket.on(
-            "validatePassword",
-            function (
-                password,
-                callback
-            ) {
+                Stop
 
-                const userName =
-                    getUserFromPassword(
+            </button>
+
+        </div>
+
+
+    </div>
+
+
+    <!-- =====================================================
+         SOCKET.IO
+         ===================================================== -->
+
+    <script src="./style/socket_io.js"></script>
+
+
+    <!-- =====================================================
+         JAVASCRIPT
+         ===================================================== -->
+
+    <script>
+
+        document.addEventListener(
+            "DOMContentLoaded",
+            function () {
+
+
+                // =================================================
+                // ELEMENTS
+                // =================================================
+
+                const dropdown =
+                    document.getElementById(
+                        "dropdown"
+                    );
+
+
+                const startButton =
+                    document.getElementById(
+                        "startButton"
+                    );
+
+
+                const stopButton =
+                    document.getElementById(
+                        "stopButton"
+                    );
+
+
+                // =================================================
+                // USER / PASSWORD
+                // =================================================
+
+                const users = {
+
+                    "111": "vaibhav",
+
+                    "222": "abhishek",
+
+                    "333": "suraj",
+
+                    "444": "mahadu",
+
+                    "555": "aishwarya",
+
+                    "666": "indrajit"
+
+                };
+
+
+                // =================================================
+                // SOCKET.IO
+                // =================================================
+
+                const socket = io();
+
+
+                // =================================================
+                // LOCAL PASSWORD VALIDATION
+                // =================================================
+
+                function validatePassword(
+                    password
+                ) {
+
+                    return Object.prototype.hasOwnProperty.call(
+                        users,
                         password
                     );
 
-
-                if (!userName) {
-
-                    if (callback) {
-
-                        callback({
-
-                            success: false,
-
-                            error:
-                                "Invalid passcode."
-
-                        });
-
-                    }
-
-                    return;
-
                 }
 
 
-                if (callback) {
+                // =================================================
+                // START SERVICE
+                // =================================================
 
-                    callback({
-
-                        success: true,
-
-                        user:
-                            userName
-
-                    });
-
-                }
-
-            }
-        );
+                startButton.addEventListener(
+                    "click",
+                    function () {
 
 
-        // ====================================================
-        // EXECUTE PM2 COMMAND
-        // ====================================================
-
-        socket.on(
-            "executeBat",
-            function (
-                command,
-                callback
-            ) {
-
-                console.log(
-                    "========================================"
-                );
-
-                console.log(
-                    "COMMAND RECEIVED"
-                );
-
-                console.log(
-                    "========================================"
-                );
-
-                console.log(
-                    command
-                );
-
-                console.log(
-                    "========================================"
-                );
+                        const selectedValue =
+                            dropdown.value;
 
 
-                // -----------------------------------------
-                // VALIDATE COMMAND
-                // -----------------------------------------
+                        // -----------------------------------------
+                        // SERVICE REQUIRED
+                        // -----------------------------------------
 
-                if (
-                    typeof command !== "string" ||
-                    command.trim() === ""
-                ) {
+                        if (
+                            selectedValue === ""
+                        ) {
 
-                    console.error(
-                        "Invalid command received."
-                    );
+                            Swal.fire({
 
+                                title:
+                                    "Select Service",
 
-                    if (callback) {
+                                text:
+                                    "Please select a service name first.",
 
-                        callback({
+                                icon:
+                                    "warning"
 
-                            success: false,
-
-                            error:
-                                "Invalid command."
-
-                        });
-
-                    }
-
-                    return;
-
-                }
-
-
-                // -----------------------------------------
-                // EXECUTE COMMAND
-                // -----------------------------------------
-
-                exec(
-                    command,
-                    function (
-                        error,
-                        stdout,
-                        stderr
-                    ) {
-
-
-                        // =================================
-                        // COMMAND FAILED
-                        // =================================
-
-                        if (error) {
-
-                            console.error(
-                                "========================================"
-                            );
-
-                            console.error(
-                                "COMMAND EXECUTION FAILED"
-                            );
-
-                            console.error(
-                                "========================================"
-                            );
-
-
-                            console.error(
-                                "Error:",
-                                error.message
-                            );
-
-
-                            console.error(
-                                "STDERR:",
-                                stderr
-                            );
-
-
-                            console.error(
-                                "STDOUT:",
-                                stdout
-                            );
-
-
-                            if (callback) {
-
-                                callback({
-
-                                    success: false,
-
-                                    error:
-                                        stderr ||
-                                        error.message,
-
-                                    stdout:
-                                        stdout || "",
-
-                                    stderr:
-                                        stderr || ""
-
-                                });
-
-                            }
-
+                            });
 
                             return;
 
                         }
 
 
-                        // =================================
-                        // COMMAND SUCCESS
-                        // =================================
-
                         console.log(
-                            "========================================"
-                        );
-
-                        console.log(
-                            "COMMAND EXECUTED SUCCESSFULLY"
-                        );
-
-                        console.log(
-                            "========================================"
+                            "Selected Service:",
+                            selectedValue
                         );
 
 
-                        console.log(
-                            "STDOUT:",
-                            stdout
+                        // -----------------------------------------
+                        // PASSWORD POPUP
+                        // -----------------------------------------
+
+                        Swal.fire({
+
+                            title:
+                                "Enter Passcode!",
+
+                            html:
+
+                                '<input ' +
+
+                                'id="password" ' +
+
+                                'type="password" ' +
+
+                                'class="swal2-input" ' +
+
+                                'placeholder="Enter Passcode" ' +
+
+                                'autocomplete="off">',
+
+                            showCancelButton:
+                                true,
+
+                            confirmButtonText:
+                                "Start",
+
+                            cancelButtonText:
+                                "Cancel",
+
+                            allowOutsideClick:
+                                false,
+
+
+                            // -------------------------------------
+                            // VALIDATION
+                            // -------------------------------------
+
+                            preConfirm:
+                                function () {
+
+
+                                    const password =
+                                        document.getElementById(
+                                            "password"
+                                        )
+                                        .value
+                                        .trim();
+
+
+                                    if (
+                                        password === ""
+                                    ) {
+
+                                        Swal.showValidationMessage(
+                                            "Please enter the passcode."
+                                        );
+
+                                        return false;
+
+                                    }
+
+
+                                    if (
+                                        !validatePassword(
+                                            password
+                                        )
+                                    ) {
+
+                                        Swal.showValidationMessage(
+                                            "Invalid passcode."
+                                        );
+
+                                        return false;
+
+                                    }
+
+
+                                    return password;
+
+                                }
+
+                        }).then(
+                            function (result) {
+
+
+                                if (
+                                    !result.isConfirmed
+                                ) {
+
+                                    return;
+
+                                }
+
+
+                                const password =
+                                    result.value;
+
+
+                                // ---------------------------------
+                                // SERVER PASSWORD VALIDATION
+                                // ---------------------------------
+
+                                socket.emit(
+
+                                    "validatePassword",
+
+                                    password,
+
+                                    function (
+                                        authResponse
+                                    ) {
+
+
+                                        if (
+                                            !authResponse ||
+                                            !authResponse.success
+                                        ) {
+
+                                            Swal.fire({
+
+                                                title:
+                                                    "Invalid Passcode",
+
+                                                text:
+                                                    authResponse?.error ||
+                                                    "Invalid passcode.",
+
+                                                icon:
+                                                    "error"
+
+                                            });
+
+                                            return;
+
+                                        }
+
+
+                                        // ---------------------------------
+                                        // PM2 START
+                                        // ---------------------------------
+
+                                        const cmdname =
+
+                                            `pm2 start ${selectedValue} --interpreter=pythonw`;
+
+
+                                        console.log(
+                                            "START COMMAND:",
+                                            cmdname
+                                        );
+
+
+                                        socket.emit(
+
+                                            "executeBat",
+
+                                            cmdname,
+
+                                            function (
+                                                response
+                                            ) {
+
+
+                                                console.log(
+                                                    "Server Response:",
+                                                    response
+                                                );
+
+
+                                                // -------------------------
+                                                // START SUCCESS
+                                                // -------------------------
+
+                                                if (
+                                                    response &&
+                                                    response.success
+                                                ) {
+
+
+                                                    Swal.fire({
+
+                                                        title:
+                                                            "PM2 Service Started",
+
+                                                        text:
+
+                                                            `${selectedValue} has been started successfully by ${authResponse.user}.`,
+
+                                                        icon:
+                                                            "success"
+
+                                                    }).then(
+                                                        function () {
+
+                                                            location.reload();
+
+                                                        }
+                                                    );
+
+                                                }
+
+
+                                                // -------------------------
+                                                // START FAILED
+                                                // -------------------------
+
+                                                else {
+
+                                                    Swal.fire({
+
+                                                        title:
+                                                            "Failed to Start Service",
+
+                                                        text:
+                                                            response?.error ||
+                                                            "Unable to start PM2 service.",
+
+                                                        icon:
+                                                            "error"
+
+                                                    });
+
+                                                }
+
+                                            }
+
+                                        );
+
+                                    }
+
+                                );
+
+                            }
+
                         );
 
+                    }
 
-                        if (stderr) {
-
-                            console.log(
-                                "STDERR:",
-                                stderr
-                            );
-
-                        }
+                );
 
 
-                        if (callback) {
+                // =================================================
+                // STOP SERVICE
+                // =================================================
 
-                            callback({
+                stopButton.addEventListener(
+                    "click",
+                    function () {
 
-                                success: true,
 
-                                stdout:
-                                    stdout || "",
+                        const selectedValue =
+                            dropdown.value;
 
-                                stderr:
-                                    stderr || ""
+
+                        // -----------------------------------------
+                        // SERVICE REQUIRED
+                        // -----------------------------------------
+
+                        if (
+                            selectedValue === ""
+                        ) {
+
+                            Swal.fire({
+
+                                title:
+                                    "Select Service",
+
+                                text:
+                                    "Please select a service name first.",
+
+                                icon:
+                                    "warning"
 
                             });
 
+                            return;
+
                         }
 
+
+                        console.log(
+                            "Selected Service:",
+                            selectedValue
+                        );
+
+
+                        // =================================================
+                        // PASSWORD + REASON POPUP
+                        // =================================================
+
+                        Swal.fire({
+
+                            title:
+                                "Stop OCV Service",
+
+
+                            html:
+
+                                '<input ' +
+
+                                'id="password" ' +
+
+                                'type="password" ' +
+
+                                'class="swal2-input" ' +
+
+                                'placeholder="Enter Passcode" ' +
+
+                                'autocomplete="off">' +
+
+
+                                '<textarea ' +
+
+                                'id="stopReason" ' +
+
+                                'class="swal2-textarea" ' +
+
+                                'placeholder="Enter reason for stopping the service *" ' +
+
+                                'maxlength="1000"></textarea>',
+
+
+                            showCancelButton:
+                                true,
+
+
+                            confirmButtonText:
+                                "Stop",
+
+
+                            cancelButtonText:
+                                "Cancel",
+
+
+                            allowOutsideClick:
+                                false,
+
+
+                            // =================================================
+                            // VALIDATION
+                            // =================================================
+
+                            preConfirm:
+                                function () {
+
+
+                                    const password =
+                                        document.getElementById(
+                                            "password"
+                                        )
+                                        .value
+                                        .trim();
+
+
+                                    const reason =
+                                        document.getElementById(
+                                            "stopReason"
+                                        )
+                                        .value
+                                        .trim();
+
+
+                                    // -----------------------------------------
+                                    // PASSWORD REQUIRED
+                                    // -----------------------------------------
+
+                                    if (
+                                        password === ""
+                                    ) {
+
+                                        Swal.showValidationMessage(
+                                            "Please enter the passcode."
+                                        );
+
+                                        return false;
+
+                                    }
+
+
+                                    // -----------------------------------------
+                                    // PASSWORD VALIDATION
+                                    // -----------------------------------------
+
+                                    if (
+                                        !validatePassword(
+                                            password
+                                        )
+                                    ) {
+
+                                        Swal.showValidationMessage(
+                                            "Invalid passcode."
+                                        );
+
+                                        return false;
+
+                                    }
+
+
+                                    // -----------------------------------------
+                                    // REASON REQUIRED
+                                    // -----------------------------------------
+
+                                    if (
+                                        reason === ""
+                                    ) {
+
+                                        Swal.showValidationMessage(
+                                            "Stop reason is mandatory. Please enter the reason."
+                                        );
+
+                                        return false;
+
+                                    }
+
+
+                                    return {
+
+                                        password:
+                                            password,
+
+                                        reason:
+                                            reason
+
+                                    };
+
+                                }
+
+                        }).then(
+                            function (result) {
+
+
+                                if (
+                                    !result.isConfirmed
+                                ) {
+
+                                    return;
+
+                                }
+
+
+                                const password =
+                                    result.value.password;
+
+
+                                const reason =
+                                    result.value.reason;
+
+
+                                // =================================================
+                                // SERVER PASSWORD VALIDATION
+                                // =================================================
+
+                                socket.emit(
+
+                                    "validatePassword",
+
+                                    password,
+
+                                    function (
+                                        authResponse
+                                    ) {
+
+
+                                        if (
+                                            !authResponse ||
+                                            !authResponse.success
+                                        ) {
+
+                                            Swal.fire({
+
+                                                title:
+                                                    "Invalid Passcode",
+
+                                                text:
+                                                    authResponse?.error ||
+                                                    "Invalid passcode.",
+
+                                                icon:
+                                                    "error"
+
+                                            });
+
+                                            return;
+
+                                        }
+
+
+                                        // =================================================
+                                        // PM2 STOP
+                                        // =================================================
+
+                                        const cmdname =
+
+                                            `pm2 stop ${selectedValue}`;
+
+
+                                        console.log(
+                                            "STOP COMMAND:",
+                                            cmdname
+                                        );
+
+
+                                        socket.emit(
+
+                                            "executeBat",
+
+                                            cmdname,
+
+                                            function (
+                                                response
+                                            ) {
+
+
+                                                console.log(
+                                                    "Server Response:",
+                                                    response
+                                                );
+
+
+                                                // =================================================
+                                                // STOP FAILED
+                                                // NO LOG
+                                                // =================================================
+
+                                                if (
+                                                    !response ||
+                                                    !response.success
+                                                ) {
+
+
+                                                    Swal.fire({
+
+                                                        title:
+                                                            "Failed to Stop Service",
+
+                                                        text:
+
+                                                            response?.error ||
+
+                                                            "Unable to stop PM2 service. Stop log was not inserted.",
+
+                                                        icon:
+                                                            "error"
+
+                                                    });
+
+
+                                                    return;
+
+                                                }
+
+
+                                                // =================================================
+                                                // STOP SUCCESS
+                                                // INSERT LOG
+                                                // =================================================
+
+                                                socket.emit(
+
+                                                    "insertStopLog",
+
+                                                    {
+
+                                                        password:
+                                                            password,
+
+                                                        reason:
+                                                            reason,
+
+                                                        serviceName:
+                                                            selectedValue
+
+                                                    },
+
+
+                                                    function (
+                                                        logResponse
+                                                    ) {
+
+
+                                                        console.log(
+                                                            "Stop Log Response:",
+                                                            logResponse
+                                                        );
+
+
+                                                        // =============================================
+                                                        // LOG INSERT SUCCESS
+                                                        // =============================================
+
+                                                        if (
+                                                            logResponse &&
+                                                            logResponse.success
+                                                        ) {
+
+
+                                                            Swal.fire({
+
+                                                                title:
+                                                                    "PM2 Service Stopped",
+
+
+                                                                html:
+
+                                                                    `${selectedValue} has been stopped successfully.<br><br>` +
+
+                                                                    `<b>User:</b> ${logResponse.user}<br>` +
+
+                                                                    `<b>Reason:</b> ${escapeHtml(reason)}`,
+
+                                                                icon:
+                                                                    "success"
+
+                                                            }).then(
+                                                                function () {
+
+                                                                    location.reload();
+
+                                                                }
+                                                            );
+
+                                                        }
+
+
+                                                        // =============================================
+                                                        // LOG INSERT FAILED
+                                                        // =============================================
+
+                                                        else {
+
+
+                                                            Swal.fire({
+
+                                                                title:
+                                                                    "Service Stopped, But Log Failed",
+
+                                                                text:
+
+                                                                    logResponse?.error ||
+
+                                                                    "The service was stopped, but the stop log could not be inserted into SQL.",
+
+                                                                icon:
+                                                                    "warning"
+
+                                                            });
+
+                                                        }
+
+                                                    }
+
+                                                );
+
+                                            }
+
+                                        );
+
+                                    }
+
+                                );
+
+                            }
+
+                        );
+
                     }
+
                 );
 
-            }
-        );
 
+                // =================================================
+                // ESCAPE HTML
+                // =================================================
 
-        // ====================================================
-        // INSERT STOP LOG
-        // ====================================================
+                function escapeHtml(
+                    text
+                ) {
 
-        socket.on(
-            "insertStopLog",
-            async function (
-                data,
-                callback
-            ) {
-
-                try {
-
-                    // -------------------------------------
-                    // CHECK DATA
-                    // -------------------------------------
-
-                    if (
-                        !data ||
-                        typeof data !== "object"
-                    ) {
-
-                        throw new Error(
-                            "Invalid stop log data."
+                    const div =
+                        document.createElement(
+                            "div"
                         );
 
-                    }
+                    div.textContent =
+                        text;
 
-
-                    const password =
-                        typeof data.password === "string"
-                            ? data.password.trim()
-                            : "";
-
-
-                    const reason =
-                        typeof data.reason === "string"
-                            ? data.reason.trim()
-                            : "";
-
-
-                    const serviceName =
-                        typeof data.serviceName === "string"
-                            ? data.serviceName.trim()
-                            : "";
-
-
-                    // -------------------------------------
-                    // PASSWORD
-                    // -------------------------------------
-
-                    const userName =
-                        getUserFromPassword(
-                            password
-                        );
-
-
-                    if (!userName) {
-
-                        throw new Error(
-                            "Invalid passcode."
-                        );
-
-                    }
-
-
-                    // -------------------------------------
-                    // SERVICE
-                    // -------------------------------------
-
-                    if (
-                        !isValidService(
-                            serviceName
-                        )
-                    ) {
-
-                        throw new Error(
-                            "Invalid service name."
-                        );
-
-                    }
-
-
-                    // -------------------------------------
-                    // REASON
-                    // -------------------------------------
-
-                    if (
-                        reason === ""
-                    ) {
-
-                        throw new Error(
-                            "Stop reason is required."
-                        );
-
-                    }
-
-
-                    // -------------------------------------
-                    // INSERT
-                    // -------------------------------------
-
-                    const loggedUser =
-                        await insertStopLog(
-
-                            password,
-
-                            reason,
-
-                            serviceName
-
-                        );
-
-
-                    // -------------------------------------
-                    // RESPONSE
-                    // -------------------------------------
-
-                    if (callback) {
-
-                        callback({
-
-                            success: true,
-
-                            user:
-                                loggedUser
-
-                        });
-
-                    }
+                    return div.innerHTML;
 
                 }
 
-                catch (error) {
 
-                    console.error(
-                        "========================================"
-                    );
+                // =================================================
+                // SOCKET CONNECT
+                // =================================================
 
-                    console.error(
-                        "STOP LOG INSERT FAILED"
-                    );
+                socket.on(
+                    "connect",
+                    function () {
 
-                    console.error(
-                        "========================================"
-                    );
+                        console.log(
+                            "Connected to server."
+                        );
 
-                    console.error(
-                        error
-                    );
-
-
-                    if (callback) {
-
-                        callback({
-
-                            success: false,
-
-                            error:
-                                error.message ||
-                                "Unable to insert stop log."
-
-                        });
+                        console.log(
+                            "Socket ID:",
+                            socket.id
+                        );
 
                     }
+                );
 
-                }
+
+                // =================================================
+                // SOCKET DISCONNECT
+                // =================================================
+
+                socket.on(
+                    "disconnect",
+                    function () {
+
+                        console.log(
+                            "Disconnected from server."
+                        );
+
+                    }
+                );
+
 
             }
+
         );
 
+    </script>
 
-        // ====================================================
-        // DISCONNECT
-        // ====================================================
+</body>
 
-        socket.on(
-            "disconnect",
-            function () {
-
-                console.log(
-                    "========================================"
-                );
-
-                console.log(
-                    "HTTPS CLIENT DISCONNECTED"
-                );
-
-                console.log(
-                    "Socket ID:",
-                    socket.id
-                );
-
-                console.log(
-                    "========================================"
-                );
-
-            }
-        );
-
-    }
-);
-
-
-// ============================================================
-// HTTPS SERVER ERROR
-// ============================================================
-
-httpsServer.on(
-    "error",
-    function (error) {
-
-        console.error(
-            "========================================"
-        );
-
-        console.error(
-            "HTTPS SERVER ERROR"
-        );
-
-        console.error(
-            "========================================"
-        );
-
-        console.error(
-            error
-        );
-
-
-        if (
-            error.code === "EADDRINUSE"
-        ) {
-
-            console.error(
-                `Port ${PORT} is already in use.`
-            );
-
-            console.error(
-                "Stop the existing Node.js process and try again."
-            );
-
-        }
-
-    }
-);
-
-
-// ============================================================
-// START HTTPS SERVER
-// ============================================================
-
-httpsServer.listen(
-    PORT,
-    "0.0.0.0",
-    function () {
-
-        console.log(
-            "========================================"
-        );
-
-        console.log(
-            "OCV SERVICE RESTART SERVER"
-        );
-
-        console.log(
-            "========================================"
-        );
-
-        console.log(
-            "HTTPS SERVER STARTED"
-        );
-
-        console.log(
-            `Port: ${PORT}`
-        );
-
-        console.log(
-            `Local URL: https://localhost:${PORT}/ocv`
-        );
-
-        console.log(
-            `Network URL: https://<SERVER-IP>:${PORT}/ocv`
-        );
-
-        console.log(
-            "========================================"
-        );
-
-        console.log(
-            "Socket.IO running over HTTPS"
-        );
-
-        console.log(
-            "SQL stop logging enabled"
-        );
-
-        console.log(
-            "========================================"
-        );
-
-    }
-);
+</html>
