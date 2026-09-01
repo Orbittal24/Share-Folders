@@ -3,7 +3,6 @@ import pyodbc
 import time
 import redis
 import json
-import re
 
 
 # -----------------------------------
@@ -13,52 +12,26 @@ import re
 redis_host = "localhost"
 redis_port = 6379
 redis_db = 31
-redis_password = "Gotion@123Strong!"
 
 r = redis.StrictRedis(
     host=redis_host,
     port=redis_port,
-    password=redis_password,
+    password="Gotion@123Strong!",
     db=redis_db,
     decode_responses=True
 )
 
-DUPLICATE_TTL_SECONDS = 3 * 24 * 60 * 60
-
 
 # -----------------------------------
-# RETRY CONFIG
-# -----------------------------------
-
-MAX_RETRY = 3
-RETRY_KEY_PREFIX = "retry:"
-
-
-# -----------------------------------
-# SAFE STRING
+# SAFE STRING CONVERSION
 # -----------------------------------
 
 def safe(val):
     return "" if val is None else str(val)
 
 
-def extract_capacity(val):
-
-    if val is None:
-        return ""
-
-    val_str = str(val)
-
-    match = re.search(r"\d+(\.\d+)?", val_str)
-
-    if match:
-        return match.group(0)
-
-    return ""
-
-
 # -----------------------------------
-# DB CONFIG
+# DB CONFIGS
 # -----------------------------------
 
 sqlConfig1 = {
@@ -78,7 +51,7 @@ sqlConfig2 = {
 
 
 # -----------------------------------
-# CONNECT DB
+# CONNECT FUNCTION
 # -----------------------------------
 
 def connect_db(config):
@@ -92,13 +65,11 @@ def connect_db(config):
         f"TrustServerCertificate=yes;"
     )
 
-    conn.autocommit = False
-
     return conn
 
 
 # -----------------------------------
-# DATE MAPS
+# MAPPING TABLES
 # -----------------------------------
 
 yearMap = {
@@ -182,49 +153,23 @@ dayMap = {
     "W": 28,
     "X": 29,
     "Y": 30,
-    "0": 31
+    "0": 31,
 }
 
 
 # -----------------------------------
-# ENSURE TABLE
+# MOVE SOURCE RECORD TO REJECTION
 # -----------------------------------
-
-def ensure_table(dst_cursor, tableName):
-
-    dst_cursor.execute(f"""
-    IF NOT EXISTS (
-        SELECT 1
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_NAME = '{tableName}'
-    )
-    BEGIN
-
-        CREATE TABLE {tableName} (
-            sr_no INT IDENTITY(1,1) PRIMARY KEY,
-            cellqr NVARCHAR(50),
-            voltage NVARCHAR(50),
-            ir NVARCHAR(50),
-            class_grade NVARCHAR(30),
-            capacity NVARCHAR(50),
-            thickness NVARCHAR(50),
-            k_value NVARCHAR(50),
-            negative_voltage NVARCHAR(50),
-            cell_status NVARCHAR(20),
-            ocv_mc_no NVARCHAR(40),
-            first_para_time DATETIME,
-            last_para_time DATETIME,
-            laser_status VARCHAR(50),
-            batch VARCHAR(100),
-            plant_code VARCHAR(50)
-        )
-
-    END
-    """)
-
-
-# -----------------------------------
-# MOVE TO REJECTION
+#
+# IMPORTANT:
+#
+# Rejection INSERT is considered the
+# acknowledgement only after commit()
+# succeeds.
+#
+# Mirror is deleted only after this
+# function returns True.
+#
 # -----------------------------------
 
 def move_to_rejection(src_conn, row):
@@ -239,22 +184,22 @@ def move_to_rejection(src_conn, row):
         )
 
         cursor.execute("""
-        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
-        (
-            cell_qrcode,
-            voltage,
-            ir,
-            today_date,
-            updated_time,
-            machine_location,
-            shift,
-            used_on_line,
-            kvalue,
-            grade,
-            cell_capacity,
-            cell_class
-        )
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO taco_treceability.ocv_machine_data_xng_mirrior_rejection
+            (
+                cell_qrcode,
+                voltage,
+                ir,
+                today_date,
+                updated_time,
+                machine_location,
+                shift,
+                used_on_line,
+                kvalue,
+                grade,
+                cell_capacity,
+                cell_class
+            )
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             row.cell_qrcode,
@@ -274,15 +219,11 @@ def move_to_rejection(src_conn, row):
         # -----------------------------------
         # ACKNOWLEDGEMENT
         # -----------------------------------
-        # Commit means rejection insertion
-        # was successfully acknowledged.
-        # Only after this returns successfully
-        # will the mirror record be deleted.
 
         src_conn.commit()
 
         print(
-            "REJECTION ACKNOWLEDGED :",
+            "REJECTION INSERT ACKNOWLEDGED :",
             row.cell_qrcode
         )
 
@@ -307,20 +248,36 @@ def move_to_rejection(src_conn, row):
 
 
 # -----------------------------------
-# HANDLE FAILURE
+# INSERT INTO REJECTION
+# THEN DELETE FROM MIRROR
 # -----------------------------------
 
-def handle_failure(src_conn, row):
+def handle_failure(src_conn, row, failure_reason):
 
     qr = safe(row.cell_qrcode)
 
     print(
-        "FAILURE HANDLER STARTED :",
+        "-----------------------------------"
+    )
+
+    print(
+        "FAILURE REASON :",
+        failure_reason
+    )
+
+    print(
+        "QR :",
         qr
     )
 
+    print(
+        "MOVING DATA TO REJECTION..."
+    )
+
+
     # -----------------------------------
-    # INSERT INTO REJECTION
+    # STEP 1
+    # INSERT REJECTION
     # -----------------------------------
 
     rejection_success = move_to_rejection(
@@ -328,8 +285,11 @@ def handle_failure(src_conn, row):
         row
     )
 
+
     # -----------------------------------
-    # ONLY DELETE AFTER ACKNOWLEDGEMENT
+    # STEP 2
+    # ONLY AFTER ACKNOWLEDGEMENT
+    # DELETE MIRROR
     # -----------------------------------
 
     if rejection_success:
@@ -339,15 +299,23 @@ def handle_failure(src_conn, row):
             cursor = src_conn.cursor()
 
             cursor.execute("""
-            DELETE FROM taco_treceability.ocv_machine_data_mirror
-            WHERE cell_qrcode=?
+                DELETE FROM taco_treceability.ocv_machine_data_xng_mirrior
+                WHERE cell_qrcode = ?
             """, qr)
 
             src_conn.commit()
 
             print(
-                "SOURCE DELETED AFTER REJECTION ACK :",
+                "REJECTION ACK RECEIVED"
+            )
+
+            print(
+                "SOURCE DELETED FROM MIRROR :",
                 qr
+            )
+
+            print(
+                "-----------------------------------"
             )
 
             return True
@@ -355,7 +323,7 @@ def handle_failure(src_conn, row):
         except Exception as delete_error:
 
             print(
-                "DELETE AFTER REJECTION FAILED :",
+                "DELETE FROM MIRROR FAILED :",
                 delete_error
             )
 
@@ -367,82 +335,135 @@ def handle_failure(src_conn, row):
                     rollback_error
                 )
 
+            print(
+                "SOURCE KEPT IN MIRROR :",
+                qr
+            )
+
+            print(
+                "-----------------------------------"
+            )
+
             return False
 
     else:
 
         print(
-            "REJECTION NOT ACKNOWLEDGED - SOURCE KEPT :",
+            "REJECTION ACKNOWLEDGEMENT FAILED"
+        )
+
+        print(
+            "SOURCE KEPT IN MIRROR :",
             qr
+        )
+
+        print(
+            "-----------------------------------"
         )
 
         return False
 
 
 # -----------------------------------
-# PROCESS RECORD
+# PROCESS ONE RECORD
 # -----------------------------------
 
 def process_record(src_conn, dst_conn):
 
     src_cursor = src_conn.cursor()
+
     dst_cursor = dst_conn.cursor()
 
     row = None
+
 
     # -----------------------------------
     # STATUS FLAGS
     # -----------------------------------
 
     sql_success = False
+
     redis_success = False
+
 
     try:
 
         # -----------------------------------
-        # GET SOURCE RECORD
+        # FETCH TOP 1 FROM NEW TABLE
         # -----------------------------------
 
         src_cursor.execute("""
-        SELECT TOP 1 *
-        FROM taco_treceability.ocv_machine_data_mirror
-        WHERE machine_location='line5_line6'
-        ORDER BY sr_no ASC
+            SELECT TOP 1 *
+            FROM taco_treceability.ocv_machine_data_xng_mirrior
+            ORDER BY sr_no DESC
         """)
 
         row = src_cursor.fetchone()
 
+
         if not row:
 
-            print("No records...")
+            print(
+                "No new records..."
+            )
 
             return
 
-        qr = safe(row.cell_qrcode)
 
-        print("\n========= NEW RECORD =========")
-        print("QR :", qr)
+        qr = row.cell_qrcode
+
+
+        print(
+            "\n================ NEW RECORD ================"
+        )
+
+        print(
+            "QR CODE:",
+            qr
+        )
 
 
         # -----------------------------------
         # QR VALIDATION
         # -----------------------------------
 
-        if len(qr) < 16:
+        if not qr or len(qr) < 16:
 
-            raise Exception("QR too short")
+            print(
+                "ERROR: QR too short, skipping"
+            )
+
+            return
 
 
         # -----------------------------------
-        # DATE CODE
+        # EXTRACT PLANT CODE & BATCH CODE
         # -----------------------------------
 
         code12_13 = qr[12:14]
 
-        dateCode = (
-            qr[8:11]
-            if code12_13 == "BV"
-            else qr[14:17]
+
+        # -----------------------------------
+        # DYNAMIC LOGIC FOR DATE CODE
+        # -----------------------------------
+
+        if code12_13 == 'BV':
+
+            dateCode = qr[8:11]
+
+        else:
+
+            dateCode = qr[14:17]
+
+
+        print(
+            "Plant code:",
+            code12_13
+        )
+
+        print(
+            "Batch code:",
+            dateCode
         )
 
 
@@ -450,18 +471,27 @@ def process_record(src_conn, dst_conn):
         # DATE MAPPING
         # -----------------------------------
 
-        yearValue = yearMap.get(dateCode[0])
+        yearValue = yearMap.get(
+            dateCode[0]
+        )
 
-        monthValue = monthMap.get(dateCode[1])
+        monthValue = monthMap.get(
+            dateCode[1]
+        )
 
-        dayValue = dayMap.get(dateCode[2])
+        dayValue = dayMap.get(
+            dateCode[2]
+        )
 
 
         if not yearValue or not monthValue or not dayValue:
 
-            raise Exception(
-                "Date mapping failed"
+            print(
+                "ERROR: Mapping failed! Skipping QR:",
+                qr
             )
+
+            return
 
 
         year = 2000 + yearValue
@@ -477,24 +507,130 @@ def process_record(src_conn, dst_conn):
 
 
         print(
-            "TABLE :",
+            "Target Table:",
             tableName
         )
 
 
         # -----------------------------------
-        # ENSURE TABLE
+        # CREATE TABLE IF NOT EXISTS
         # -----------------------------------
 
-        ensure_table(
-            dst_cursor,
-            tableName
+        dst_cursor.execute(
+            f"""
+            IF NOT EXISTS (
+                SELECT 1
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_NAME='{tableName}'
+            )
+            BEGIN
+
+                CREATE TABLE {tableName} (
+                    sr_no INT IDENTITY(1,1) PRIMARY KEY,
+                    cellqr NVARCHAR(50),
+                    voltage NVARCHAR(50),
+                    ir NVARCHAR(50),
+                    class_grade NVARCHAR(30),
+                    capacity NVARCHAR(50),
+                    thickness NVARCHAR(50),
+                    k_value NVARCHAR(50),
+                    negative_voltage NVARCHAR(50),
+                    cell_status NVARCHAR(20),
+                    ocv_mc_no NVARCHAR(40),
+                    first_para_time DATETIME,
+                    last_para_time DATETIME,
+                    laser_status VARCHAR(50),
+                    batch VARCHAR(100),
+                    plant_code VARCHAR(50)
+                );
+
+            END
+            """
         )
 
 
-        capacity_val = extract_capacity(
-            row.cell_capacity
+        dst_conn.commit()
+
+
+        # -----------------------------------
+        # CHECK IF EXISTS
+        # -----------------------------------
+
+        dst_cursor.execute(
+            f"""
+            SELECT *
+            FROM {tableName}
+            WHERE cellqr = ?
+            """,
+            qr
         )
+
+
+        exists = dst_cursor.fetchone()
+
+
+        # -----------------------------------
+        # PREPARE REDIS DATA
+        # -----------------------------------
+
+        row_dict = {
+
+            "cellqr": safe(qr),
+
+            "voltage": safe(
+                row.voltage
+            ),
+
+            "ir": safe(
+                row.ir
+            ),
+
+            "class_grade": safe(
+                row.cell_class
+            ),
+
+            "capacity": safe(
+                row.cell_capacity
+            ),
+
+            "thickness": safe(
+                row.cell_thikness
+            ),
+
+            "k_value": safe(
+                row.kvalue
+            ),
+
+            "negative_voltage": safe(
+                row.cell_nigative_voltage
+            ),
+
+            "cell_status": "OK",
+
+            "ocv_mc_no": safe(
+                row.used_on_line
+            ),
+
+            "first_para_time": safe(
+                row.today_date
+            ),
+
+            "last_para_time": safe(
+                row.updated_time
+            ),
+
+            "laser_status": safe(
+                row.laser_status
+            ),
+
+            "batch": safe(
+                dateCode
+            ),
+
+            "plant_code": safe(
+                code12_13
+            )
+        }
 
 
         # =================================================
@@ -503,66 +639,16 @@ def process_record(src_conn, dst_conn):
 
         try:
 
-            dst_cursor.execute(
-                f"""
-                SELECT cellqr
-                FROM {tableName}
-                WHERE cellqr=?
-                """,
-                qr
-            )
-
-            exists = dst_cursor.fetchone()
-
-
             # -----------------------------------
-            # UPDATE EXISTING SQL RECORD
+            # SQL INSERT
             # -----------------------------------
 
-            if exists:
-
-                dst_cursor.execute(
-                    f"""
-                    UPDATE {tableName}
-                    SET
-                        voltage=?,
-                        ir=?,
-                        class_grade=?,
-                        capacity=?,
-                        k_value=?,
-                        ocv_mc_no=?,
-                        first_para_time=?,
-                        last_para_time=?,
-                        batch=?,
-                        plant_code=?
-                    WHERE cellqr=?
-                    """,
-                    (
-                        safe(row.voltage),
-                        safe(row.ir),
-                        safe(row.cell_class),
-                        capacity_val,
-                        safe(row.kvalue),
-                        safe(row.machine_location),
-                        row.today_date,
-                        row.today_date,
-                        dateCode,
-                        code12_13,
-                        qr
-                    )
-                )
+            if not exists:
 
                 print(
-                    "UPDATED :",
-                    qr
+                    "SQL: New record - INSERT"
                 )
 
-
-            # -----------------------------------
-            # INSERT NEW SQL RECORD
-            # -----------------------------------
-
-            else:
 
                 dst_cursor.execute(
                     f"""
@@ -591,32 +677,39 @@ def process_record(src_conn, dst_conn):
                         ?,
                         ?,
                         ?,
-                        NULL,
                         ?,
-                        NULL,
+                        ?,
+                        ?,
                         'OK',
                         ?,
                         ?,
                         ?,
-                        NULL,
+                        ?,
                         ?,
                         ?
                     )
                     """,
                     (
                         qr,
-                        safe(row.voltage),
-                        safe(row.ir),
-                        safe(row.cell_class),
-                        capacity_val,
-                        safe(row.kvalue),
-                        safe(row.machine_location),
+                        row.voltage,
+                        row.ir,
+                        row.cell_class,
+                        row.cell_capacity,
+                        row.cell_thikness,
+                        row.kvalue,
+                        row.cell_nigative_voltage,
+                        row.used_on_line,
                         row.today_date,
-                        row.today_date,
+                        row.updated_time,
+                        row.laser_status,
                         dateCode,
                         code12_13
                     )
                 )
+
+
+                dst_conn.commit()
+
 
                 print(
                     "INSERTED :",
@@ -625,12 +718,69 @@ def process_record(src_conn, dst_conn):
 
 
             # -----------------------------------
-            # SQL COMMIT
+            # SQL UPDATE
             # -----------------------------------
 
-            dst_conn.commit()
+            else:
+
+                print(
+                    "SQL: Existing record - UPDATE"
+                )
+
+
+                dst_cursor.execute(
+                    f"""
+                    UPDATE {tableName}
+
+                    SET
+                        voltage = ?,
+                        ir = ?,
+                        class_grade = ?,
+                        capacity = ?,
+                        thickness = ?,
+                        k_value = ?,
+                        negative_voltage = ?,
+                        ocv_mc_no = ?,
+                        last_para_time = ?,
+                        laser_status = ?,
+                        batch = ?,
+                        plant_code = ?
+
+                    WHERE cellqr = ?
+                    """,
+                    (
+                        row.voltage,
+                        row.ir,
+                        row.cell_class,
+                        row.cell_capacity,
+                        row.cell_thikness,
+                        row.kvalue,
+                        row.cell_nigative_voltage,
+                        row.used_on_line,
+                        row.updated_time,
+                        row.laser_status,
+                        dateCode,
+                        code12_13,
+                        qr
+                    )
+                )
+
+
+                dst_conn.commit()
+
+
+                print(
+                    "SQL UPDATED :",
+                    qr
+                )
+
+
+            # -----------------------------------
+            # SQL SUCCESS
+            # -----------------------------------
 
             sql_success = True
+
 
             print(
                 "SQL SUCCESS :",
@@ -644,10 +794,14 @@ def process_record(src_conn, dst_conn):
             # SQL FAILED
             # -----------------------------------
 
+            sql_success = False
+
+
             print(
                 "SQL FAILED :",
                 sql_error
             )
+
 
             try:
 
@@ -660,14 +814,12 @@ def process_record(src_conn, dst_conn):
                     rollback_error
                 )
 
+
             # IMPORTANT:
             #
             # DO NOT RETURN HERE.
             #
-            # Redis MUST be attempted even
-            # when SQL has failed.
-
-            sql_success = False
+            # Redis must still be attempted.
 
 
         # =================================================
@@ -676,37 +828,22 @@ def process_record(src_conn, dst_conn):
 
         try:
 
-            redis_payload = {
-                "cellqr": qr,
-                "voltage": safe(row.voltage),
-                "ir": safe(row.ir),
-                "class_grade": safe(row.cell_class),
-                "capacity": capacity_val,
-                "k_value": safe(row.kvalue),
-                "ocv_mc_no": safe(row.machine_location),
-                "first_para_time": str(row.today_date),
-                "last_para_time": str(row.today_date),
-                "batch": dateCode,
-                "plant_code": code12_13
-            }
-
-
             # -----------------------------------
-            # REDIS INSERT
+            # REDIS INSERT / UPDATE
             # -----------------------------------
 
-            r.setex(
+            r.set(
                 f"cell:{qr}",
-                DUPLICATE_TTL_SECONDS,
-                json.dumps(redis_payload)
+                json.dumps(row_dict)
             )
 
 
             redis_success = True
 
+
             print(
-                "REDIS SUCCESS :",
-                redis_payload
+                "REDIS SUCCESS : Stored cell:",
+                qr
             )
 
 
@@ -716,17 +853,19 @@ def process_record(src_conn, dst_conn):
             # REDIS FAILED
             # -----------------------------------
 
+            redis_success = False
+
+
             print(
                 "REDIS FAILED :",
                 redis_error
             )
 
-            redis_success = False
-
 
         # =================================================
-        # FINAL RESULT
+        # FINAL RESULT HANDLING
         # =================================================
+
 
         # -----------------------------------
         # CASE 1
@@ -736,28 +875,39 @@ def process_record(src_conn, dst_conn):
         if sql_success and redis_success:
 
             print(
-                "SQL + REDIS SUCCESS :",
+                "SQL SUCCESS + REDIS SUCCESS :",
                 qr
             )
 
+            print(
+                "NORMAL FLOW - DELETE SOURCE"
+            )
+
+
             try:
 
-                src_cursor.execute("""
-                DELETE FROM taco_treceability.ocv_machine_data_mirror
-                WHERE cell_qrcode=?
-                """, qr)
+                src_cursor.execute(
+                    """
+                    DELETE FROM taco_treceability.ocv_machine_data_xng_mirrior
+                    WHERE cell_qrcode = ?
+                    """,
+                    qr
+                )
+
 
                 src_conn.commit()
 
+
                 print(
-                    "SOURCE DELETED :",
+                    "DELETED SOURCE :",
                     qr
                 )
+
 
             except Exception as delete_error:
 
                 print(
-                    "DELETE FAILED :",
+                    "DELETE SOURCE FAILED :",
                     delete_error
                 )
 
@@ -768,6 +918,7 @@ def process_record(src_conn, dst_conn):
                         "DELETE ROLLBACK FAILED :",
                         rollback_error
                     )
+
 
             return
 
@@ -785,28 +936,16 @@ def process_record(src_conn, dst_conn):
             )
 
             print(
-                "INSERTING FAILED SQL DATA INTO REJECTION :",
-                qr
+                "SQL DATA WILL BE MOVED TO REJECTION"
             )
 
-            rejection_result = handle_failure(
+
+            handle_failure(
                 src_conn,
-                row
+                row,
+                "SQL INSERT/UPDATE FAILED, REDIS SUCCESS"
             )
 
-            if rejection_result:
-
-                print(
-                    "SQL FAILED DATA MOVED TO REJECTION :",
-                    qr
-                )
-
-            else:
-
-                print(
-                    "SQL FAILED DATA KEPT IN MIRROR :",
-                    qr
-                )
 
             return
 
@@ -824,28 +963,16 @@ def process_record(src_conn, dst_conn):
             )
 
             print(
-                "INSERTING REDIS FAILED DATA INTO REJECTION :",
-                qr
+                "REDIS FAILED DATA WILL BE MOVED TO REJECTION"
             )
 
-            rejection_result = handle_failure(
+
+            handle_failure(
                 src_conn,
-                row
+                row,
+                "SQL SUCCESS, REDIS INSERT/UPDATE FAILED"
             )
 
-            if rejection_result:
-
-                print(
-                    "REDIS FAILED DATA MOVED TO REJECTION :",
-                    qr
-                )
-
-            else:
-
-                print(
-                    "REDIS FAILED DATA KEPT IN MIRROR :",
-                    qr
-                )
 
             return
 
@@ -863,28 +990,16 @@ def process_record(src_conn, dst_conn):
             )
 
             print(
-                "BOTH FAILED - INSERTING INTO REJECTION :",
-                qr
+                "BOTH FAILED - ATTEMPTING REJECTION"
             )
 
-            rejection_result = handle_failure(
+
+            handle_failure(
                 src_conn,
-                row
+                row,
+                "SQL FAILED + REDIS FAILED"
             )
 
-            if rejection_result:
-
-                print(
-                    "BOTH FAILED - DATA MOVED TO REJECTION :",
-                    qr
-                )
-
-            else:
-
-                print(
-                    "BOTH FAILED - SOURCE KEPT IN MIRROR :",
-                    qr
-                )
 
             return
 
@@ -896,20 +1011,20 @@ def process_record(src_conn, dst_conn):
     except Exception as e:
 
         print(
-            "PROCESS ERROR :",
+            "ERROR:",
             e
         )
 
+
         # -----------------------------------
-        # IMPORTANT
+        # IF RECORD WAS ALREADY FETCHED
         # -----------------------------------
         #
-        # If an unexpected error occurs after
-        # obtaining the source row, attempt to
-        # move it to rejection.
-        #
-        # Mirror is deleted ONLY if rejection
-        # insertion + acknowledgement succeeds.
+        # Do not simply lose it.
+        # Attempt rejection insertion.
+        # Mirror is deleted only if rejection
+        # acknowledgement succeeds.
+        # -----------------------------------
 
         if row:
 
@@ -917,7 +1032,8 @@ def process_record(src_conn, dst_conn):
 
                 handle_failure(
                     src_conn,
-                    row
+                    row,
+                    "UNEXPECTED PROCESS ERROR"
                 )
 
             except Exception as failure_error:
@@ -927,11 +1043,12 @@ def process_record(src_conn, dst_conn):
                     failure_error
                 )
 
+
         return
 
 
 # -----------------------------------
-# MAIN LOOP
+# CONTINUOUS LOOP
 # -----------------------------------
 
 def start():
@@ -943,6 +1060,7 @@ def start():
     dst_conn = connect_db(
         sqlConfig2
     )
+
 
     print(
         "SYSTEM STARTED"
@@ -959,15 +1077,16 @@ def start():
             )
 
 
-        except Exception as main_error:
+        except Exception as e:
 
             print(
-                "MAIN LOOP ERROR :",
-                main_error
+                "ERROR:",
+                e
             )
 
+
             # -----------------------------------
-            # RECONNECT DATABASES
+            # RECONNECT SOURCE AND DESTINATION DB
             # -----------------------------------
 
             try:
@@ -984,15 +1103,20 @@ def start():
                     "DB RECONNECTED"
                 )
 
+
             except Exception as reconnect_error:
 
                 print(
-                    "RECONNECT FAILED :",
+                    "DB RECONNECT FAILED :",
                     reconnect_error
                 )
 
 
-        time.sleep(0.1)
+        # -----------------------------------
+        # EXISTING LOOP DELAY
+        # -----------------------------------
+
+        time.sleep(1)
 
 
 # -----------------------------------
