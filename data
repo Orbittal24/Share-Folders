@@ -1,470 +1,390 @@
-const sql = require("mssql");
-const path = require("path");
-const https = require("https");
-const express = require("express");
-const fs = require("fs");
-const socketio = require("socket.io");
+```html
+<!DOCTYPE html>
+<html lang="en">
 
-const app = express();
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+    <title>Restart IR Screwing Services</title>
 
-// ============================================================
-// SSL CERTIFICATE
-// ============================================================
+    <!-- Your CSS -->
+    <link href="./style/style.css" rel="stylesheet">
 
-const sslOptions = {
-    key: fs.readFileSync("./certs/server.key"),
-    cert: fs.readFileSync("./certs/server.pem")
-};
+    <!-- SweetAlert -->
+    <script src="./style/sweetalert.js"></script>
+</head>
 
+<body>
 
-// ============================================================
-// HTTPS SERVER
-// ============================================================
+    <!-- Page Heading -->
+    <div class="py-3 d-flex flex-row align-items-center m-5">
+        <h3>IR Screwing Service Restart</h3>
+    </div>
 
-const httpsServer = https.createServer(sslOptions, app);
 
+    <!-- Service Control Card -->
+    <div class="card-header py-3 d-flex flex-row align-items-center m-5 bg-light">
 
-// ============================================================
-// SOCKET.IO
-// ============================================================
+        <label for="dropdown" class="mr-2">
+            Choose an option:
+        </label>
 
-const io = socketio(httpsServer, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
-});
+        <select id="dropdown" class="custom-select mr-2">
 
+            <option value="ocv_cell_data_mirror_ocv_universal_line_1_2">
+                ocv_cell_data_mirror_ocv_universal_line_1_2
+            </option>
 
-// ============================================================
-// DATABASE CONFIG
-// ============================================================
+            <option value="ocv_cell_data_mirror_ocv_universal_line_3_4">
+                ocv_cell_data_mirror_ocv_universal_line_3_4
+            </option>
 
-const sqlConfig = {
+            <option value="ocv_cell_data_mirror_ocv_universal_line_5_6">
+                ocv_cell_data_mirror_ocv_universal_line_5_6
+            </option>
 
-    user: "user_mis",
+            <option value="ocv_cell_data_mirror_ocv_universal_line_7_8">
+                ocv_cell_data_mirror_ocv_universal_line_7_8
+            </option>
 
-    password: "admin@123",
+            <option value="ocv_cell_data_mirror_ocv_universal_line_A">
+                ocv_cell_data_mirror_ocv_universal_line_A
+            </option>
 
-    database: "taco_treceability",
+            <option value="ocv_cell_data_mirror_ocv_universal_XNG">
+                ocv_cell_data_mirror_ocv_universal_XNG
+            </option>
 
-    server: "10.9.4.29",
+            <option value="ocv_cell_data_mirror_ocv_universal_bajaj_2w">
+                ocv_cell_data_mirror_ocv_universal_bajaj_2w
+            </option>
 
-    port: 1433,
+        </select>
 
-    options: {
 
-        instanceName: "PROD_SQL_2026",
+        <!-- Start Button -->
+        <a id="startButton"
+           class="ml-auto btn btn-success btn-sm"
+           href="#">
+            Start
+        </a>
 
-        encrypt: false,
 
-        trustServerCertificate: true
+        <!-- Stop Button -->
+        <a id="stopButton"
+           class="ml-2 btn btn-danger btn-sm"
+           href="#">
+            Stop
+        </a>
 
-    },
+    </div>
 
-    pool: {
 
-        max: 10,
+    <!-- Socket.IO -->
+    <script src="./style/socket_io.js"></script>
 
-        min: 0,
 
-        idleTimeoutMillis: 30000
+    <script>
 
-    }
+        document.addEventListener("DOMContentLoaded", function () {
 
-};
+            const dropdown = document.getElementById("dropdown");
+            const startButton = document.getElementById("startButton");
+            const stopButton = document.getElementById("stopButton");
 
 
-let dbConn;
+            // =========================================================
+            // CONNECT TO SOCKET.IO SERVER
+            // =========================================================
 
+            const socket = io();
 
-// ============================================================
-// DATABASE CONNECTION
-// ============================================================
 
-async function connectDB() {
+            // =========================================================
+            // START SERVICE
+            // =========================================================
 
-    try {
+            startButton.addEventListener("click", function (event) {
 
-        dbConn = await sql.connect(sqlConfig);
+                event.preventDefault();
 
-        console.log("SQL Server Connected...");
+                const selectedValue = dropdown.value;
 
-    } catch (err) {
+                console.log("Selected Service:", selectedValue);
 
-        console.log("DB Connection Error :", err);
 
-    }
+                Swal.fire({
 
-}
+                    title: "Enter Passcode!",
 
-connectDB();
+                    html:
+                        '<input id="password" ' +
+                        'type="password" ' +
+                        'class="swal2-input" ' +
+                        'placeholder="Enter Passcode">',
 
+                    showCancelButton: true,
 
-// ============================================================
-// HTML ROUTE
-// ============================================================
+                    confirmButtonText: "Start",
 
-app.get("/OCV_reject", (req, res) => {
+                    cancelButtonText: "Cancel"
 
-    res.sendFile(
-        path.join(__dirname, "OCV_reject.html")
-    );
+                }).then((result) => {
 
-});
 
+                    // User clicked Cancel
+                    if (!result.isConfirmed) {
+                        return;
+                    }
 
-// ============================================================
-// GET XNG OCV REJECTION DATA
-// ============================================================
 
-app.get("/api/get_ocv_reject_data", async (req, res) => {
+                    const password =
+                        document.getElementById("password").value;
 
-    try {
 
-        const result = await dbConn.request().query(`
+                    // =================================================
+                    // CHECK PASSWORD
+                    // =================================================
 
-            SELECT
+                    if (password === "") {
 
-                sr_no,
-                cell_qrcode,
-                voltage,
-                ir,
-                today_date,
-                updated_time,
-                machine_location,
-                shift,
-                used_on_line,
-                kvalue,
-                grade,
-                cell_capacity,
-                cell_class,
-                cell_thikness,
-                cell_nigative_voltage,
-                laser_status
+                        Swal.fire({
+                            title: "Password Required",
+                            text: "Please enter the passcode.",
+                            icon: "warning"
+                        });
 
-            FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
+                        return;
+                    }
 
-            WHERE cell_qrcode LIKE '03%'
 
-            ORDER BY sr_no
+                    if (password !== "service") {
 
-        `);
+                        Swal.fire({
+                            title: "Invalid Passcode",
+                            text: "Please enter the correct passcode.",
+                            icon: "error"
+                        });
 
+                        return;
+                    }
 
-        res.json({
 
-            success: true,
+                    // =================================================
+                    // PM2 START COMMAND
+                    // =================================================
 
-            totalCount: result.recordset.length,
+                    const cmdname =
+                        `pm2 start ${selectedValue} --interpreter=pythonw`;
 
-            data: result.recordset
 
-        });
+                    console.log(
+                        "START COMMAND:",
+                        cmdname
+                    );
 
 
-    } catch (err) {
+                    // =================================================
+                    // SEND COMMAND TO BACKEND
+                    // =================================================
 
-        console.log("GET DATA ERROR :", err);
+                    socket.emit(
+                        "executeBat",
+                        cmdname,
+                        function (response) {
 
+                            console.log(
+                                "Server Response:",
+                                response
+                            );
 
-        res.json({
 
-            success: false,
+                            if (response.success) {
 
-            message: err.message
+                                Swal.fire({
+                                    title: "PM2 Service Started",
+                                    text:
+                                        `${selectedValue} has been started successfully.`,
+                                    icon: "success"
+                                });
 
-        });
+                            } else {
 
-    }
+                                Swal.fire({
+                                    title: "Failed to Start Service",
+                                    text:
+                                        response.error ||
+                                        "Unable to start PM2 service.",
+                                    icon: "error"
+                                });
 
-});
+                            }
 
-
-// ============================================================
-// SOCKET.IO
-// ============================================================
-
-io.on("connection", (socket) => {
-
-    console.log(
-        "Client Connected :",
-        socket.id
-    );
-
-
-    // ========================================================
-    // SHIFT REJECTION DATA TO XNG MIRROR
-    // ========================================================
-
-    socket.on("shift_to_mirror", async () => {
-
-        try {
-
-            // ------------------------------------------------
-            // GET ALL REJECTION RECORDS
-            // ------------------------------------------------
-
-            const result = await dbConn.request().query(`
-
-                SELECT
-
-                    sr_no
-
-                FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
-
-                WHERE cell_qrcode LIKE '03%'
-
-                ORDER BY sr_no
-
-            `);
-
-
-            const rows = result.recordset;
-
-
-            // ------------------------------------------------
-            // NO RECORDS
-            // ------------------------------------------------
-
-            if (rows.length === 0) {
-
-                socket.emit("shift_completed", {
-
-                    success: true,
-
-                    total: 0
+                        }
+                    );
 
                 });
 
-                return;
-
-            }
+            });
 
 
-            let shiftedCount = 0;
+            // =========================================================
+            // STOP SERVICE
+            // =========================================================
+
+            stopButton.addEventListener("click", function (event) {
+
+                event.preventDefault();
+
+                const selectedValue = dropdown.value;
+
+                console.log("Selected Service:", selectedValue);
 
 
-            // =================================================
-            // PROCESS EACH RECORD
-            // =================================================
+                Swal.fire({
 
-            for (const row of rows) {
+                    title: "Enter Passcode!",
 
-                try {
+                    html:
+                        '<input id="password" ' +
+                        'type="password" ' +
+                        'class="swal2-input" ' +
+                        'placeholder="Enter Passcode">',
 
-                    // ------------------------------------------------
-                    // INSERT INTO XNG MIRROR
-                    // ------------------------------------------------
+                    showCancelButton: true,
 
-                    const insertResult =
-                        await dbConn.request().query(`
+                    confirmButtonText: "Stop",
 
-                            INSERT INTO taco_treceability.ocv_machine_data_xng_mirrior
+                    cancelButtonText: "Cancel"
 
-                            (
-
-                                cell_qrcode,
-                                voltage,
-                                ir,
-                                today_date,
-                                updated_time,
-                                machine_location,
-                                shift,
-                                used_on_line,
-                                kvalue,
-                                grade,
-                                cell_capacity,
-                                cell_class,
-                                cell_thikness,
-                                cell_nigative_voltage,
-                                laser_status
-
-                            )
-
-                            SELECT
-
-                                cell_qrcode,
-                                voltage,
-                                ir,
-                                today_date,
-                                updated_time,
-                                machine_location,
-                                shift,
-                                used_on_line,
-                                kvalue,
-                                grade,
-                                cell_capacity,
-                                cell_class,
-                                cell_thikness,
-                                cell_nigative_voltage,
-                                laser_status
-
-                            FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
-
-                            WHERE
-
-                                sr_no = ${row.sr_no}
-
-                                AND cell_qrcode LIKE '03%'
-
-                        `);
+                }).then((result) => {
 
 
-                    // ------------------------------------------------
-                    // IF INSERT SUCCESSFUL
-                    // ------------------------------------------------
-
-                    if (
-                        insertResult.rowsAffected[0] > 0
-                    ) {
-
-                        // ------------------------------------------------
-                        // DELETE INSERTED RECORD
-                        // ------------------------------------------------
-
-                        const deleteResult =
-                            await dbConn.request().query(`
-
-                                DELETE
-
-                                FROM taco_treceability.ocv_machine_data_xng_mirrior_rejection
-
-                                WHERE
-
-                                    sr_no = ${row.sr_no}
-
-                                    AND cell_qrcode LIKE '03%'
-
-                            `);
-
-
-                        // ------------------------------------------------
-                        // IF DELETE SUCCESSFUL
-                        // ------------------------------------------------
-
-                        if (
-                            deleteResult.rowsAffected[0] > 0
-                        ) {
-
-                            shiftedCount++;
-
-
-                            // ------------------------------------------------
-                            // SEND PROGRESS TO FRONTEND
-                            // ------------------------------------------------
-
-                            socket.emit(
-                                "shift_progress",
-                                {
-
-                                    shifted: shiftedCount,
-
-                                    total: rows.length
-
-                                }
-                            );
-
-
-                            console.log(
-                                `Shifted XNG Record SR NO : ${row.sr_no}`
-                            );
-
-                        }
-
+                    // User clicked Cancel
+                    if (!result.isConfirmed) {
+                        return;
                     }
 
-                } catch (err) {
+
+                    const password =
+                        document.getElementById("password").value;
+
+
+                    // =================================================
+                    // CHECK PASSWORD
+                    // =================================================
+
+                    if (password === "") {
+
+                        Swal.fire({
+                            title: "Password Required",
+                            text: "Please enter the passcode.",
+                            icon: "warning"
+                        });
+
+                        return;
+                    }
+
+
+                    if (password !== "service") {
+
+                        Swal.fire({
+                            title: "Invalid Passcode",
+                            text: "Please enter the correct passcode.",
+                            icon: "error"
+                        });
+
+                        return;
+                    }
+
+
+                    // =================================================
+                    // PM2 STOP COMMAND
+                    // =================================================
+
+                    const cmdname =
+                        `pm2 stop ${selectedValue}`;
+
 
                     console.log(
-                        `Error shifting XNG SR NO ${row.sr_no} :`,
-                        err.message
+                        "STOP COMMAND:",
+                        cmdname
                     );
 
-                }
 
-            }
+                    // =================================================
+                    // SEND COMMAND TO BACKEND
+                    // =================================================
 
+                    socket.emit(
+                        "executeBat",
+                        cmdname,
+                        function (response) {
 
-            // =================================================
-            // SHIFT COMPLETED
-            // =================================================
-
-            socket.emit(
-                "shift_completed",
-                {
-
-                    success: true,
-
-                    total: shiftedCount
-
-                }
-            );
+                            console.log(
+                                "Server Response:",
+                                response
+                            );
 
 
-        } catch (err) {
+                            if (response.success) {
 
-            console.log(
-                "XNG Shift Error :",
-                err
-            );
+                                Swal.fire({
+                                    title: "PM2 Service Stopped",
+                                    text:
+                                        `${selectedValue} has been stopped successfully.`,
+                                    icon: "success"
+                                });
 
+                            } else {
 
-            socket.emit(
-                "shift_completed",
-                {
+                                Swal.fire({
+                                    title: "Failed to Stop Service",
+                                    text:
+                                        response.error ||
+                                        "Unable to stop PM2 service.",
+                                    icon: "error"
+                                });
 
-                    success: false
+                            }
 
-                }
-            );
+                        }
+                    );
 
-        }
+                });
 
-    });
-
-
-    // ========================================================
-    // DISCONNECT
-    // ========================================================
-
-    socket.on("disconnect", () => {
-
-        console.log(
-            "Client Disconnected :",
-            socket.id
-        );
-
-    });
-
-});
+            });
 
 
-// ============================================================
-// START HTTPS SERVER
-// ============================================================
+            // =========================================================
+            // SOCKET CONNECTION STATUS
+            // =========================================================
 
-httpsServer.listen(
-    5511,
-    "0.0.0.0",
-    function () {
+            socket.on("connect", function () {
 
-        console.log(
-            "===================================="
-        );
+                console.log(
+                    "Connected to server. Socket ID:",
+                    socket.id
+                );
 
-        console.log(
-            "HTTPS Server Running"
-        );
+            });
 
-        console.log(
-            "https://0.0.0.0:5511"
-        );
 
-        console.log(
-            "===================================="
-        );
+            socket.on("disconnect", function () {
 
-    }
-);
+                console.log(
+                    "Disconnected from server."
+                );
+
+            });
+
+        });
+
+    </script>
+
+
+</body>
+
+</html>
+```
