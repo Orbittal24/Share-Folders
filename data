@@ -1,516 +1,1003 @@
-// ============================================================
-// IR SCREWING SERVICE RESTART
-// HTTPS + SOCKET.IO BACKEND
-// ============================================================
+```python
+import pyodbc
+import time
+import redis
+import json
+import re
 
 
-// ============================================================
-// IMPORT MODULES
-// ============================================================
+# -----------------------------------
+# REDIS CONFIG
+# -----------------------------------
 
-const express = require("express");
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 31
+redis_password = "Gotion@123Strong!"
 
-const https = require("https");
+r = redis.StrictRedis(
+    host=redis_host,
+    port=redis_port,
+    password=redis_password,
+    db=redis_db,
+    decode_responses=True
+)
 
-const fs = require("fs");
-
-const path = require("path");
-
-const { exec } = require("child_process");
-
-const socketio = require("socket.io");
-
-
-// ============================================================
-// EXPRESS APP
-// ============================================================
-
-const app = express();
+DUPLICATE_TTL_SECONDS = 3 * 24 * 60 * 60
 
 
-// ============================================================
-// PORT
-// ============================================================
+# -----------------------------------
+# RETRY CONFIG
+# -----------------------------------
 
-const PORT = 3998;
+MAX_RETRY = 3
+RETRY_KEY_PREFIX = "retry:"
 
 
-// ============================================================
-// SSL CERTIFICATE
-// ============================================================
+# -----------------------------------
+# SAFE STRING
+# -----------------------------------
 
-const sslOptions = {
+def safe(val):
+    return "" if val is None else str(val)
 
-    key: fs.readFileSync(
-        path.join(
-            __dirname,
-            "certs",
-            "server.key"
-        )
-    ),
 
-    cert: fs.readFileSync(
-        path.join(
-            __dirname,
-            "certs",
-            "server.pem"
-        )
+def extract_capacity(val):
+
+    if val is None:
+        return ""
+
+    val_str = str(val)
+
+    match = re.search(r"\d+(\.\d+)?", val_str)
+
+    if match:
+        return match.group(0)
+
+    return ""
+
+
+# -----------------------------------
+# DB CONFIG
+# -----------------------------------
+
+sqlConfig1 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "taco_treceability",
+    "user": "user_mis",
+    "password": "admin@123",
+}
+
+
+sqlConfig2 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "ocv_inventory_master",
+    "user": "user_mis",
+    "password": "admin@123",
+}
+
+
+# -----------------------------------
+# CONNECT DB
+# -----------------------------------
+
+def connect_db(config):
+
+    conn = pyodbc.connect(
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={config['server']};"
+        f"DATABASE={config['database']};"
+        f"UID={config['user']};"
+        f"PWD={config['password']};"
+        f"TrustServerCertificate=yes;"
     )
 
-};
+    conn.autocommit = False
+
+    return conn
 
 
-// ============================================================
-// CREATE HTTPS SERVER
-// ============================================================
+# -----------------------------------
+# DATE MAPS
+# -----------------------------------
 
-const httpsServer = https.createServer(
-    sslOptions,
-    app
-);
-
-
-// ============================================================
-// SOCKET.IO
-// SOCKET.IO WILL RUN ON HTTPS SERVER
-// ============================================================
-
-const io = socketio(
-    httpsServer,
-    {
-        cors: {
-
-            origin: "*",
-
-            methods: [
-                "GET",
-                "POST"
-            ]
-
-        }
-    }
-);
-
-
-// ============================================================
-// SERVE STATIC FILES
-// ============================================================
-
-app.use(
-    express.static(__dirname)
-);
+yearMap = {
+    "B": 21,
+    "C": 22,
+    "D": 23,
+    "E": 24,
+    "F": 25,
+    "G": 26,
+    "H": 27,
+    "J": 28,
+    "K": 29,
+    "L": 30,
+    "M": 31,
+    "N": 32,
+    "P": 33,
+    "R": 34,
+    "S": 35,
+    "T": 36,
+    "V": 37,
+    "W": 38,
+    "X": 39,
+    "Y": 40,
+    "1": 41,
+    "2": 42,
+    "3": 43,
+    "4": 44,
+    "5": 45,
+    "6": 46,
+    "7": 47,
+    "8": 48,
+    "9": 49,
+    "A": 50,
+}
 
 
-// ============================================================
-// OCV PAGE
-// ============================================================
+monthMap = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "A": 10,
+    "B": 11,
+    "C": 12
+}
 
-app.get(
-    "/ocv",
-    function (req, res) {
 
-        res.sendFile(
-            path.join(
-                __dirname,
-                "ocv.html"
+dayMap = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "A": 10,
+    "B": 11,
+    "C": 12,
+    "D": 13,
+    "E": 14,
+    "F": 15,
+    "G": 16,
+    "H": 17,
+    "J": 18,
+    "K": 19,
+    "L": 20,
+    "M": 21,
+    "N": 22,
+    "P": 23,
+    "R": 24,
+    "S": 25,
+    "T": 26,
+    "V": 27,
+    "W": 28,
+    "X": 29,
+    "Y": 30,
+    "0": 31
+}
+
+
+# -----------------------------------
+# ENSURE TABLE
+# -----------------------------------
+
+def ensure_table(dst_cursor, tableName):
+
+    dst_cursor.execute(f"""
+    IF NOT EXISTS (
+        SELECT 1
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME = '{tableName}'
+    )
+    BEGIN
+
+        CREATE TABLE {tableName} (
+            sr_no INT IDENTITY(1,1) PRIMARY KEY,
+            cellqr NVARCHAR(50),
+            voltage NVARCHAR(50),
+            ir NVARCHAR(50),
+            class_grade NVARCHAR(30),
+            capacity NVARCHAR(50),
+            thickness NVARCHAR(50),
+            k_value NVARCHAR(50),
+            negative_voltage NVARCHAR(50),
+            cell_status NVARCHAR(20),
+            ocv_mc_no NVARCHAR(40),
+            first_para_time DATETIME,
+            last_para_time DATETIME,
+            laser_status VARCHAR(50),
+            batch VARCHAR(100),
+            plant_code VARCHAR(50)
+        )
+
+    END
+    """)
+
+
+# -----------------------------------
+# MOVE TO REJECTION
+# -----------------------------------
+
+def move_to_rejection(src_conn, row):
+
+    cursor = src_conn.cursor()
+
+    try:
+
+        print(
+            "INSERTING INTO REJECTION :",
+            row.cell_qrcode
+        )
+
+        cursor.execute("""
+        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
+        (
+            cell_qrcode,
+            voltage,
+            ir,
+            today_date,
+            updated_time,
+            machine_location,
+            shift,
+            used_on_line,
+            kvalue,
+            grade,
+            cell_capacity,
+            cell_class
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            row.cell_qrcode,
+            row.voltage,
+            row.ir,
+            row.today_date,
+            row.updated_time,
+            row.machine_location,
+            row.shift,
+            row.used_on_line,
+            row.kvalue,
+            row.grade,
+            row.cell_capacity,
+            row.cell_class
+        ))
+
+        # -----------------------------------
+        # ACKNOWLEDGEMENT
+        # -----------------------------------
+        # Commit means rejection insertion
+        # was successfully acknowledged.
+        # Only after this returns successfully
+        # will the mirror record be deleted.
+
+        src_conn.commit()
+
+        print(
+            "REJECTION ACKNOWLEDGED :",
+            row.cell_qrcode
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "REJECTION INSERT FAILED :",
+            e
+        )
+
+        try:
+            src_conn.rollback()
+        except Exception as rollback_error:
+            print(
+                "REJECTION ROLLBACK FAILED :",
+                rollback_error
             )
-        );
 
-    }
-);
+        return False
 
 
-// ============================================================
-// ROOT PAGE
-// REDIRECT TO OCV
-// ============================================================
+# -----------------------------------
+# HANDLE FAILURE
+# -----------------------------------
 
-app.get(
-    "/",
-    function (req, res) {
+def handle_failure(src_conn, row):
 
-        res.redirect("/ocv");
+    qr = safe(row.cell_qrcode)
 
-    }
-);
+    print(
+        "FAILURE HANDLER STARTED :",
+        qr
+    )
 
+    # -----------------------------------
+    # INSERT INTO REJECTION
+    # -----------------------------------
 
-// ============================================================
-// SOCKET.IO CONNECTION
-// ============================================================
+    rejection_success = move_to_rejection(
+        src_conn,
+        row
+    )
 
-io.on(
-    "connection",
-    function (socket) {
+    # -----------------------------------
+    # ONLY DELETE AFTER ACKNOWLEDGEMENT
+    # -----------------------------------
 
+    if rejection_success:
 
-        console.log(
-            "========================================"
-        );
+        try:
 
-        console.log(
-            "HTTPS CLIENT CONNECTED"
-        );
+            cursor = src_conn.cursor()
 
-        console.log(
-            "Socket ID:",
-            socket.id
-        );
+            cursor.execute("""
+            DELETE FROM taco_treceability.ocv_machine_data_mirror
+            WHERE cell_qrcode=?
+            """, qr)
 
-        console.log(
-            "========================================"
-        );
+            src_conn.commit()
 
+            print(
+                "SOURCE DELETED AFTER REJECTION ACK :",
+                qr
+            )
 
-        // ====================================================
-        // EXECUTE COMMAND
-        // ====================================================
+            return True
 
-        socket.on(
-            "executeBat",
-            function (command, callback) {
+        except Exception as delete_error:
 
+            print(
+                "DELETE AFTER REJECTION FAILED :",
+                delete_error
+            )
 
-                console.log(
-                    "========================================"
-                );
+            try:
+                src_conn.rollback()
+            except Exception as rollback_error:
+                print(
+                    "DELETE ROLLBACK FAILED :",
+                    rollback_error
+                )
 
-                console.log(
-                    "COMMAND RECEIVED"
-                );
+            return False
 
-                console.log(
-                    "========================================"
-                );
+    else:
 
-                console.log(
-                    command
-                );
+        print(
+            "REJECTION NOT ACKNOWLEDGED - SOURCE KEPT :",
+            qr
+        )
 
-                console.log(
-                    "========================================"
-                );
+        return False
 
 
-                // =================================================
-                // VALIDATE COMMAND
-                // =================================================
+# -----------------------------------
+# PROCESS RECORD
+# -----------------------------------
 
-                if (
-                    typeof command !== "string" ||
-                    command.trim() === ""
-                ) {
+def process_record(src_conn, dst_conn):
 
-                    console.error(
-                        "Invalid command received."
-                    );
+    src_cursor = src_conn.cursor()
+    dst_cursor = dst_conn.cursor()
 
+    row = None
 
-                    if (callback) {
+    # -----------------------------------
+    # STATUS FLAGS
+    # -----------------------------------
 
-                        callback({
+    sql_success = False
+    redis_success = False
 
-                            success: false,
+    try:
 
-                            error:
-                                "Invalid command."
+        # -----------------------------------
+        # GET SOURCE RECORD
+        # -----------------------------------
 
-                        });
+        src_cursor.execute("""
+        SELECT TOP 1 *
+        FROM taco_treceability.ocv_machine_data_mirror
+        WHERE machine_location='line5_line6'
+        ORDER BY sr_no ASC
+        """)
 
-                    }
+        row = src_cursor.fetchone()
 
-                    return;
+        if not row:
 
-                }
+            print("No records...")
 
+            return
 
-                // =================================================
-                // EXECUTE COMMAND
-                // =================================================
+        qr = safe(row.cell_qrcode)
 
-                exec(
-                    command,
-                    function (
-                        error,
-                        stdout,
-                        stderr
-                    ) {
+        print("\n========= NEW RECORD =========")
+        print("QR :", qr)
 
 
-                        // =========================================
-                        // COMMAND FAILED
-                        // =========================================
+        # -----------------------------------
+        # QR VALIDATION
+        # -----------------------------------
 
-                        if (error) {
+        if len(qr) < 16:
 
+            raise Exception("QR too short")
 
-                            console.error(
-                                "========================================"
-                            );
 
-                            console.error(
-                                "COMMAND EXECUTION FAILED"
-                            );
+        # -----------------------------------
+        # DATE CODE
+        # -----------------------------------
 
-                            console.error(
-                                "========================================"
-                            );
+        code12_13 = qr[12:14]
 
+        dateCode = (
+            qr[8:11]
+            if code12_13 == "BV"
+            else qr[14:17]
+        )
 
-                            console.error(
-                                "Error:"
-                            );
 
-                            console.error(
-                                error.message
-                            );
+        # -----------------------------------
+        # DATE MAPPING
+        # -----------------------------------
 
+        yearValue = yearMap.get(dateCode[0])
 
-                            console.error(
-                                "STDERR:"
-                            );
+        monthValue = monthMap.get(dateCode[1])
 
-                            console.error(
-                                stderr
-                            );
+        dayValue = dayMap.get(dateCode[2])
 
 
-                            console.error(
-                                "STDOUT:"
-                            );
+        if not yearValue or not monthValue or not dayValue:
 
-                            console.error(
-                                stdout
-                            );
+            raise Exception(
+                "Date mapping failed"
+            )
 
 
-                            // -------------------------------------
-                            // SEND ERROR TO CLIENT
-                            // -------------------------------------
+        year = 2000 + yearValue
 
-                            if (callback) {
+        month = f"{monthValue:02d}"
 
-                                callback({
+        day = f"{dayValue:02d}"
 
-                                    success: false,
 
-                                    error:
-                                        stderr ||
-                                        error.message,
+        tableName = (
+            f"ocvcell_inventory_data_{year}_{month}_{day}"
+        )
 
-                                    stdout:
-                                        stdout || "",
 
-                                    stderr:
-                                        stderr || ""
+        print(
+            "TABLE :",
+            tableName
+        )
 
-                                });
 
-                            }
+        # -----------------------------------
+        # ENSURE TABLE
+        # -----------------------------------
 
+        ensure_table(
+            dst_cursor,
+            tableName
+        )
 
-                            return;
 
-                        }
+        capacity_val = extract_capacity(
+            row.cell_capacity
+        )
 
 
-                        // =========================================
-                        // COMMAND SUCCESS
-                        // =========================================
+        # =================================================
+        # SQL PROCESS
+        # =================================================
 
-                        console.log(
-                            "========================================"
-                        );
+        try:
 
-                        console.log(
-                            "COMMAND EXECUTED SUCCESSFULLY"
-                        );
+            dst_cursor.execute(
+                f"""
+                SELECT cellqr
+                FROM {tableName}
+                WHERE cellqr=?
+                """,
+                qr
+            )
+
+            exists = dst_cursor.fetchone()
+
+
+            # -----------------------------------
+            # UPDATE EXISTING SQL RECORD
+            # -----------------------------------
+
+            if exists:
+
+                dst_cursor.execute(
+                    f"""
+                    UPDATE {tableName}
+                    SET
+                        voltage=?,
+                        ir=?,
+                        class_grade=?,
+                        capacity=?,
+                        k_value=?,
+                        ocv_mc_no=?,
+                        first_para_time=?,
+                        last_para_time=?,
+                        batch=?,
+                        plant_code=?
+                    WHERE cellqr=?
+                    """,
+                    (
+                        safe(row.voltage),
+                        safe(row.ir),
+                        safe(row.cell_class),
+                        capacity_val,
+                        safe(row.kvalue),
+                        safe(row.machine_location),
+                        row.today_date,
+                        row.today_date,
+                        dateCode,
+                        code12_13,
+                        qr
+                    )
+                )
+
+                print(
+                    "UPDATED :",
+                    qr
+                )
 
-                        console.log(
-                            "========================================"
-                        );
 
+            # -----------------------------------
+            # INSERT NEW SQL RECORD
+            # -----------------------------------
 
-                        console.log(
-                            "STDOUT:"
-                        );
-
-                        console.log(
-                            stdout
-                        );
-
-
-                        if (stderr) {
-
-                            console.log(
-                                "STDERR:"
-                            );
-
-                            console.log(
-                                stderr
-                            );
-
-                        }
-
-
-                        // -------------------------------------
-                        // SEND SUCCESS TO CLIENT
-                        // -------------------------------------
-
-                        if (callback) {
-
-                            callback({
-
-                                success: true,
-
-                                stdout:
-                                    stdout || "",
-
-                                stderr:
-                                    stderr || ""
-
-                            });
-
-                        }
-
-                    }
-                );
-
+            else:
+
+                dst_cursor.execute(
+                    f"""
+                    INSERT INTO {tableName}
+                    (
+                        cellqr,
+                        voltage,
+                        ir,
+                        class_grade,
+                        capacity,
+                        thickness,
+                        k_value,
+                        negative_voltage,
+                        cell_status,
+                        ocv_mc_no,
+                        first_para_time,
+                        last_para_time,
+                        laser_status,
+                        batch,
+                        plant_code
+                    )
+                    VALUES
+                    (
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        NULL,
+                        ?,
+                        NULL,
+                        'OK',
+                        ?,
+                        ?,
+                        ?,
+                        NULL,
+                        ?,
+                        ?
+                    )
+                    """,
+                    (
+                        qr,
+                        safe(row.voltage),
+                        safe(row.ir),
+                        safe(row.cell_class),
+                        capacity_val,
+                        safe(row.kvalue),
+                        safe(row.machine_location),
+                        row.today_date,
+                        row.today_date,
+                        dateCode,
+                        code12_13
+                    )
+                )
+
+                print(
+                    "INSERTED :",
+                    qr
+                )
+
+
+            # -----------------------------------
+            # SQL COMMIT
+            # -----------------------------------
+
+            dst_conn.commit()
+
+            sql_success = True
+
+            print(
+                "SQL SUCCESS :",
+                qr
+            )
+
+
+        except Exception as sql_error:
+
+            # -----------------------------------
+            # SQL FAILED
+            # -----------------------------------
+
+            print(
+                "SQL FAILED :",
+                sql_error
+            )
+
+            try:
+
+                dst_conn.rollback()
+
+            except Exception as rollback_error:
+
+                print(
+                    "SQL ROLLBACK FAILED :",
+                    rollback_error
+                )
+
+            # IMPORTANT:
+            #
+            # DO NOT RETURN HERE.
+            #
+            # Redis MUST be attempted even
+            # when SQL has failed.
+
+            sql_success = False
+
+
+        # =================================================
+        # REDIS PROCESS
+        # =================================================
+
+        try:
+
+            redis_payload = {
+                "cellqr": qr,
+                "voltage": safe(row.voltage),
+                "ir": safe(row.ir),
+                "class_grade": safe(row.cell_class),
+                "capacity": capacity_val,
+                "k_value": safe(row.kvalue),
+                "ocv_mc_no": safe(row.machine_location),
+                "first_para_time": str(row.today_date),
+                "last_para_time": str(row.today_date),
+                "batch": dateCode,
+                "plant_code": code12_13
             }
-        );
 
 
-        // ====================================================
-        // CLIENT DISCONNECTED
-        // ====================================================
+            # -----------------------------------
+            # REDIS INSERT
+            # -----------------------------------
 
-        socket.on(
-            "disconnect",
-            function () {
-
-
-                console.log(
-                    "========================================"
-                );
-
-                console.log(
-                    "HTTPS CLIENT DISCONNECTED"
-                );
-
-                console.log(
-                    "Socket ID:",
-                    socket.id
-                );
-
-                console.log(
-                    "========================================"
-                );
-
-            }
-        );
-
-    }
-);
+            r.setex(
+                f"cell:{qr}",
+                DUPLICATE_TTL_SECONDS,
+                json.dumps(redis_payload)
+            )
 
 
-// ============================================================
-// HTTPS SERVER ERROR
-// ============================================================
+            redis_success = True
 
-httpsServer.on(
-    "error",
-    function (error) {
-
-
-        console.error(
-            "========================================"
-        );
-
-        console.error(
-            "HTTPS SERVER ERROR"
-        );
-
-        console.error(
-            "========================================"
-        );
+            print(
+                "REDIS SUCCESS :",
+                redis_payload
+            )
 
 
-        console.error(
-            error
-        );
+        except Exception as redis_error:
+
+            # -----------------------------------
+            # REDIS FAILED
+            # -----------------------------------
+
+            print(
+                "REDIS FAILED :",
+                redis_error
+            )
+
+            redis_success = False
 
 
-        // ---------------------------------------------
-        // PORT ALREADY IN USE
-        // ---------------------------------------------
+        # =================================================
+        # FINAL RESULT
+        # =================================================
 
-        if (
-            error.code === "EADDRINUSE"
-        ) {
+        # -----------------------------------
+        # CASE 1
+        # SQL SUCCESS + REDIS SUCCESS
+        # -----------------------------------
 
-            console.error(
-                `Port ${PORT} is already in use.`
-            );
+        if sql_success and redis_success:
 
-            console.error(
-                "Stop the existing Node.js process and try again."
-            );
+            print(
+                "SQL + REDIS SUCCESS :",
+                qr
+            )
 
-        }
+            try:
 
-    }
-);
+                src_cursor.execute("""
+                DELETE FROM taco_treceability.ocv_machine_data_mirror
+                WHERE cell_qrcode=?
+                """, qr)
+
+                src_conn.commit()
+
+                print(
+                    "SOURCE DELETED :",
+                    qr
+                )
+
+            except Exception as delete_error:
+
+                print(
+                    "DELETE FAILED :",
+                    delete_error
+                )
+
+                try:
+                    src_conn.rollback()
+                except Exception as rollback_error:
+                    print(
+                        "DELETE ROLLBACK FAILED :",
+                        rollback_error
+                    )
+
+            return
 
 
-// ============================================================
-// START HTTPS SERVER
-// ============================================================
+        # -----------------------------------
+        # CASE 2
+        # SQL FAILED + REDIS SUCCESS
+        # -----------------------------------
 
-httpsServer.listen(
-    PORT,
-    "0.0.0.0",
-    function () {
+        if not sql_success and redis_success:
+
+            print(
+                "SQL FAILED + REDIS SUCCESS :",
+                qr
+            )
+
+            print(
+                "INSERTING FAILED SQL DATA INTO REJECTION :",
+                qr
+            )
+
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
+
+            if rejection_result:
+
+                print(
+                    "SQL FAILED DATA MOVED TO REJECTION :",
+                    qr
+                )
+
+            else:
+
+                print(
+                    "SQL FAILED DATA KEPT IN MIRROR :",
+                    qr
+                )
+
+            return
 
 
-        console.log(
-            "========================================"
-        );
+        # -----------------------------------
+        # CASE 3
+        # SQL SUCCESS + REDIS FAILED
+        # -----------------------------------
 
-        console.log(
-            "IR SCREWING SERVICE RESTART SERVER"
-        );
+        if sql_success and not redis_success:
 
-        console.log(
-            "========================================"
-        );
+            print(
+                "SQL SUCCESS + REDIS FAILED :",
+                qr
+            )
 
-        console.log(
-            "HTTPS SERVER STARTED"
-        );
+            print(
+                "INSERTING REDIS FAILED DATA INTO REJECTION :",
+                qr
+            )
 
-        console.log(
-            `Port: ${PORT}`
-        );
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
 
-        console.log(
-            `Local URL: https://localhost:${PORT}/ocv`
-        );
+            if rejection_result:
 
-        console.log(
-            `Network URL: https://<SERVER-IP>:${PORT}/ocv`
-        );
+                print(
+                    "REDIS FAILED DATA MOVED TO REJECTION :",
+                    qr
+                )
 
-        console.log(
-            "========================================"
-        );
+            else:
 
-        console.log(
-            "Socket.IO running over HTTPS"
-        );
+                print(
+                    "REDIS FAILED DATA KEPT IN MIRROR :",
+                    qr
+                )
 
-        console.log(
-            "========================================"
-        );
+            return
 
-    }
-);
+
+        # -----------------------------------
+        # CASE 4
+        # SQL FAILED + REDIS FAILED
+        # -----------------------------------
+
+        if not sql_success and not redis_success:
+
+            print(
+                "SQL FAILED + REDIS FAILED :",
+                qr
+            )
+
+            print(
+                "BOTH FAILED - INSERTING INTO REJECTION :",
+                qr
+            )
+
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
+
+            if rejection_result:
+
+                print(
+                    "BOTH FAILED - DATA MOVED TO REJECTION :",
+                    qr
+                )
+
+            else:
+
+                print(
+                    "BOTH FAILED - SOURCE KEPT IN MIRROR :",
+                    qr
+                )
+
+            return
+
+
+    # =================================================
+    # OUTER PROCESS ERROR
+    # =================================================
+
+    except Exception as e:
+
+        print(
+            "PROCESS ERROR :",
+            e
+        )
+
+        # -----------------------------------
+        # IMPORTANT
+        # -----------------------------------
+        #
+        # If an unexpected error occurs after
+        # obtaining the source row, attempt to
+        # move it to rejection.
+        #
+        # Mirror is deleted ONLY if rejection
+        # insertion + acknowledgement succeeds.
+
+        if row:
+
+            try:
+
+                handle_failure(
+                    src_conn,
+                    row
+                )
+
+            except Exception as failure_error:
+
+                print(
+                    "FAILURE HANDLER ERROR :",
+                    failure_error
+                )
+
+        return
+
+
+# -----------------------------------
+# MAIN LOOP
+# -----------------------------------
+
+def start():
+
+    src_conn = connect_db(
+        sqlConfig1
+    )
+
+    dst_conn = connect_db(
+        sqlConfig2
+    )
+
+    print(
+        "SYSTEM STARTED"
+    )
+
+
+    while True:
+
+        try:
+
+            process_record(
+                src_conn,
+                dst_conn
+            )
+
+
+        except Exception as main_error:
+
+            print(
+                "MAIN LOOP ERROR :",
+                main_error
+            )
+
+            # -----------------------------------
+            # RECONNECT DATABASES
+            # -----------------------------------
+
+            try:
+
+                src_conn = connect_db(
+                    sqlConfig1
+                )
+
+                dst_conn = connect_db(
+                    sqlConfig2
+                )
+
+                print(
+                    "DB RECONNECTED"
+                )
+
+            except Exception as reconnect_error:
+
+                print(
+                    "RECONNECT FAILED :",
+                    reconnect_error
+                )
+
+
+        time.sleep(0.1)
+
+
+# -----------------------------------
+# START
+# -----------------------------------
+
+start()
+```
