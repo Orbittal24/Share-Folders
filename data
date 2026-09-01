@@ -51,11 +51,11 @@
 
         .page-title {
 
-            width: calc(100% - 56px);
+            width: calc(100% - 12px);
 
-            margin: 25px 28px 18px 28px;
+            margin: 12px 6px 10px 6px;
 
-            height: 35px;
+            height: 25px;
 
             display: flex;
 
@@ -70,7 +70,7 @@
 
             padding: 0;
 
-            font-size: 18px;
+            font-size: 13px;
 
             font-weight: 500;
 
@@ -80,45 +80,43 @@
 
 
         /* ====================================================
-           MAIN CONTROL ROW
+           SERVICE CONTROL ROW
 
-           12 COLUMN GRID
+           LABEL       = ONLY REQUIRED SPACE
+           DROPDOWN    = LARGE / REMAINING SPACE
+           START       = LARGE
+           STOP        = LARGE
 
-           LABEL    = 4
-           DROPDOWN = 4
-           START    = 2
-           STOP     = 2
-
-           TOTAL    = 12
+           EVERYTHING STAYS IN ONE ROW
            ==================================================== */
 
         .service-control {
 
-            width: calc(100% - 56px);
+            width: calc(100% - 12px);
 
-            margin: 0 28px;
+            margin: 0 6px;
 
-            padding: 12px 10px;
+            padding: 7px 6px;
 
-            min-height: 62px;
+            min-height: 42px;
 
             display: grid;
 
             grid-template-columns:
-                4fr
-                4fr
-                2fr
-                2fr;
+                auto
+                minmax(0, 1fr)
+                17%
+                17%;
 
-            column-gap: 10px;
+            column-gap: 6px;
 
             align-items: center;
 
             background: #f8f9fa;
 
-            border: 1px solid #e1e4e8;
+            border: 1px solid #d9dde2;
 
-            border-radius: 3px;
+            border-radius: 2px;
 
         }
 
@@ -126,55 +124,76 @@
         /* ====================================================
            LABEL
            
-           4 COLUMNS
+           NO FIXED 4-COLUMN WIDTH
+           
+           This removes the empty space.
            ==================================================== */
 
         .service-label {
 
-            width: 100%;
+            width: auto;
 
             margin: 0;
 
-            padding: 0 10px;
+            padding: 0 5px;
 
             display: flex;
 
             align-items: center;
 
-            font-size: 13px;
+            justify-content: flex-start;
+
+            font-size: 9px;
 
             font-weight: 500;
 
             color: #333333;
 
+            white-space: nowrap;
+
         }
 
 
         /* ====================================================
-           DROPDOWN
+           DROPDOWN CONTAINER
+           ==================================================== */
+
+        .dropdown-container {
+
+            width: 100%;
+
+            min-width: 0;
+
+        }
+
+
+        /* ====================================================
+           SERVICE DROPDOWN
            
-           4 COLUMNS
+           TAKES ALL EMPTY SPACE
            ==================================================== */
 
         #dropdown {
 
+            display: block;
+
             width: 100%;
 
-            height: 40px;
+            height: 32px;
 
             margin: 0;
 
-            padding: 5px 10px;
+            padding: 4px 8px;
 
-            border: 1px solid #bfc5cc;
+            border: 1px solid #8fbfff;
 
-            border-radius: 4px;
+            border-radius: 3px;
 
             background-color: #ffffff;
 
             color: #555555;
 
-            font-size: 12px;
+            font-size: 10px;
 
             font-weight: 400;
 
@@ -185,15 +204,22 @@
         }
 
 
+        #dropdown:hover {
+
+            border-color: #5da2ff;
+
+        }
+
+
         #dropdown:focus {
 
-            border-color: #80bdff;
+            border-color: #5da2ff;
 
             outline: none;
 
             box-shadow:
-                0 0 0 2px
-                rgba(0, 123, 255, 0.12);
+                0 0 0 1px
+                rgba(0, 123, 255, 0.15);
 
         }
 
@@ -204,9 +230,22 @@
 
         #dropdown option {
 
-            font-size: 12px;
+            font-size: 10px;
 
-            padding: 5px;
+            padding: 4px;
+
+        }
+
+
+        /* ====================================================
+           BUTTON CONTAINER
+           ==================================================== */
+
+        .button-container {
+
+            width: 100%;
+
+            min-width: 0;
 
         }
 
@@ -214,20 +253,11 @@
         /* ====================================================
            BUTTONS
            
-           START = 2 COLUMNS
-           STOP  = 2 COLUMNS
+           BIG BUTTONS
            ==================================================== */
 
         #startButton,
         #stopButton {
-
-            width: 100%;
-
-            height: 40px;
-
-            margin: 0;
-
-            padding: 0 15px;
 
             display: flex;
 
@@ -235,13 +265,23 @@
 
             justify-content: center;
 
+            width: 100%;
+
+            height: 32px;
+
+            margin: 0;
+
+            padding: 0 10px;
+
             border: none;
 
-            border-radius: 4px;
+            border-radius: 3px;
 
-            font-size: 14px;
+            font-size: 11px;
 
             font-weight: 600;
+
+            line-height: 1;
 
             cursor: pointer;
 
@@ -255,7 +295,7 @@
 
 
         /* ====================================================
-           START
+           START BUTTON
            ==================================================== */
 
         #startButton {
@@ -284,7 +324,7 @@
 
 
         /* ====================================================
-           STOP
+           STOP BUTTON
            ==================================================== */
 
         #stopButton {
@@ -313,34 +353,27 @@
 
 
         /* ====================================================
-           KEEP ONE ROW ON NORMAL DESKTOP
+           DESKTOP LARGE SCREEN
            ==================================================== */
 
-        @media (max-width: 700px) {
+        @media (min-width: 1200px) {
 
             .service-control {
 
-                column-gap: 5px;
-
-                padding: 8px;
-
-            }
-
-
-            .service-label {
-
-                padding: 0 4px;
-
-                font-size: 10px;
+                grid-template-columns:
+                    auto
+                    minmax(0, 1fr)
+                    16%
+                    16%;
 
             }
 
 
             #dropdown {
 
-                font-size: 10px;
+                height: 34px;
 
-                height: 36px;
+                font-size: 10px;
 
             }
 
@@ -348,11 +381,62 @@
             #startButton,
             #stopButton {
 
-                height: 36px;
+                height: 34px;
 
                 font-size: 11px;
 
-                padding: 0 5px;
+            }
+
+        }
+
+
+        /* ====================================================
+           SMALL SCREEN
+           
+           STILL ONE ROW
+           ==================================================== */
+
+        @media (max-width: 700px) {
+
+            .service-control {
+
+                grid-template-columns:
+                    auto
+                    minmax(0, 1fr)
+                    75px
+                    75px;
+
+                column-gap: 4px;
+
+                padding: 5px;
+
+            }
+
+
+            .service-label {
+
+                font-size: 8px;
+
+                padding: 0 3px;
+
+            }
+
+
+            #dropdown {
+
+                height: 30px;
+
+                font-size: 9px;
+
+            }
+
+
+            #startButton,
+            #stopButton {
+
+                height: 30px;
+
+                font-size: 10px;
 
             }
 
@@ -362,7 +446,7 @@
 
 
     <!-- =====================================================
-         SWEET ALERT
+         SWEETALERT
          ===================================================== -->
 
     <script src="./style/sweetalert.js"></script>
@@ -388,19 +472,23 @@
 
 
     <!-- =====================================================
-         12 COLUMN SERVICE ROW
+         SERVICE CONTROL
 
-         4 = LABEL
-         4 = DROPDOWN
-         2 = START
-         2 = STOP
+         LABEL
+         ↓
+         DROPDOWN TAKES REMAINING SPACE
+         ↓
+         START
+         ↓
+         STOP
+
+         ALL IN ONE ROW
          ===================================================== -->
 
     <div class="service-control">
 
 
         <!-- =================================================
-             COLUMN 1-4
              LABEL
              ================================================= -->
 
@@ -413,11 +501,10 @@
 
 
         <!-- =================================================
-             COLUMN 5-8
-             DROPDOWN
+             LARGE DROPDOWN
              ================================================= -->
 
-        <div>
+        <div class="dropdown-container">
 
             <select id="dropdown">
 
@@ -460,7 +547,6 @@
                     ocv_cell_data_mirror_ocv_universal_bajaj_2w
                 </option>
 
-
             </select>
 
         </div>
@@ -468,11 +554,10 @@
 
 
         <!-- =================================================
-             COLUMN 9-10
-             START BUTTON
+             START
              ================================================= -->
 
-        <div>
+        <div class="button-container">
 
             <button
                 id="startButton"
@@ -487,11 +572,10 @@
 
 
         <!-- =================================================
-             COLUMN 11-12
-             STOP BUTTON
+             STOP
              ================================================= -->
 
-        <div>
+        <div class="button-container">
 
             <button
                 id="stopButton"
@@ -570,7 +654,7 @@
 
 
                         // -----------------------------------------
-                        // CHECK SERVICE
+                        // SERVICE NOT SELECTED
                         // -----------------------------------------
 
                         if (selectedValue === "") {
@@ -793,7 +877,7 @@
 
 
                         // -----------------------------------------
-                        // CHECK SERVICE
+                        // SERVICE NOT SELECTED
                         // -----------------------------------------
 
                         if (selectedValue === "") {
