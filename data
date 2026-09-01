@@ -1,4 +1,3 @@
-ss
 ```python
 import pyodbc
 import time
