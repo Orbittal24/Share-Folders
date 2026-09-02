@@ -1,9 +1,6 @@
-Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue
+Get-Process python
 
-Then immediately:
+Then:
 
-netstat -ano | findstr ":1101 "
-
-And:
-
-Test-NetConnection 127.0.0.1 -Port 1101
+Get-NetTCPConnection -OwningProcess <PYTHON_PID> -ErrorAction SilentlyContinue |
+Where-Object {$_.LocalPort -eq 1101}
