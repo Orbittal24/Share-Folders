@@ -1,11 +1,448 @@
-# SERVER
-API_HOST=0.0.0.0
-API_PORT=3000
-TCP_HOST=10.9.4.28
-TCP_PORT=1826
+const net = require("net");
+const { SerialPort } = require("serialport");
+const XLSX = require("xlsx");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 
-# DATABASE
-DB_USER=user_mis
-DB_PASSWORD=admin
-DB_DATABASE=taco_treceability_master
-DB_SERVER=localhost
+// ============================================================
+// TCP CONFIGURATION
+// ============================================================
+const SERVER_IP = process.env.SERVER_IP || "10.9.4.28";
+const SERVER_PORT = Number(process.env.SERVER_PORT || 1826);
+
+// ============================================================
+// SERIAL RELAY CONFIGURATION
+// ============================================================
+const SERIAL_PORT = process.env.SERIAL_PORT || "COM4";
+const BAUD_RATE = Number(process.env.BAUD_RATE || 9600);
+
+const DATA_BITS = 8;
+const STOP_BITS = 1;
+const PARITY = "none";
+
+// ============================================================
+// EXCEL CONFIGURATION
+// ============================================================
+// The client reads:
+// C:\Users\<USERNAME>\Desktop\buzzer_line.xlsx
+//
+// Excel format:
+// Sheet1
+// A1 = line number
+// No header.
+// ============================================================
+const EXCEL_FILE_NAME = process.env.EXCEL_FILE_NAME || "buzzer_line.xlsx";
+const EXCEL_FILE_PATH = path.join(os.homedir(), "Desktop", EXCEL_FILE_NAME);
+const SHEET_NAME = "Sheet1";
+const LINE_CELL = "A1";
+
+// ============================================================
+// BUZZER
+// ============================================================
+const BUZZER_DURATION = 10000;
+
+// ============================================================
+// RECONNECT
+// ============================================================
+const TCP_RECONNECT_DELAY = 3000;
+const SERIAL_RECONNECT_DELAY = 3000;
+
+let serialPort = null;
+let isSerialConnecting = false;
+let isBuzzerRunning = false;
+let buzzerTimer = null;
+
+let tcpClient = null;
+let tcpReconnectTimer = null;
+let receivedBuffer = "";
+
+// ============================================================
+// EXCEL
+// ============================================================
+function readLocalExcelLine() {
+  if (!fs.existsSync(EXCEL_FILE_PATH)) {
+    throw new Error(`Excel file not found: ${EXCEL_FILE_PATH}`);
+  }
+
+  const workbook = XLSX.readFile(EXCEL_FILE_PATH);
+
+  if (!workbook.SheetNames.includes(SHEET_NAME)) {
+    throw new Error(`Excel sheet "${SHEET_NAME}" not found`);
+  }
+
+  const worksheet = workbook.Sheets[SHEET_NAME];
+  const cell = worksheet[LINE_CELL];
+
+  if (!cell || cell.v === undefined || cell.v === null ||
+      String(cell.v).trim() === "") {
+    throw new Error(`Excel cell ${LINE_CELL} is empty`);
+  }
+
+  return String(cell.v).trim();
+}
+
+// ============================================================
+// SERIAL
+// ============================================================
+async function connectSerialRelay() {
+  if (serialPort && serialPort.isOpen) {
+    return true;
+  }
+
+  if (isSerialConnecting) {
+    return false;
+  }
+
+  isSerialConnecting = true;
+
+  console.log(`[SERIAL] Connecting to ${SERIAL_PORT}...`);
+
+  return new Promise((resolve) => {
+    serialPort = new SerialPort({
+      path: SERIAL_PORT,
+      baudRate: BAUD_RATE,
+      dataBits: DATA_BITS,
+      stopBits: STOP_BITS,
+      parity: PARITY,
+      autoOpen: false
+    });
+
+    serialPort.on("data", (data) => {
+      console.log(`[SERIAL RESPONSE] ${data.toString("hex").toUpperCase()}`);
+    });
+
+    serialPort.on("error", (error) => {
+      console.error(`[SERIAL ERROR] ${error.message}`);
+    });
+
+    serialPort.on("close", () => {
+      console.log("[SERIAL] Relay COM port closed");
+      isSerialConnecting = false;
+    });
+
+    serialPort.open((error) => {
+      isSerialConnecting = false;
+
+      if (error) {
+        console.error(`[SERIAL ERROR] ${error.message}`);
+        resolve(false);
+        return;
+      }
+
+      console.log(`[SERIAL] Connected successfully to ${SERIAL_PORT}`);
+      resolve(true);
+    });
+  });
+}
+
+async function ensureSerialConnected() {
+  if (serialPort && serialPort.isOpen) {
+    return true;
+  }
+
+  return await connectSerialRelay();
+}
+
+async function sendRelayCommand(command, commandName) {
+  const connected = await ensureSerialConnected();
+
+  if (!connected) {
+    throw new Error(`Relay not connected on ${SERIAL_PORT}`);
+  }
+
+  return new Promise((resolve, reject) => {
+    console.log(`[SERIAL] Sending ${commandName}`);
+    console.log(`[SERIAL] Command: ${command.toString("hex").toUpperCase()}`);
+
+    serialPort.write(command, (writeError) => {
+      if (writeError) {
+        reject(writeError);
+        return;
+      }
+
+      serialPort.drain((drainError) => {
+        if (drainError) {
+          reject(drainError);
+          return;
+        }
+
+        console.log(`[SERIAL] ${commandName} command sent successfully`);
+        resolve();
+      });
+    });
+  });
+}
+
+const RELAY_ON_COMMAND = Buffer.from([0xA0, 0x01, 0x01, 0xA2]);
+const RELAY_OFF_COMMAND = Buffer.from([0xA0, 0x01, 0x00, 0xA1]);
+
+// ============================================================
+// BUZZER
+// ============================================================
+async function startBuzzer(lineNo, cellqr) {
+  if (isBuzzerRunning) {
+    console.log(
+      `[BUZZER] Already running. Trigger ignored. Line=${lineNo}, CellQR=${cellqr}`
+    );
+    return;
+  }
+
+  isBuzzerRunning = true;
+
+  try {
+    await sendRelayCommand(RELAY_ON_COMMAND, "RELAY ON");
+
+    console.log(
+      `[BUZZER] ON for ${BUZZER_DURATION / 1000}s | Line=${lineNo} | CellQR=${cellqr}`
+    );
+
+    if (buzzerTimer) {
+      clearTimeout(buzzerTimer);
+      buzzerTimer = null;
+    }
+
+    buzzerTimer = setTimeout(async () => {
+      await stopBuzzer();
+    }, BUZZER_DURATION);
+
+  } catch (error) {
+    console.error(`[BUZZER ON ERROR] ${error.message}`);
+    isBuzzerRunning = false;
+  }
+}
+
+async function stopBuzzer() {
+  if (buzzerTimer) {
+    clearTimeout(buzzerTimer);
+    buzzerTimer = null;
+  }
+
+  try {
+    console.log("[BUZZER] 10 seconds completed. Turning OFF...");
+    await sendRelayCommand(RELAY_OFF_COMMAND, "RELAY OFF");
+    console.log("[BUZZER] OFF successfully");
+  } catch (error) {
+    console.error(`[BUZZER OFF ERROR] ${error.message}`);
+  } finally {
+    isBuzzerRunning = false;
+  }
+}
+
+// ============================================================
+// PROCESS BROADCAST
+// ============================================================
+async function processBroadcast(receivedLineNo, receivedCellQr) {
+  console.log("");
+  console.log("################################################");
+  console.log(`[TCP] RECEIVED LINE NO : ${receivedLineNo}`);
+  console.log(`[TCP] RECEIVED CELL QR : ${receivedCellQr}`);
+  console.log("################################################");
+
+  try {
+    const excelLine = readLocalExcelLine();
+
+    const serverLine = String(receivedLineNo).trim();
+    const localLine = String(excelLine).trim();
+
+    console.log(`[EXCEL] File : ${EXCEL_FILE_PATH}`);
+    console.log(`[EXCEL] ${LINE_CELL} : ${localLine}`);
+
+    if (serverLine !== localLine) {
+      console.log("[CLIENT] LINE NOT MATCHED");
+      console.log(`[CLIENT] Broadcasted Line : ${serverLine}`);
+      console.log(`[CLIENT] Excel Line       : ${localLine}`);
+      console.log("[CLIENT] BUZZER WILL REMAIN OFF");
+      return;
+    }
+
+    console.log("[CLIENT] LINE MATCHED SUCCESSFULLY");
+    console.log(`[CLIENT] Line   : ${serverLine}`);
+    console.log(`[CLIENT] CellQR : ${receivedCellQr}`);
+    console.log("[CLIENT] STARTING BUZZER...");
+
+    await startBuzzer(receivedLineNo, receivedCellQr);
+
+  } catch (error) {
+    console.error(`[CLIENT EXCEL ERROR] ${error.message}`);
+    console.error("[CLIENT] BUZZER WILL NOT START");
+  }
+}
+
+// ============================================================
+// TCP MESSAGE
+// ============================================================
+async function processTcpMessage(message) {
+  const trimmedMessage = message.trim();
+
+  if (!trimmedMessage) return;
+
+  try {
+    console.log(`[TCP] Raw Message: ${trimmedMessage}`);
+
+    const parsed = JSON.parse(trimmedMessage);
+
+    const lineNo = parsed.line_no;
+    const cellqr = parsed.cellqr;
+
+    if (lineNo === undefined || lineNo === null ||
+        String(lineNo).trim() === "") {
+      console.error("[TCP ERROR] line_no missing");
+      return;
+    }
+
+    if (cellqr === undefined || cellqr === null ||
+        String(cellqr).trim() === "") {
+      console.error("[TCP ERROR] cellqr missing");
+      return;
+    }
+
+    await processBroadcast(lineNo, cellqr);
+
+  } catch (error) {
+    console.error(`[TCP MESSAGE ERROR] ${error.message}`);
+    console.error(`[TCP MESSAGE] Invalid message: ${trimmedMessage}`);
+  }
+}
+
+// ============================================================
+// TCP CONNECTION
+// ============================================================
+function connectToMainServer() {
+  if (tcpClient && !tcpClient.destroyed) {
+    return;
+  }
+
+  console.log("================================================");
+  console.log("[TCP] CONNECTING TO MAIN SERVER");
+  console.log(`[TCP] Server: ${SERVER_IP}:${SERVER_PORT}`);
+  console.log("================================================");
+
+  tcpClient = new net.Socket();
+
+  tcpClient.connect(SERVER_PORT, SERVER_IP, () => {
+    console.log("[TCP] CONNECTED TO MAIN SERVER");
+    console.log(`[TCP] ${SERVER_IP}:${SERVER_PORT}`);
+  });
+
+  tcpClient.on("data", async (data) => {
+    receivedBuffer += data.toString("utf8");
+
+    const messages = receivedBuffer.split("\n");
+    receivedBuffer = messages.pop();
+
+    for (const message of messages) {
+      await processTcpMessage(message);
+    }
+  });
+
+  tcpClient.on("error", (error) => {
+    console.error(`[TCP ERROR] ${error.message}`);
+  });
+
+  tcpClient.on("close", () => {
+    console.log("[TCP] Disconnected from main server");
+
+    tcpClient = null;
+    receivedBuffer = "";
+
+    scheduleTcpReconnect();
+  });
+}
+
+function scheduleTcpReconnect() {
+  if (tcpReconnectTimer) {
+    return;
+  }
+
+  console.log(
+    `[TCP] Reconnecting in ${TCP_RECONNECT_DELAY / 1000} seconds...`
+  );
+
+  tcpReconnectTimer = setTimeout(() => {
+    tcpReconnectTimer = null;
+    connectToMainServer();
+  }, TCP_RECONNECT_DELAY);
+}
+
+function startSerialReconnectCheck() {
+  setInterval(async () => {
+    if (!serialPort || !serialPort.isOpen) {
+      console.log("[SERIAL] Relay disconnected. Trying to reconnect...");
+      await connectSerialRelay();
+    }
+  }, SERIAL_RECONNECT_DELAY);
+}
+
+// ============================================================
+// STARTUP
+// ============================================================
+async function startApplication() {
+  console.log("");
+  console.log("================================================");
+  console.log(" BUZZER TCP CLIENT STARTED");
+  console.log("================================================");
+  console.log(`Main Server IP   : ${SERVER_IP}`);
+  console.log(`Main Server Port : ${SERVER_PORT}`);
+  console.log(`Serial Port      : ${SERIAL_PORT}`);
+  console.log(`Baud Rate        : ${BAUD_RATE}`);
+  console.log(`Excel File       : ${EXCEL_FILE_PATH}`);
+  console.log(`Excel Sheet      : ${SHEET_NAME}`);
+  console.log(`Excel Cell       : ${LINE_CELL}`);
+  console.log(`Buzzer Duration  : ${BUZZER_DURATION / 1000}s`);
+  console.log("================================================");
+
+  const serialConnected = await connectSerialRelay();
+
+  if (serialConnected) {
+    try {
+      await sendRelayCommand(RELAY_OFF_COMMAND, "RELAY OFF (STARTUP)");
+    } catch (error) {
+      console.error(`[STARTUP ERROR] ${error.message}`);
+    }
+  } else {
+    console.log("[STARTUP] Serial relay not connected. Auto reconnect enabled.");
+  }
+
+  startSerialReconnectCheck();
+  connectToMainServer();
+}
+
+// ============================================================
+// SAFE SHUTDOWN
+// ============================================================
+async function shutdown(signal) {
+  console.log(`[SYSTEM] ${signal} received`);
+  console.log("[SYSTEM] Shutting down buzzer client...");
+
+  if (buzzerTimer) {
+    clearTimeout(buzzerTimer);
+    buzzerTimer = null;
+  }
+
+  try {
+    if (serialPort && serialPort.isOpen) {
+      await sendRelayCommand(RELAY_OFF_COMMAND, "RELAY OFF (SHUTDOWN)");
+    }
+  } catch (error) {
+    console.error(`[SHUTDOWN ERROR] ${error.message}`);
+  }
+
+  if (tcpClient && !tcpClient.destroyed) {
+    tcpClient.destroy();
+  }
+
+  if (serialPort && serialPort.isOpen) {
+    await new Promise((resolve) => {
+      serialPort.close(() => resolve());
+    });
+  }
+
+  console.log("[SYSTEM] Client stopped.");
+  process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("CTRL+C / SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+startApplication();
