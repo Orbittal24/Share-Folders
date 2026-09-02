@@ -9,12 +9,32 @@ Then:
 powershell -Command "Test-NetConnection 127.0.0.1 -Port 1101"
 
 ////////////
-Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue | Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
 
-Then:
 
-Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue
 
-And:
+Get-NetTCPConnection -LocalPort 1101 | Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
 
-Get-Process -Id 48592 | Format-List Id,ProcessName,Path
+netstat -ano | findstr ":1101 "
+
+You should see:
+
+TCP    0.0.0.0:1101    0.0.0.0:0    LISTENING    <PID>
+2. Test locally on 10.9.4.28
+Test-NetConnection 127.0.0.1 -Port 1101
+
+Expected:
+
+TcpTestSucceeded : True
+
+Then test using the server's actual IP:
+
+Test-NetConnection 10.9.4.28 -Port 1101
+
+Expected:
+
+TcpTestSucceeded : True
+3. Then test from the Node PC
+
+On the machine where buz.js is running:
+
+Test-NetConnection 10.9.4.28 -Port 1101
