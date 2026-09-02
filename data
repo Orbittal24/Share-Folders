@@ -1,9 +1,13 @@
-Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue
+Get-Process -Id 48592 | Select-Object Id,ProcessName,Path,StartTime
 
-netstat -ano | findstr "1101"
 
-Get-NetTCPConnection -LocalPort 3250 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess
 
-Then also:
+Get-CimInstance Win32_Process -Filter "ProcessId = 48592" | Select-Object ProcessId,ParentProcessId,CommandLine
 
-Get-Process -Id 33288 -ErrorAction SilentlyContinue
+
+
+Get-Service | Where-Object {$_.Name -like "*jenkins*" -or $_.DisplayName -like "*jenkins*"} | Select-Object Name,Status,DisplayName
+
+
+
+wmic process where processid=48592 get ProcessId,ParentProcessId,CommandLine
