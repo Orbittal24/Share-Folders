@@ -9,18 +9,12 @@ Then:
 powershell -Command "Test-NetConnection 127.0.0.1 -Port 1101"
 
 ////////////
-
-Get-NetTCPConnection -OwningProcess 9016 -ErrorAction SilentlyContinue | Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
+Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue | Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
 
 Then:
 
-Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue | Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
+Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue
 
 And:
 
-Test-NetConnection 127.0.0.1 -Port 1101
-Also run this in CMD
-
-This one works directly in CMD:
-
-netstat -ano | findstr ":3250 "
+Get-Process -Id 48592 | Format-List Id,ProcessName,Path
