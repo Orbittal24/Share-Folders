@@ -7,3 +7,22 @@ powershell -Command "Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyC
 Then:
 
 powershell -Command "Test-NetConnection 127.0.0.1 -Port 1101"
+
+Get-NetTCPConnection -OwningProcess 9016 -ErrorAction SilentlyContinue |
+Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
+
+If your Uvicorn PID is no longer 9016, first run:
+
+Get-Process python,python3 -ErrorAction SilentlyContinue |
+Format-Table Id,ProcessName,Path -AutoSize
+
+Then use the correct PID.
+
+2. Also run this
+Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue |
+Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
+3. Check the HTTP server for comparison
+
+Your application is using HTTPS port 3250, so run:
+
+netstat -ano | findstr ":3250 "
