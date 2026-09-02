@@ -1,7 +1,5 @@
-Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue |
-Where-Object {$_.LocalPort -eq 1101}
+Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -eq 1101}
 
 Then also run:
 
-Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue |
-Where-Object {$_.LocalPort -eq 3250}
+Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -eq 3250}
