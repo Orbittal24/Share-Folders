@@ -1,6 +1,7 @@
-Get-Process python
-
-Then:
-
-Get-NetTCPConnection -OwningProcess <PYTHON_PID> -ErrorAction SilentlyContinue |
+Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue |
 Where-Object {$_.LocalPort -eq 1101}
+
+Then also run:
+
+Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue |
+Where-Object {$_.LocalPort -eq 3250}
