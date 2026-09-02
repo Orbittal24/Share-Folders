@@ -1,7 +1,1 @@
-Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -eq 1101}
-
-Then also run:
-
-Get-NetTCPConnection -OwningProcess 48592 -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -eq 3250}
-
-netstat -ano | findstr "LISTENING"
+netstat -ano | findstr ":1101 "
