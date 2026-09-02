@@ -1,40 +1,9 @@
-netstat -ano | findstr "1101"
+Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue
 
-Then execute:
-
-powershell -Command "Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue | Format-List *"
-
-Then:
-
-powershell -Command "Test-NetConnection 127.0.0.1 -Port 1101"
-
-////////////
-
-
-
-Get-NetTCPConnection -LocalPort 1101 | Format-Table LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess -AutoSize
+Then immediately:
 
 netstat -ano | findstr ":1101 "
 
-You should see:
+And:
 
-TCP    0.0.0.0:1101    0.0.0.0:0    LISTENING    <PID>
-2. Test locally on 10.9.4.28
 Test-NetConnection 127.0.0.1 -Port 1101
-
-Expected:
-
-TcpTestSucceeded : True
-
-Then test using the server's actual IP:
-
-Test-NetConnection 10.9.4.28 -Port 1101
-
-Expected:
-
-TcpTestSucceeded : True
-3. Then test from the Node PC
-
-On the machine where buz.js is running:
-
-Test-NetConnection 10.9.4.28 -Port 1101
