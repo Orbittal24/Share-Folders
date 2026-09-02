@@ -1,14 +1,11 @@
-{
-  "name": "cell-buzzer-tcp-server",
-  "version": "1.0.0",
-  "private": true,
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^5.1.0",
-    "mssql": "^11.0.1"
-  }
-}
+# SERVER
+API_HOST=0.0.0.0
+API_PORT=3000
+TCP_HOST=10.9.4.28
+TCP_PORT=1826
+
+# DATABASE
+DB_USER=user_mis
+DB_PASSWORD=admin
+DB_DATABASE=taco_treceability_master
+DB_SERVER=localhost
