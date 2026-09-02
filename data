@@ -1,1 +1,9 @@
-netstat -ano | findstr ":1101 "
+Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue
+
+netstat -ano | findstr "1101"
+
+Get-NetTCPConnection -LocalPort 3250 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,State,OwningProcess
+
+Then also:
+
+Get-Process -Id 33288 -ErrorAction SilentlyContinue
