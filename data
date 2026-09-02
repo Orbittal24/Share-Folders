@@ -1,1 +1,9 @@
-netstat -ano | findstr :1101
+netstat -ano | findstr "1101"
+
+Then execute:
+
+powershell -Command "Get-NetTCPConnection -LocalPort 1101 -ErrorAction SilentlyContinue | Format-List *"
+
+Then:
+
+powershell -Command "Test-NetConnection 127.0.0.1 -Port 1101"
