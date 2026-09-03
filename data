@@ -26,10 +26,8 @@ const SERIAL_BAUD_RATE = 9600;
 // EXCEL CONFIGURATION
 // ============================================================
 
-// Excel file is on Desktop.
-//
-// Expected:
-// Desktop\buzzer_line.xlsx
+// Expected file:
+// C:\Users\<WindowsUser>\Desktop\buzzer_line.xlsx
 //
 // Sheet:
 // Sheet1
@@ -50,10 +48,10 @@ const EXCEL_LINE_CELL = "A1";
 
 
 // ============================================================
-// RELAY COMMANDS
+// BUZZER CONFIGURATION
 // ============================================================
 
-// Relay ON:
+// Buzzer ON:
 // A0 01 01 A2
 
 const RELAY_ON_COMMAND = Buffer.from([
@@ -64,7 +62,7 @@ const RELAY_ON_COMMAND = Buffer.from([
 ]);
 
 
-// Relay OFF:
+// Buzzer OFF:
 // A0 01 00 A1
 
 const RELAY_OFF_COMMAND = Buffer.from([
@@ -75,9 +73,7 @@ const RELAY_OFF_COMMAND = Buffer.from([
 ]);
 
 
-// ============================================================
-// BUZZER SETTINGS
-// ============================================================
+// Buzzer duration = 10 seconds
 
 const BUZZER_DURATION_MS = 10000;
 
@@ -107,6 +103,20 @@ const serialPort = new SerialPort({
 
 
 // ============================================================
+// HEX DISPLAY HELPER
+// ============================================================
+
+function bufferToHex(buffer) {
+
+    return buffer
+        .toString("hex")
+        .match(/.{1,2}/g)
+        .join(" ")
+        .toUpperCase();
+}
+
+
+// ============================================================
 // OPEN SERIAL PORT
 // ============================================================
 
@@ -127,13 +137,13 @@ function openSerialPort() {
 
             console.log("");
             console.log("==========================================");
-            console.log("❌ SERIAL PORT ERROR");
+            console.log("❌ SERIAL PORT OPEN ERROR");
             console.log("==========================================");
             console.log(
-                `Port : ${SERIAL_PORT}`
+                `Port  : ${SERIAL_PORT}`
             );
             console.log(
-                `Error: ${error.message}`
+                `Error : ${error.message}`
             );
             console.log("==========================================");
             console.log("");
@@ -164,14 +174,17 @@ function openSerialPort() {
 serialPort.on("error", (error) => {
 
     console.log("");
-    console.log("❌ SERIAL ERROR:");
-    console.log(error.message);
+    console.log("❌ SERIAL ERROR");
+    console.log("------------------------------------------");
+    console.log(
+        error.message
+    );
     console.log("");
 });
 
 
 // ============================================================
-// READ LINE FROM EXCEL
+// READ LINE NUMBER FROM EXCEL
 // ============================================================
 
 function getConfiguredLineFromExcel() {
@@ -179,7 +192,7 @@ function getConfiguredLineFromExcel() {
     try {
 
         // ----------------------------------------------------
-        // Check file
+        // Check Excel file
         // ----------------------------------------------------
 
         if (!fs.existsSync(EXCEL_FILE_PATH)) {
@@ -199,7 +212,7 @@ function getConfiguredLineFromExcel() {
 
 
         // ----------------------------------------------------
-        // Read Excel file
+        // Read workbook
         // ----------------------------------------------------
 
         const workbook = XLSX.readFile(
@@ -211,51 +224,73 @@ function getConfiguredLineFromExcel() {
         // Check Sheet1
         // ----------------------------------------------------
 
-        if (!workbook.Sheets[EXCEL_SHEET_NAME]) {
+        if (
+            !workbook.Sheets[
+                EXCEL_SHEET_NAME
+            ]
+        ) {
 
             console.log("");
-            console.log("❌ Excel sheet not found:");
+            console.log("==========================================");
+            console.log("❌ EXCEL SHEET NOT FOUND");
+            console.log("==========================================");
             console.log(
-                EXCEL_SHEET_NAME
+                `Sheet : ${EXCEL_SHEET_NAME}`
             );
+            console.log("==========================================");
+            console.log("");
 
             return null;
         }
 
 
         const worksheet =
-            workbook.Sheets[EXCEL_SHEET_NAME];
+            workbook.Sheets[
+                EXCEL_SHEET_NAME
+            ];
 
 
         // ----------------------------------------------------
         // Read A1
         // ----------------------------------------------------
 
-        const cell =
-            worksheet[EXCEL_LINE_CELL];
+        const excelCell =
+            worksheet[
+                EXCEL_LINE_CELL
+            ];
 
 
-        if (!cell || cell.v === undefined || cell.v === null) {
+        if (
+            !excelCell ||
+            excelCell.v === undefined ||
+            excelCell.v === null
+        ) {
 
             console.log("");
-            console.log("❌ Excel line number not found");
+            console.log("==========================================");
+            console.log("❌ EXCEL LINE NUMBER NOT FOUND");
+            console.log("==========================================");
             console.log(
                 `Sheet : ${EXCEL_SHEET_NAME}`
             );
             console.log(
                 `Cell  : ${EXCEL_LINE_CELL}`
             );
+            console.log("==========================================");
+            console.log("");
 
             return null;
         }
 
 
         // ----------------------------------------------------
-        // Convert to string
+        // Convert Excel value to string
         // ----------------------------------------------------
 
         const configuredLine =
-            String(cell.v).trim();
+            String(
+                excelCell.v
+            ).trim();
 
 
         if (!configuredLine) {
@@ -277,7 +312,7 @@ function getConfiguredLineFromExcel() {
         console.log("❌ EXCEL READ ERROR");
         console.log("==========================================");
         console.log(
-            error.message
+            `Error : ${error.message}`
         );
         console.log("==========================================");
         console.log("");
@@ -291,22 +326,36 @@ function getConfiguredLineFromExcel() {
 // SEND RELAY COMMAND
 // ============================================================
 
-function sendRelayCommand(command, commandName) {
+function sendRelayCommand(
+    command,
+    commandName
+) {
+
+    // --------------------------------------------------------
+    // Check serial port
+    // --------------------------------------------------------
 
     if (!serialPort.isOpen) {
 
         console.log("");
+        console.log("==========================================");
         console.log(
-            "❌ Serial port is not open."
+            `❌ RELAY ${commandName} FAILED`
         );
-
+        console.log("==========================================");
         console.log(
-            `Cannot send relay ${commandName} command.`
+            `Serial port ${SERIAL_PORT} is not open.`
         );
+        console.log("==========================================");
+        console.log("");
 
         return false;
     }
 
+
+    // --------------------------------------------------------
+    // Send command
+    // --------------------------------------------------------
 
     serialPort.write(
         command,
@@ -315,13 +364,16 @@ function sendRelayCommand(command, commandName) {
             if (error) {
 
                 console.log("");
+                console.log("==========================================");
                 console.log(
                     `❌ RELAY ${commandName} ERROR`
                 );
-
+                console.log("==========================================");
                 console.log(
-                    error.message
+                    `Error : ${error.message}`
                 );
+                console.log("==========================================");
+                console.log("");
 
                 return;
             }
@@ -331,10 +383,10 @@ function sendRelayCommand(command, commandName) {
             console.log(
                 `📤 RELAY ${commandName} COMMAND SENT`
             );
-
             console.log(
-                `HEX : ${command.toString("hex").toUpperCase()}`
+                `HEX : ${bufferToHex(command)}`
             );
+            console.log("");
         }
     );
 
@@ -344,30 +396,38 @@ function sendRelayCommand(command, commandName) {
 
 
 // ============================================================
-// BUZZER ON
+// START BUZZER
 // ============================================================
 
-function startBuzzer(lineNo, cellQr) {
+function startBuzzer(
+    lineNo,
+    cellQr
+) {
 
     // --------------------------------------------------------
-    // Prevent duplicate timers
+    // Prevent overlapping buzzer cycles
     // --------------------------------------------------------
 
     if (buzzerRunning) {
 
         console.log("");
-        console.log(
-            "⚠️ BUZZER ALREADY RUNNING"
-        );
-
+        console.log("==========================================");
+        console.log("⚠️ BUZZER ALREADY RUNNING");
+        console.log("==========================================");
         console.log(
             "New buzzer event ignored while current "
-            "10-second cycle is active."
+            + "10-second cycle is active."
         );
+        console.log("==========================================");
+        console.log("");
 
         return;
     }
 
+
+    // --------------------------------------------------------
+    // Set buzzer state
+    // --------------------------------------------------------
 
     buzzerRunning = true;
 
@@ -377,55 +437,105 @@ function startBuzzer(lineNo, cellQr) {
     console.log("🔔 BUZZER START");
     console.log("==========================================");
     console.log(
-        `Line   : ${lineNo}`
+        `Line     : ${lineNo}`
     );
     console.log(
-        `CellQR : ${cellQr}`
+        `CellQR   : ${cellQr}`
     );
     console.log(
         "Duration : 10 seconds"
     );
     console.log("==========================================");
+    console.log("");
 
 
     // --------------------------------------------------------
     // RELAY ON
     // --------------------------------------------------------
 
-    sendRelayCommand(
-        RELAY_ON_COMMAND,
-        "ON"
-    );
-
-
-    // --------------------------------------------------------
-    // Auto OFF after 10 seconds
-    // --------------------------------------------------------
-
-    buzzerTimer = setTimeout(() => {
-
+    const relayOnSent =
         sendRelayCommand(
-            RELAY_OFF_COMMAND,
-            "OFF"
+            RELAY_ON_COMMAND,
+            "ON"
         );
 
+
+    // --------------------------------------------------------
+    // If relay ON could not be sent
+    // --------------------------------------------------------
+
+    if (!relayOnSent) {
 
         buzzerRunning = false;
 
-        buzzerTimer = null;
+        return;
+    }
 
 
-        console.log("");
-        console.log("==========================================");
-        console.log("🔕 BUZZER AUTO STOPPED");
-        console.log("==========================================");
-        console.log(
-            "Relay OFF after 10 seconds"
+    // --------------------------------------------------------
+    // Clear old timer if somehow present
+    // --------------------------------------------------------
+
+    if (buzzerTimer) {
+
+        clearTimeout(
+            buzzerTimer
         );
-        console.log("==========================================");
-        console.log("");
 
-    }, BUZZER_DURATION_MS);
+        buzzerTimer = null;
+    }
+
+
+    // --------------------------------------------------------
+    // AUTO OFF AFTER 10 SECONDS
+    // --------------------------------------------------------
+
+    buzzerTimer = setTimeout(
+        () => {
+
+            console.log("");
+            console.log("==========================================");
+            console.log("⏱️ 10 SECONDS COMPLETED");
+            console.log("==========================================");
+            console.log(
+                "Sending relay OFF command..."
+            );
+            console.log("==========================================");
+            console.log("");
+
+
+            // ------------------------------------------------
+            // RELAY OFF
+            // ------------------------------------------------
+
+            sendRelayCommand(
+                RELAY_OFF_COMMAND,
+                "OFF"
+            );
+
+
+            // ------------------------------------------------
+            // Reset state
+            // ------------------------------------------------
+
+            buzzerRunning = false;
+
+            buzzerTimer = null;
+
+
+            console.log("");
+            console.log("==========================================");
+            console.log("🔕 BUZZER AUTO STOPPED");
+            console.log("==========================================");
+            console.log(
+                "Relay OFF after 10 seconds"
+            );
+            console.log("==========================================");
+            console.log("");
+
+        },
+        BUZZER_DURATION_MS
+    );
 }
 
 
@@ -438,6 +548,10 @@ function processBuzzerEvent(
     cellQr
 ) {
 
+    // --------------------------------------------------------
+    // Read configured line from Excel
+    // --------------------------------------------------------
+
     const configuredLine =
         getConfiguredLineFromExcel();
 
@@ -448,14 +562,22 @@ function processBuzzerEvent(
 
     if (configuredLine === null) {
 
+        console.log("");
         console.log(
-            "⚠️ Cannot process buzzer event "
-            + "because Excel line could not be read."
+            "⚠️ BUZZER EVENT CANNOT BE PROCESSED"
         );
+        console.log(
+            "Excel line number could not be read."
+        );
+        console.log("");
 
         return;
     }
 
+
+    // --------------------------------------------------------
+    // Display comparison
+    // --------------------------------------------------------
 
     console.log("");
     console.log("==========================================");
@@ -468,10 +590,11 @@ function processBuzzerEvent(
         `Excel Line    : ${configuredLine}`
     );
     console.log("==========================================");
+    console.log("");
 
 
     // --------------------------------------------------------
-    // Compare lines
+    // Compare received line with Excel line
     // --------------------------------------------------------
 
     if (
@@ -480,14 +603,19 @@ function processBuzzerEvent(
     ) {
 
         console.log("");
-        console.log(
-            "✅ LINE MATCHED"
-        );
-
+        console.log("==========================================");
+        console.log("✅ LINE MATCHED");
+        console.log("==========================================");
         console.log(
             `Line ${receivedLine} belongs to this client.`
         );
+        console.log("==========================================");
+        console.log("");
 
+
+        // ----------------------------------------------------
+        // Start buzzer
+        // ----------------------------------------------------
 
         startBuzzer(
             receivedLine,
@@ -497,22 +625,19 @@ function processBuzzerEvent(
     } else {
 
         console.log("");
+        console.log("==========================================");
+        console.log("❌ LINE NOT MATCHED");
+        console.log("==========================================");
         console.log(
-            "❌ LINE NOT MATCHED"
+            `Received  : ${receivedLine}`
         );
-
         console.log(
-            `Received : ${receivedLine}`
+            `Configured: ${configuredLine}`
         );
-
-        console.log(
-            `Configured : ${configuredLine}`
-        );
-
         console.log(
             "🚫 Buzzer will NOT start."
         );
-
+        console.log("==========================================");
         console.log("");
     }
 }
@@ -535,13 +660,18 @@ function connectToServer() {
         `Port   : ${PORT}`
     );
     console.log("==========================================");
+    console.log("");
 
+
+    // --------------------------------------------------------
+    // Create TCP socket
+    // --------------------------------------------------------
 
     client = new net.Socket();
 
 
     // --------------------------------------------------------
-    // Keep TCP connection alive
+    // Keep connection alive
     // --------------------------------------------------------
 
     client.setKeepAlive(
@@ -551,7 +681,7 @@ function connectToServer() {
 
 
     // --------------------------------------------------------
-    // Connect
+    // Connect to server
     // --------------------------------------------------------
 
     client.connect(
@@ -578,138 +708,187 @@ function connectToServer() {
 
 
     // ========================================================
-    // RECEIVE DATA
+    // RECEIVE TCP DATA
     // ========================================================
 
-    client.on("data", (data) => {
+    client.on(
+        "data",
+        (data) => {
 
-        const messages = data
-            .toString("utf-8")
-            .split("\n");
+            // ------------------------------------------------
+            // TCP data may contain multiple messages
+            // ------------------------------------------------
 
-
-        for (const message of messages) {
-
-            const trimmedMessage =
-                message.trim();
-
-
-            if (!trimmedMessage) {
-
-                continue;
-            }
+            const messages =
+                data
+                    .toString("utf-8")
+                    .split("\n");
 
 
-            console.log("");
-            console.log("📥 BUZZER BROADCAST RECEIVED");
-            console.log("------------------------------------------");
-            console.log(
-                `Raw : ${trimmedMessage}`
-            );
+            // ------------------------------------------------
+            // Process each message
+            // ------------------------------------------------
+
+            for (
+                const message of messages
+            ) {
+
+                const trimmedMessage =
+                    message.trim();
 
 
-            // =================================================
-            // PARSE JSON
-            // =================================================
-
-            try {
-
-                const payload =
-                    JSON.parse(
-                        trimmedMessage
-                    );
-
-
-                const lineNo =
-                    String(
-                        payload.line_no || ""
-                    ).trim();
-
-
-                const cellQr =
-                    String(
-                        payload.cellqr || ""
-                    ).trim();
-
-
-                if (!lineNo) {
-
-                    console.log(
-                        "⚠️ line_no missing."
-                    );
+                // Ignore empty messages
+                if (!trimmedMessage) {
 
                     continue;
                 }
 
 
-                console.log(
-                    `📡 Line   : ${lineNo}`
-                );
-
-                console.log(
-                    `📦 CellQR : ${cellQr}`
-                );
-
-
-                // =================================================
-                // COMPARE WITH EXCEL
-                // =================================================
-
-                processBuzzerEvent(
-                    lineNo,
-                    cellQr
-                );
-
-
-            } catch (error) {
-
                 console.log("");
+                console.log("==========================================");
                 console.log(
-                    "⚠️ INVALID JSON RECEIVED"
+                    "📥 BUZZER BROADCAST RECEIVED"
                 );
+                console.log("==========================================");
+                console.log(
+                    `Raw : ${trimmedMessage}`
+                );
+                console.log("==========================================");
 
-                console.log(
-                    trimmedMessage
-                );
 
-                console.log(
-                    `Error : ${error.message}`
-                );
+                // =================================================
+                // PARSE JSON
+                // =================================================
+
+                try {
+
+                    const payload =
+                        JSON.parse(
+                            trimmedMessage
+                        );
+
+
+                    // ------------------------------------------------
+                    // Get line number
+                    // ------------------------------------------------
+
+                    const lineNo =
+                        String(
+                            payload.line_no || ""
+                        ).trim();
+
+
+                    // ------------------------------------------------
+                    // Get cell QR
+                    // ------------------------------------------------
+
+                    const cellQr =
+                        String(
+                            payload.cellqr || ""
+                        ).trim();
+
+
+                    // ------------------------------------------------
+                    // Validate line number
+                    // ------------------------------------------------
+
+                    if (!lineNo) {
+
+                        console.log(
+                            "⚠️ line_no missing."
+                        );
+
+                        continue;
+                    }
+
+
+                    console.log(
+                        `📡 Line   : ${lineNo}`
+                    );
+
+                    console.log(
+                        `📦 CellQR : ${cellQr}`
+                    );
+
+
+                    // =================================================
+                    // COMPARE LINE WITH EXCEL
+                    // =================================================
+
+                    processBuzzerEvent(
+                        lineNo,
+                        cellQr
+                    );
+
+
+                } catch (error) {
+
+                    console.log("");
+                    console.log(
+                        "=========================================="
+                    );
+                    console.log(
+                        "⚠️ INVALID JSON RECEIVED"
+                    );
+                    console.log(
+                        "=========================================="
+                    );
+                    console.log(
+                        `Data : ${trimmedMessage}`
+                    );
+                    console.log(
+                        `Error: ${error.message}`
+                    );
+                    console.log(
+                        "=========================================="
+                    );
+                    console.log("");
+                }
             }
         }
-    });
+    );
 
 
     // ========================================================
-    // CONNECTION CLOSED
+    // TCP CONNECTION CLOSED
     // ========================================================
 
-    client.on("close", () => {
+    client.on(
+        "close",
+        () => {
 
-        console.log("");
-        console.log(
-            "❌ TCP CONNECTION CLOSED"
-        );
+            console.log("");
+            console.log("==========================================");
+            console.log(
+                "❌ TCP CONNECTION CLOSED"
+            );
+            console.log("==========================================");
+            console.log("");
 
-        scheduleReconnect();
-    });
+            scheduleReconnect();
+        }
+    );
 
 
     // ========================================================
     // TCP ERROR
     // ========================================================
 
-    client.on("error", (err) => {
+    client.on(
+        "error",
+        (err) => {
 
-        console.log("");
-        console.log(
-            "❌ TCP ERROR:"
-        );
-
-        console.log(
-            err.message
-        );
-    });
+            console.log("");
+            console.log("==========================================");
+            console.log("❌ TCP ERROR");
+            console.log("==========================================");
+            console.log(
+                err.message
+            );
+            console.log("==========================================");
+            console.log("");
+        }
+    );
 }
 
 
@@ -718,6 +897,10 @@ function connectToServer() {
 // ============================================================
 
 function scheduleReconnect() {
+
+    // --------------------------------------------------------
+    // Prevent duplicate reconnect timers
+    // --------------------------------------------------------
 
     if (reconnectTimer) {
 
@@ -730,48 +913,62 @@ function scheduleReconnect() {
     );
 
 
-    reconnectTimer = setTimeout(
-        () => {
+    reconnectTimer =
+        setTimeout(
+            () => {
 
-            reconnectTimer = null;
+                reconnectTimer = null;
 
-            connectToServer();
+                connectToServer();
 
-        },
-        3000
-    );
+            },
+            3000
+        );
 }
 
 
 // ============================================================
-// START
+// START APPLICATION
 // ============================================================
 
 console.log("");
-console.log("==========================================");
+console.log("================================================");
 console.log("🚀 BUZZER CLIENT STARTING");
-console.log("==========================================");
+console.log("================================================");
 console.log(
-    `Excel : ${EXCEL_FILE_PATH}`
+    `TCP Server : ${HOST}:${PORT}`
 );
 console.log(
-    `Sheet : ${EXCEL_SHEET_NAME}`
+    `Excel File : ${EXCEL_FILE_PATH}`
 );
 console.log(
-    `Cell  : ${EXCEL_LINE_CELL}`
+    `Excel Sheet: ${EXCEL_SHEET_NAME}`
 );
 console.log(
-    `TCP   : ${HOST}:${PORT}`
+    `Excel Cell : ${EXCEL_LINE_CELL}`
 );
 console.log(
-    `Serial: ${SERIAL_PORT}`
+    `Serial Port: ${SERIAL_PORT}`
 );
-console.log("==========================================");
+console.log(
+    `Baud Rate  : ${SERIAL_BAUD_RATE}`
+);
+console.log(
+    "Buzzer Time: 10 seconds"
+);
+console.log("================================================");
 console.log("");
 
 
-// Open serial port
+// ============================================================
+// OPEN SERIAL PORT
+// ============================================================
+
 openSerialPort();
 
-// Connect TCP
+
+// ============================================================
+// CONNECT TCP
+// ============================================================
+
 connectToServer();
