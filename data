@@ -1,1139 +1,372 @@
-const net = require("net");
-const { SerialPort } = require("serialport");
-const XLSX = require("xlsx");
-const fs = require("fs");
-const path = require("path");
-const os = require("os");
+import asyncio
+import json
 
 
-// ============================================================
-// MAIN SERVER TCP CONFIGURATION
-// ============================================================
+# ============================================================
+# TCP SERVER CONFIGURATION
+# ============================================================
 
-// Main FastAPI server IP
-const SERVER_IP = "10.9.4.28";
+HOST = "0.0.0.0"
+PORT = 7280
 
-// TCP Buzzer Server Port
-const SERVER_PORT = 7280;
 
+# ============================================================
+# CONNECTED CLIENTS
+# ============================================================
 
-// ============================================================
-// SERIAL RELAY CONFIGURATION
-// ============================================================
+connected_clients = set()
 
-// Change this according to the COM port on this client PC
-const SERIAL_PORT = "COM4";
 
-// Change if your relay uses a different baud rate
-const BAUD_RATE = 9600;
+# ============================================================
+# BROADCAST MESSAGE TO ALL CLIENTS
+# ============================================================
 
-const DATA_BITS = 8;
-const STOP_BITS = 1;
-const PARITY = "none";
+async def broadcast_message(message):
 
+    if not connected_clients:
 
-// ============================================================
-// EXCEL CONFIGURATION
-// ============================================================
-//
-// File location:
-// C:\Users\<USERNAME>\Desktop\buzzer_line.xlsx
-//
-// Excel format:
-//
-//   A
-//  ---
-//   1
-//
-// There is NO column name.
-// There is NO heading.
-// Only one line number is stored in cell A1.
-//
+        print(
+            "⚠️ No connected TCP clients."
+        )
 
-const EXCEL_FILE_NAME = "buzzer_line.xlsx";
+        return
 
-const EXCEL_FILE_PATH = path.join(
-    os.homedir(),
-    "Desktop",
-    EXCEL_FILE_NAME
-);
+    print("")
+    print("================================================")
+    print("📢 BROADCASTING TO ALL CLIENTS")
+    print("================================================")
+    print(
+        f"👥 Connected Clients : "
+        f"{len(connected_clients)}"
+    )
+    print(
+        f"📤 Message : {message.strip()}"
+    )
+    print("================================================")
 
-const SHEET_NAME = "Sheet1";
+    disconnected_clients = set()
 
-const LINE_CELL = "A1";
+    for writer in list(connected_clients):
 
+        try:
 
-// ============================================================
-// BUZZER CONFIGURATION
-// ============================================================
+            client_address = (
+                writer.get_extra_info("peername")
+            )
 
-// Buzzer automatically turns OFF after 10 seconds
-const BUZZER_DURATION = 10000;
+            writer.write(
+                message.encode("utf-8")
+            )
 
+            await writer.drain()
 
-// ============================================================
-// RECONNECT CONFIGURATION
-// ============================================================
+            print(
+                f"✅ Sent to : "
+                f"{client_address}"
+            )
 
-const TCP_RECONNECT_DELAY = 3000;
+        except Exception as e:
 
-const SERIAL_RECONNECT_DELAY = 3000;
+            client_address = (
+                writer.get_extra_info("peername")
+            )
 
+            print(
+                f"❌ Failed to send to "
+                f"{client_address}: {e}"
+            )
 
-// ============================================================
-// RELAY COMMANDS
-// ============================================================
+            disconnected_clients.add(
+                writer
+            )
 
-// RELAY ON
-// A0 01 01 A2
-const RELAY_ON_COMMAND = Buffer.from([
-    0xA0,
-    0x01,
-    0x01,
-    0xA2
-]);
+    # --------------------------------------------------------
+    # Remove disconnected clients
+    # --------------------------------------------------------
 
+    for writer in disconnected_clients:
 
-// RELAY OFF
-// A0 01 00 A1
-const RELAY_OFF_COMMAND = Buffer.from([
-    0xA0,
-    0x01,
-    0x00,
-    0xA1
-]);
+        connected_clients.discard(
+            writer
+        )
 
+        try:
 
-// ============================================================
-// APPLICATION STATE
-// ============================================================
+            writer.close()
 
-let serialPort = null;
+            await writer.wait_closed()
 
-let isSerialConnecting = false;
+        except Exception:
 
-let isBuzzerRunning = false;
+            pass
 
-let buzzerTimer = null;
+    print("================================================")
+    print("✅ BROADCAST COMPLETED")
+    print("================================================")
+    print("")
 
-let tcpClient = null;
 
-let tcpReconnectTimer = null;
+# ============================================================
+# HANDLE TCP CLIENT
+# ============================================================
 
-let receivedBuffer = "";
+async def handle_client(
+    reader,
+    writer,
+):
 
+    client_address = (
+        writer.get_extra_info("peername")
+    )
 
-// ============================================================
-// READ LINE NUMBER FROM LOCAL EXCEL
-// ============================================================
-//
-// Reads only:
-// A1
-//
-// Example:
-//
-// A1 = 1
-//
-// Returns:
-// "1"
-//
+    connected_clients.add(writer)
 
-function readLocalExcelLine() {
+    print("")
+    print("================================================")
+    print("✅ TCP CLIENT CONNECTED")
+    print("================================================")
+    print(
+        f"Client : {client_address}"
+    )
+    print(
+        f"Total Clients : "
+        f"{len(connected_clients)}"
+    )
+    print("================================================")
+    print("")
 
-    // Check Excel file exists
-    if (!fs.existsSync(EXCEL_FILE_PATH)) {
+    try:
 
-        throw new Error(
-            `Excel file not found: ${EXCEL_FILE_PATH}`
-        );
-    }
+        while True:
 
+            data = await reader.readline()
 
-    // Open Excel file
-    const workbook = XLSX.readFile(
-        EXCEL_FILE_PATH
-    );
+            if not data:
 
+                print(
+                    f"❌ Client disconnected : "
+                    f"{client_address}"
+                )
 
-    // Check Sheet1 exists
-    if (!workbook.SheetNames.includes(SHEET_NAME)) {
+                break
 
-        throw new Error(
-            `Excel sheet "${SHEET_NAME}" not found`
-        );
-    }
+            message = data.decode(
+                "utf-8",
+                errors="ignore",
+            ).strip()
 
+            if not message:
 
-    // Get worksheet
-    const worksheet =
-        workbook.Sheets[SHEET_NAME];
+                continue
 
+            print("")
+            print("📥 DATA RECEIVED FROM FASTAPI")
+            print("------------------------------")
+            print(
+                f"Client  : {client_address}"
+            )
+            print(
+                f"Message : {message}"
+            )
 
-    // Get A1 cell
-    const cell =
-        worksheet[LINE_CELL];
+            # =================================================
+            # Validate JSON
+            # =================================================
 
+            try:
 
-    // Check A1 has a value
-    if (
-        !cell ||
-        cell.v === undefined ||
-        cell.v === null ||
-        String(cell.v).trim() === ""
-    ) {
-
-        throw new Error(
-            `Excel cell ${LINE_CELL} is empty`
-        );
-    }
-
-
-    // Return line number as string
-    return String(
-        cell.v
-    ).trim();
-}
-
-
-// ============================================================
-// CONNECT SERIAL RELAY
-// ============================================================
-
-async function connectSerialRelay() {
-
-    // Already connected
-    if (
-        serialPort &&
-        serialPort.isOpen
-    ) {
-
-        return true;
-    }
-
-
-    // Connection already in progress
-    if (isSerialConnecting) {
-
-        return false;
-    }
-
-
-    isSerialConnecting = true;
-
-
-    console.log(
-        `[SERIAL] Connecting to ${SERIAL_PORT}...`
-    );
-
-
-    return new Promise((resolve) => {
-
-        serialPort = new SerialPort({
-            path: SERIAL_PORT,
-            baudRate: BAUD_RATE,
-            dataBits: DATA_BITS,
-            stopBits: STOP_BITS,
-            parity: PARITY,
-            autoOpen: false,
-        });
-
-
-        // Serial data response
-        serialPort.on(
-            "data",
-            (data) => {
-
-                console.log(
-                    `[SERIAL RESPONSE] ` +
-                    data.toString("hex").toUpperCase()
-                );
-
-            }
-        );
-
-
-        // Serial error
-        serialPort.on(
-            "error",
-            (error) => {
-
-                console.error(
-                    `[SERIAL ERROR] ${error.message}`
-                );
-
-            }
-        );
-
-
-        // Serial closed
-        serialPort.on(
-            "close",
-            () => {
-
-                console.log(
-                    "[SERIAL] Relay COM port closed"
-                );
-
-                isSerialConnecting = false;
-
-            }
-        );
-
-
-        // Open serial port
-        serialPort.open(
-            (error) => {
-
-                isSerialConnecting = false;
-
-
-                if (error) {
-
-                    console.error(
-                        `[SERIAL ERROR] ${error.message}`
-                    );
-
-                    resolve(false);
-
-                    return;
-                }
-
-
-                console.log(
-                    `[SERIAL] Connected successfully to ${SERIAL_PORT}`
-                );
-
-                resolve(true);
-
-            }
-        );
-
-    });
-}
-
-
-// ============================================================
-// ENSURE SERIAL RELAY IS CONNECTED
-// ============================================================
-
-async function ensureSerialConnected() {
-
-    if (
-        serialPort &&
-        serialPort.isOpen
-    ) {
-
-        return true;
-    }
-
-
-    return await connectSerialRelay();
-}
-
-
-// ============================================================
-// SEND SERIAL COMMAND
-// ============================================================
-
-async function sendRelayCommand(
-    command,
-    commandName
-) {
-
-    const connected =
-        await ensureSerialConnected();
-
-
-    if (!connected) {
-
-        throw new Error(
-            `Relay not connected on ${SERIAL_PORT}`
-        );
-    }
-
-
-    return new Promise(
-        (resolve, reject) => {
-
-            console.log(
-                `[SERIAL] Sending ${commandName}`
-            );
-
-            console.log(
-                `[SERIAL] Command: ` +
-                command
-                    .toString("hex")
-                    .toUpperCase()
-            );
-
-
-            serialPort.write(
-                command,
-                (writeError) => {
-
-                    if (writeError) {
-
-                        reject(writeError);
-
-                        return;
-                    }
-
-
-                    serialPort.drain(
-                        (drainError) => {
-
-                            if (drainError) {
-
-                                reject(drainError);
-
-                                return;
-                            }
-
-
-                            console.log(
-                                `[SERIAL] ${commandName} command sent successfully`
-                            );
-
-                            resolve();
-
-                        }
-                    );
-
-                }
-            );
-
-        }
-    );
-}
-
-
-// ============================================================
-// START BUZZER
-// ============================================================
-
-async function startBuzzer(lineNo) {
-
-    // Do not restart while buzzer is already ON
-    if (isBuzzerRunning) {
-
-        console.log(
-            `[BUZZER] Already running. ` +
-            `New trigger for Line ${lineNo} ignored.`
-        );
-
-        return;
-    }
-
-
-    isBuzzerRunning = true;
-
-
-    console.log("");
-    console.log("================================================");
-    console.log(
-        `[BUZZER] STARTING FOR LINE: ${lineNo}`
-    );
-    console.log("================================================");
-
-
-    try {
-
-        // Send ON command
-        await sendRelayCommand(
-            RELAY_ON_COMMAND,
-            "RELAY ON"
-        );
-
-
-        console.log(
-            `[BUZZER] ON for ${BUZZER_DURATION / 1000} seconds`
-        );
-
-
-        // Clear old timer if any
-        if (buzzerTimer) {
-
-            clearTimeout(
-                buzzerTimer
-            );
-
-            buzzerTimer = null;
-        }
-
-
-        // Automatically stop after 10 seconds
-        buzzerTimer = setTimeout(
-            async () => {
-
-                await stopBuzzer();
-
-            },
-            BUZZER_DURATION
-        );
-
-    } catch (error) {
-
-        console.error(
-            `[BUZZER ON ERROR] ${error.message}`
-        );
-
-        isBuzzerRunning = false;
-    }
-}
-
-
-// ============================================================
-// STOP BUZZER
-// ============================================================
-
-async function stopBuzzer() {
-
-    // Clear timer
-    if (buzzerTimer) {
-
-        clearTimeout(
-            buzzerTimer
-        );
-
-        buzzerTimer = null;
-    }
-
-
-    console.log("");
-    console.log("================================================");
-    console.log(
-        "[BUZZER] 10 SECONDS COMPLETED"
-    );
-    console.log(
-        "[BUZZER] TURNING OFF..."
-    );
-    console.log("================================================");
-
-
-    try {
-
-        // Send OFF command
-        await sendRelayCommand(
-            RELAY_OFF_COMMAND,
-            "RELAY OFF"
-        );
-
-
-        console.log(
-            "[BUZZER] OFF SUCCESSFULLY"
-        );
-
-    } catch (error) {
-
-        console.error(
-            `[BUZZER OFF ERROR] ${error.message}`
-        );
-
-    } finally {
-
-        isBuzzerRunning = false;
-    }
-}
-
-
-// ============================================================
-// PROCESS RECEIVED LINE NUMBER
-// ============================================================
-
-async function processBroadcast(
-    receivedLineNo
-) {
-
-    console.log("");
-    console.log("################################################");
-    console.log(
-        `[TCP] RECEIVED BROADCAST LINE NO: ${receivedLineNo}`
-    );
-    console.log("################################################");
-
-
-    try {
-
-        // Read local Excel A1
-        const excelLine =
-            readLocalExcelLine();
-
-
-        console.log(
-            `[EXCEL] File: ${EXCEL_FILE_PATH}`
-        );
-
-        console.log(
-            `[EXCEL] Cell ${LINE_CELL}: ${excelLine}`
-        );
-
-
-        // ====================================================
-        // COMPARE SERVER LINE WITH EXCEL LINE
-        // ====================================================
-
-        const serverLine =
-            String(
-                receivedLineNo
-            ).trim();
-
-        const localLine =
-            String(
-                excelLine
-            ).trim();
-
-
-        // ====================================================
-        // LINE DOES NOT MATCH
-        // ====================================================
-
-        if (serverLine !== localLine) {
-
-            console.log("");
-            console.log(
-                "[CLIENT] LINE NOT MATCHED"
-            );
-
-            console.log(
-                `[CLIENT] Broadcasted Line: ${serverLine}`
-            );
-
-            console.log(
-                `[CLIENT] Excel Line      : ${localLine}`
-            );
-
-            console.log(
-                "[CLIENT] BUZZER WILL REMAIN OFF"
-            );
-
-            console.log("");
-
-            return;
-        }
-
-
-        // ====================================================
-        // LINE MATCHED
-        // ====================================================
-
-        console.log("");
-        console.log(
-            "[CLIENT] LINE MATCHED SUCCESSFULLY"
-        );
-
-        console.log(
-            `[CLIENT] Broadcasted Line: ${serverLine}`
-        );
-
-        console.log(
-            `[CLIENT] Excel Line      : ${localLine}`
-        );
-
-        console.log(
-            "[CLIENT] STARTING BUZZER..."
-        );
-
-
-        // Start local buzzer
-        await startBuzzer(
-            receivedLineNo
-        );
-
-    } catch (error) {
-
-        console.error("");
-        console.error(
-            `[CLIENT EXCEL ERROR] ${error.message}`
-        );
-        console.error(
-            "[CLIENT] BUZZER WILL NOT START"
-        );
-        console.error("");
-    }
-}
-
-
-// ============================================================
-// PROCESS TCP MESSAGE
-// ============================================================
-//
-// Expected server message:
-//
-// {"line_no": 1}\n
-//
-// Server MUST send a newline at the end:
-//
-// message = json.dumps({
-//     "line_no": line_no
-// }) + "\\n"
-//
-
-async function processTcpMessage(
-    message
-) {
-
-    const trimmedMessage =
-        message.trim();
-
-
-    // Ignore empty message
-    if (!trimmedMessage) {
-
-        return;
-    }
-
-
-    try {
-
-        console.log(
-            `[TCP] Raw Message: ${trimmedMessage}`
-        );
-
-
-        // Parse JSON
-        const parsed =
-            JSON.parse(
-                trimmedMessage
-            );
-
-
-        // IMPORTANT:
-        // Python server must send:
-        // {"line_no": 1}
-        const lineNo =
-            parsed.line_no;
-
-
-        // Check line_no exists
-        if (
-            lineNo === undefined ||
-            lineNo === null ||
-            String(lineNo).trim() === ""
-        ) {
-
-            console.error(
-                "[TCP ERROR] line_no missing from server message"
-            );
-
-            return;
-        }
-
-
-        // Process received line
-        await processBroadcast(
-            lineNo
-        );
-
-    } catch (error) {
-
-        console.error(
-            `[TCP MESSAGE ERROR] ${error.message}`
-        );
-
-        console.error(
-            `[TCP MESSAGE] Invalid message: ${trimmedMessage}`
-        );
-    }
-}
-
-
-// ============================================================
-// CONNECT TO MAIN TCP SERVER
-// ============================================================
-
-function connectToMainServer() {
-
-    // Prevent duplicate connection
-    if (
-        tcpClient &&
-        !tcpClient.destroyed
-    ) {
-
-        return;
-    }
-
-
-    console.log("");
-    console.log("================================================");
-    console.log(
-        `[TCP] CONNECTING TO MAIN SERVER`
-    );
-    console.log(
-        `[TCP] Server: ${SERVER_IP}:${SERVER_PORT}`
-    );
-    console.log("================================================");
-
-
-    tcpClient =
-        new net.Socket();
-
-
-    // Connect
-    tcpClient.connect(
-        SERVER_PORT,
-        SERVER_IP,
-        () => {
-
-            console.log("");
-            console.log("================================================");
-            console.log(
-                "[TCP] CONNECTED TO MAIN SERVER"
-            );
-            console.log(
-                `[TCP] ${SERVER_IP}:${SERVER_PORT}`
-            );
-            console.log("================================================");
-
-        }
-    );
-
-
-    // ========================================================
-    // RECEIVE DATA FROM MAIN SERVER
-    // ========================================================
-
-    tcpClient.on(
-        "data",
-        async (data) => {
-
-            // Add new data to buffer
-            receivedBuffer +=
-                data.toString(
-                    "utf8"
-                );
-
-
-            // Messages are separated by newline
-            const messages =
-                receivedBuffer.split(
-                    "\n"
-                );
-
-
-            // Keep incomplete last message
-            receivedBuffer =
-                messages.pop();
-
-
-            // Process all complete messages
-            for (
-                const message of messages
-            ) {
-
-                await processTcpMessage(
+                payload = json.loads(
                     message
-                );
+                )
 
-            }
+                line_no = str(
+                    payload.get("line_no", "")
+                ).strip()
 
-        }
-    );
+                cellqr = str(
+                    payload.get("cellqr", "")
+                ).strip()
 
+                if not line_no:
 
-    // ========================================================
-    // TCP ERROR
-    // ========================================================
+                    print(
+                        "⚠️ line_no missing."
+                    )
 
-    tcpClient.on(
-        "error",
-        (error) => {
+                    continue
 
-            console.error(
-                `[TCP ERROR] ${error.message}`
-            );
+                print(
+                    f"📡 Line   : {line_no}"
+                )
 
-        }
-    );
+                print(
+                    f"📦 CellQR : {cellqr}"
+                )
 
+            except json.JSONDecodeError:
 
-    // ========================================================
-    // TCP CONNECTION CLOSED
-    // ========================================================
+                print(
+                    "⚠️ Invalid JSON received."
+                )
 
-    tcpClient.on(
-        "close",
-        () => {
+                continue
 
-            console.log(
-                "[TCP] Disconnected from main server"
-            );
+            # =================================================
+            # BROADCAST TO ALL NODE CLIENTS
+            # =================================================
 
-            tcpClient = null;
+            broadcast_payload = json.dumps(
+                {
+                    "line_no": line_no,
+                    "cellqr": cellqr,
+                }
+            ) + "\n"
 
-            receivedBuffer = "";
+            await broadcast_message(
+                broadcast_payload
+            )
 
-            scheduleTcpReconnect();
+            # =================================================
+            # ACK TO FASTAPI
+            # =================================================
 
-        }
-    );
+            response = (
+                f"SERVER RECEIVED: "
+                f"{message}\n"
+            )
 
-}
+            try:
 
+                writer.write(
+                    response.encode("utf-8")
+                )
 
-// ============================================================
-// TCP AUTO RECONNECT
-// ============================================================
+                await writer.drain()
 
-function scheduleTcpReconnect() {
+                print(
+                    f"📤 ACK SENT : "
+                    f"{response.strip()}"
+                )
 
-    // Prevent multiple reconnect timers
-    if (tcpReconnectTimer) {
+            except Exception as e:
 
-        return;
-    }
+                print(
+                    f"⚠️ ACK failed: {e}"
+                )
 
+    except asyncio.CancelledError:
 
-    console.log(
-        `[TCP] Reconnecting in ${TCP_RECONNECT_DELAY / 1000} seconds...`
-    );
+        pass
 
+    except Exception as e:
 
-    tcpReconnectTimer =
-        setTimeout(
-            () => {
+        print("")
+        print("❌ CLIENT ERROR")
+        print(
+            f"Client : {client_address}"
+        )
+        print(
+            f"Error  : {e}"
+        )
 
-                tcpReconnectTimer = null;
+    finally:
 
-                connectToMainServer();
+        connected_clients.discard(
+            writer
+        )
 
-            },
-            TCP_RECONNECT_DELAY
-        );
-}
+        try:
 
+            writer.close()
 
-// ============================================================
-// SERIAL AUTO RECONNECT
-// ============================================================
+            await writer.wait_closed()
 
-function startSerialReconnectCheck() {
+        except Exception:
 
-    setInterval(
-        async () => {
+            pass
 
-            if (
-                !serialPort ||
-                !serialPort.isOpen
-            ) {
+        print("")
+        print("================================================")
+        print("🔌 TCP CLIENT CONNECTION CLOSED")
+        print("================================================")
+        print(
+            f"Client : {client_address}"
+        )
+        print(
+            f"Remaining Clients : "
+            f"{len(connected_clients)}"
+        )
+        print("================================================")
+        print("")
 
-                console.log(
-                    "[SERIAL] Relay disconnected. Trying to reconnect..."
-                );
 
-                await connectSerialRelay();
-            }
+# ============================================================
+# START TCP SERVER
+# ============================================================
 
-        },
-        SERIAL_RECONNECT_DELAY
-    );
-}
+async def main():
 
+    print("")
+    print("================================================")
+    print("🚀 BUZZER TCP SERVER STARTING")
+    print("================================================")
+    print(
+        f"Host : {HOST}"
+    )
+    print(
+        f"Port : {PORT}"
+    )
+    print(
+        "Mode : ONE SERVER / MULTIPLE CLIENTS"
+    )
+    print("================================================")
+    print("")
 
-// ============================================================
-// APPLICATION START
-// ============================================================
+    server = await asyncio.start_server(
+        handle_client,
+        HOST,
+        PORT,
+    )
 
-async function startApplication() {
+    print("")
+    print("================================================")
+    print("✅ TCP SERVER CREATED SUCCESSFULLY")
+    print("================================================")
 
-    console.log("");
-    console.log("================================================");
-    console.log(
-        "BUZZER TCP CLIENT STARTED"
-    );
-    console.log("================================================");
+    for sock in server.sockets or []:
 
-    console.log(
-        `Main Server IP : ${SERVER_IP}`
-    );
+        print(
+            f"📡 Listening : "
+            f"{sock.getsockname()}"
+        )
 
-    console.log(
-        `Main Server Port : ${SERVER_PORT}`
-    );
+    print(
+        "👥 Multiple clients can connect."
+    )
 
-    console.log(
-        `Serial Port : ${SERIAL_PORT}`
-    );
+    print(
+        "⏳ Waiting continuously for clients..."
+    )
 
-    console.log(
-        `Baud Rate : ${BAUD_RATE}`
-    );
+    print("================================================")
+    print("")
 
-    console.log(
-        `Excel File : ${EXCEL_FILE_PATH}`
-    );
+    async with server:
 
-    console.log(
-        `Excel Sheet : ${SHEET_NAME}`
-    );
+        await server.serve_forever()
 
-    console.log(
-        `Excel Line Cell : ${LINE_CELL}`
-    );
 
-    console.log(
-        `Buzzer Duration : ${BUZZER_DURATION / 1000} seconds`
-    );
+# ============================================================
+# RUN SERVER
+# ============================================================
 
-    console.log("================================================");
+if __name__ == "__main__":
 
+    try:
 
-    // ========================================================
-    // CONNECT SERIAL RELAY
-    // ========================================================
+        asyncio.run(main())
 
-    const serialConnected =
-        await connectSerialRelay();
+    except KeyboardInterrupt:
 
-
-    if (serialConnected) {
-
-        // Safety:
-        // Make sure buzzer is OFF when program starts.
-        try {
-
-            console.log(
-                "[STARTUP] Sending RELAY OFF command..."
-            );
-
-            await sendRelayCommand(
-                RELAY_OFF_COMMAND,
-                "RELAY OFF (STARTUP)"
-            );
-
-        } catch (error) {
-
-            console.error(
-                `[STARTUP ERROR] ${error.message}`
-            );
-        }
-
-    } else {
-
-        console.log(
-            "[STARTUP] Serial relay not connected. Auto reconnect enabled."
-        );
-    }
-
-
-    // ========================================================
-    // START SERIAL AUTO RECONNECT
-    // ========================================================
-
-    startSerialReconnectCheck();
-
-
-    // ========================================================
-    // CONNECT TO MAIN TCP SERVER
-    // ========================================================
-
-    connectToMainServer();
-}
-
-
-// ============================================================
-// SAFE SHUTDOWN
-// ============================================================
-
-async function shutdown(
-    signal
-) {
-
-    console.log("");
-    console.log(
-        `[SYSTEM] ${signal} received`
-    );
-
-    console.log(
-        "[SYSTEM] Shutting down buzzer client..."
-    );
-
-
-    // Stop buzzer
-    if (buzzerTimer) {
-
-        clearTimeout(
-            buzzerTimer
-        );
-
-        buzzerTimer = null;
-    }
-
-
-    // Turn relay OFF before closing
-    try {
-
-        if (
-            serialPort &&
-            serialPort.isOpen
-        ) {
-
-            await sendRelayCommand(
-                RELAY_OFF_COMMAND,
-                "RELAY OFF (SHUTDOWN)"
-            );
-        }
-
-    } catch (error) {
-
-        console.error(
-            `[SHUTDOWN ERROR] ${error.message}`
-        );
-    }
-
-
-    // Close TCP
-    if (
-        tcpClient &&
-        !tcpClient.destroyed
-    ) {
-
-        tcpClient.destroy();
-    }
-
-
-    // Close serial port
-    if (
-        serialPort &&
-        serialPort.isOpen
-    ) {
-
-        await new Promise(
-            (resolve) => {
-
-                serialPort.close(
-                    () => resolve()
-                );
-
-            }
-        );
-    }
-
-
-    console.log(
-        "[SYSTEM] Client stopped."
-    );
-
-    process.exit(0);
-}
-
-
-// ============================================================
-// SHUTDOWN EVENTS
-// ============================================================
-
-process.on(
-    "SIGINT",
-    () => shutdown("CTRL+C / SIGINT")
-);
-
-process.on(
-    "SIGTERM",
-    () => shutdown("SIGTERM")
-);
-
-
-// ============================================================
-// START CLIENT
-// ============================================================
-
-startApplication();
+        print("")
+        print("🛑 TCP SERVER STOPPED")
