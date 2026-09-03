@@ -1,372 +1,179 @@
-import asyncio
-import json
+const net = require("net");
 
+const HOST = "10.9.4.28";
+const PORT = 7280;
 
-# ============================================================
-# TCP SERVER CONFIGURATION
-# ============================================================
+let client = null;
+let reconnectTimer = null;
 
-HOST = "0.0.0.0"
-PORT = 7280
 
+// ============================================================
+// CONNECT TO TCP SERVER
+// ============================================================
 
-# ============================================================
-# CONNECTED CLIENTS
-# ============================================================
+function connectToServer() {
 
-connected_clients = set()
+    console.log("");
+    console.log("==========================================");
+    console.log("🔔 BUZZER TCP CLIENT");
+    console.log("==========================================");
+    console.log(`Server : ${HOST}`);
+    console.log(`Port   : ${PORT}`);
+    console.log("==========================================");
 
+    client = new net.Socket();
 
-# ============================================================
-# BROADCAST MESSAGE TO ALL CLIENTS
-# ============================================================
+    client.setKeepAlive(true, 10000);
 
-async def broadcast_message(message):
-
-    if not connected_clients:
-
-        print(
-            "⚠️ No connected TCP clients."
-        )
-
-        return
-
-    print("")
-    print("================================================")
-    print("📢 BROADCASTING TO ALL CLIENTS")
-    print("================================================")
-    print(
-        f"👥 Connected Clients : "
-        f"{len(connected_clients)}"
-    )
-    print(
-        f"📤 Message : {message.strip()}"
-    )
-    print("================================================")
-
-    disconnected_clients = set()
-
-    for writer in list(connected_clients):
-
-        try:
-
-            client_address = (
-                writer.get_extra_info("peername")
-            )
-
-            writer.write(
-                message.encode("utf-8")
-            )
-
-            await writer.drain()
-
-            print(
-                f"✅ Sent to : "
-                f"{client_address}"
-            )
-
-        except Exception as e:
-
-            client_address = (
-                writer.get_extra_info("peername")
-            )
-
-            print(
-                f"❌ Failed to send to "
-                f"{client_address}: {e}"
-            )
-
-            disconnected_clients.add(
-                writer
-            )
-
-    # --------------------------------------------------------
-    # Remove disconnected clients
-    # --------------------------------------------------------
-
-    for writer in disconnected_clients:
-
-        connected_clients.discard(
-            writer
-        )
-
-        try:
-
-            writer.close()
-
-            await writer.wait_closed()
-
-        except Exception:
-
-            pass
-
-    print("================================================")
-    print("✅ BROADCAST COMPLETED")
-    print("================================================")
-    print("")
-
-
-# ============================================================
-# HANDLE TCP CLIENT
-# ============================================================
-
-async def handle_client(
-    reader,
-    writer,
-):
-
-    client_address = (
-        writer.get_extra_info("peername")
-    )
-
-    connected_clients.add(writer)
-
-    print("")
-    print("================================================")
-    print("✅ TCP CLIENT CONNECTED")
-    print("================================================")
-    print(
-        f"Client : {client_address}"
-    )
-    print(
-        f"Total Clients : "
-        f"{len(connected_clients)}"
-    )
-    print("================================================")
-    print("")
-
-    try:
-
-        while True:
-
-            data = await reader.readline()
-
-            if not data:
-
-                print(
-                    f"❌ Client disconnected : "
-                    f"{client_address}"
-                )
-
-                break
-
-            message = data.decode(
-                "utf-8",
-                errors="ignore",
-            ).strip()
-
-            if not message:
-
-                continue
-
-            print("")
-            print("📥 DATA RECEIVED FROM FASTAPI")
-            print("------------------------------")
-            print(
-                f"Client  : {client_address}"
-            )
-            print(
-                f"Message : {message}"
-            )
-
-            # =================================================
-            # Validate JSON
-            # =================================================
-
-            try:
-
-                payload = json.loads(
-                    message
-                )
-
-                line_no = str(
-                    payload.get("line_no", "")
-                ).strip()
-
-                cellqr = str(
-                    payload.get("cellqr", "")
-                ).strip()
-
-                if not line_no:
-
-                    print(
-                        "⚠️ line_no missing."
-                    )
-
-                    continue
-
-                print(
-                    f"📡 Line   : {line_no}"
-                )
-
-                print(
-                    f"📦 CellQR : {cellqr}"
-                )
-
-            except json.JSONDecodeError:
-
-                print(
-                    "⚠️ Invalid JSON received."
-                )
-
-                continue
-
-            # =================================================
-            # BROADCAST TO ALL NODE CLIENTS
-            # =================================================
-
-            broadcast_payload = json.dumps(
-                {
-                    "line_no": line_no,
-                    "cellqr": cellqr,
-                }
-            ) + "\n"
-
-            await broadcast_message(
-                broadcast_payload
-            )
-
-            # =================================================
-            # ACK TO FASTAPI
-            # =================================================
-
-            response = (
-                f"SERVER RECEIVED: "
-                f"{message}\n"
-            )
-
-            try:
-
-                writer.write(
-                    response.encode("utf-8")
-                )
-
-                await writer.drain()
-
-                print(
-                    f"📤 ACK SENT : "
-                    f"{response.strip()}"
-                )
-
-            except Exception as e:
-
-                print(
-                    f"⚠️ ACK failed: {e}"
-                )
-
-    except asyncio.CancelledError:
-
-        pass
-
-    except Exception as e:
-
-        print("")
-        print("❌ CLIENT ERROR")
-        print(
-            f"Client : {client_address}"
-        )
-        print(
-            f"Error  : {e}"
-        )
-
-    finally:
-
-        connected_clients.discard(
-            writer
-        )
-
-        try:
-
-            writer.close()
-
-            await writer.wait_closed()
-
-        except Exception:
-
-            pass
-
-        print("")
-        print("================================================")
-        print("🔌 TCP CLIENT CONNECTION CLOSED")
-        print("================================================")
-        print(
-            f"Client : {client_address}"
-        )
-        print(
-            f"Remaining Clients : "
-            f"{len(connected_clients)}"
-        )
-        print("================================================")
-        print("")
-
-
-# ============================================================
-# START TCP SERVER
-# ============================================================
-
-async def main():
-
-    print("")
-    print("================================================")
-    print("🚀 BUZZER TCP SERVER STARTING")
-    print("================================================")
-    print(
-        f"Host : {HOST}"
-    )
-    print(
-        f"Port : {PORT}"
-    )
-    print(
-        "Mode : ONE SERVER / MULTIPLE CLIENTS"
-    )
-    print("================================================")
-    print("")
-
-    server = await asyncio.start_server(
-        handle_client,
-        HOST,
+    client.connect(
         PORT,
-    )
+        HOST,
+        () => {
 
-    print("")
-    print("================================================")
-    print("✅ TCP SERVER CREATED SUCCESSFULLY")
-    print("================================================")
-
-    for sock in server.sockets or []:
-
-        print(
-            f"📡 Listening : "
-            f"{sock.getsockname()}"
-        )
-
-    print(
-        "👥 Multiple clients can connect."
-    )
-
-    print(
-        "⏳ Waiting continuously for clients..."
-    )
-
-    print("================================================")
-    print("")
-
-    async with server:
-
-        await server.serve_forever()
+            console.log("");
+            console.log("==========================================");
+            console.log("✅ CONNECTED TO BUZZER TCP SERVER");
+            console.log("==========================================");
+            console.log(
+                `Server : ${HOST}:${PORT}`
+            );
+            console.log("Status : Listening for broadcasts");
+            console.log("==========================================");
+        }
+    );
 
 
-# ============================================================
-# RUN SERVER
-# ============================================================
+    // ========================================================
+    // RECEIVE BROADCAST
+    // ========================================================
 
-if __name__ == "__main__":
+    client.on("data", (data) => {
 
-    try:
+        const messages = data
+            .toString("utf-8")
+            .split("\n");
 
-        asyncio.run(main())
+        for (const message of messages) {
 
-    except KeyboardInterrupt:
+            const trimmedMessage =
+                message.trim();
 
-        print("")
-        print("🛑 TCP SERVER STOPPED")
+            if (!trimmedMessage) {
+                continue;
+            }
+
+            console.log("");
+            console.log("📥 BUZZER BROADCAST RECEIVED");
+            console.log("------------------------------------------");
+            console.log(
+                `Raw : ${trimmedMessage}`
+            );
+
+            try {
+
+                const payload = JSON.parse(
+                    trimmedMessage
+                );
+
+                const lineNo = String(
+                    payload.line_no || ""
+                ).trim();
+
+                const cellQr = String(
+                    payload.cellqr || ""
+                ).trim();
+
+                console.log(
+                    `📡 Line   : ${lineNo}`
+                );
+
+                console.log(
+                    `📦 CellQR : ${cellQr}`
+                );
+
+                // =================================================
+                // YOUR LOCAL BUZZER LOGIC GOES HERE
+                // =================================================
+
+                console.log(
+                    "🔔 BUZZER EVENT RECEIVED"
+                );
+
+            } catch (error) {
+
+                console.log(
+                    "⚠️ Invalid JSON received:",
+                    trimmedMessage
+                );
+
+            }
+        }
+    });
+
+
+    // ========================================================
+    // CONNECTION CLOSED
+    // ========================================================
+
+    client.on("close", () => {
+
+        console.log("");
+        console.log(
+            "❌ TCP CONNECTION CLOSED"
+        );
+
+        scheduleReconnect();
+    });
+
+
+    // ========================================================
+    // ERROR
+    // ========================================================
+
+    client.on("error", (err) => {
+
+        console.log("");
+        console.log(
+            "❌ TCP ERROR:"
+        );
+
+        console.log(
+            err.message
+        );
+
+    });
+}
+
+
+// ============================================================
+// RECONNECT
+// ============================================================
+
+function scheduleReconnect() {
+
+    if (reconnectTimer) {
+        return;
+    }
+
+    console.log(
+        "🔄 Reconnecting in 3 seconds..."
+    );
+
+    reconnectTimer = setTimeout(
+        () => {
+
+            reconnectTimer = null;
+
+            connectToServer();
+
+        },
+        3000
+    );
+}
+
+
+// ============================================================
+// START
+// ============================================================
+
+connectToServer();
