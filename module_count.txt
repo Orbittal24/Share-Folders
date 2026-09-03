@@ -68,3 +68,41 @@ GROUP BY
 ORDER BY
     x.HourBucket,
     mp.Pack_Name;
+
+
+
+
+///////////////////////////////
+
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                git branch: 'cell_scanning_buzzer',
+                    credentialsId: 'github-credentials',
+                    url: 'https://github.com/Orbitall24/Universal_MIS_Back_End.git'
+            }
+        }
+
+        stage('Check Source Code') {
+            steps {
+                bat '''
+                    echo ==============================
+                    echo Universal MIS Backend
+                    echo ==============================
+
+                    echo.
+                    echo Current Directory:
+                    cd
+
+                    echo.
+                    echo Repository Files:
+                    dir /s /b
+                '''
+            }
+        }
+    }
+}
