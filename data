@@ -1,13 +1,1648 @@
-{
-  "name": "cell-buzzer-tcp-client",
-  "version": "1.0.0",
-  "private": true,
-  "main": "client.js",
-  "scripts": {
-    "start": "node client.js"
-  },
-  "dependencies": {
-    "serialport": "^12.0.0",
-    "xlsx": "^0.18.5"
-  }
+import pyodbc
+import time
+import redis
+import json
+import re
+
+
+# ============================================================
+# REDIS CONFIG
+# ============================================================
+
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 31
+redis_password = "Gotion@123Strong!"
+
+r = redis.StrictRedis(
+    host=redis_host,
+    port=redis_port,
+    password=redis_password,
+    db=redis_db,
+    decode_responses=True
+)
+
+DUPLICATE_TTL_SECONDS = 3 * 24 * 60 * 60
+
+
+# ============================================================
+# RETRY CONFIG
+# ============================================================
+
+MAX_RETRY = 3
+RETRY_KEY_PREFIX = "retry:"
+
+# SQL connection retry
+SQL_CONNECTION_RETRY_COUNT = 5
+SQL_CONNECTION_RETRY_DELAY = 1
+
+# DB reconnect delay
+DB_RECONNECT_DELAY = 2
+
+
+# ============================================================
+# SAFE STRING
+# ============================================================
+
+def safe(val):
+    return "" if val is None else str(val)
+
+
+def extract_capacity(val):
+
+    if val is None:
+        return ""
+
+    val_str = str(val)
+
+    match = re.search(r"\d+(\.\d+)?", val_str)
+
+    if match:
+        return match.group(0)
+
+    return ""
+
+
+# ============================================================
+# DB CONFIG
+# ============================================================
+
+sqlConfig1 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "taco_treceability",
+    "user": "user_mis",
+    "password": "admin@123",
 }
+
+
+sqlConfig2 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "ocv_inventory_master",
+    "user": "user_mis",
+    "password": "admin@123",
+}
+
+
+# ============================================================
+# CONNECT DB
+# ============================================================
+
+def connect_db(config):
+
+    conn = pyodbc.connect(
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={config['server']};"
+        f"DATABASE={config['database']};"
+        f"UID={config['user']};"
+        f"PWD={config['password']};"
+        f"TrustServerCertificate=yes;"
+        f"Connection Timeout=5;"
+    )
+
+    conn.autocommit = False
+
+    return conn
+
+
+# ============================================================
+# CHECK SQL CONNECTION ERROR
+# ============================================================
+
+def is_sql_connection_error(error):
+
+    error_text = str(error).upper()
+
+    connection_errors = [
+        "08S01",
+        "08001",
+        "08003",
+        "08004",
+        "08007",
+        "08S02",
+        "08S03",
+        "COMMUNICATION LINK FAILURE",
+        "CONNECTION IS BROKEN",
+        "CONNECTION RESET",
+        "CONNECTION WAS CLOSED",
+        "TCP PROVIDER",
+        "SQL SERVER DOES NOT EXIST",
+        "GENERAL NETWORK ERROR",
+        "SERVER IS NOT FOUND",
+        "TRANSPORT-LEVEL ERROR",
+        "BROKEN PIPE",
+        "CONNECTION FAILED"
+    ]
+
+    return any(
+        error_code in error_text
+        for error_code in connection_errors
+    )
+
+
+# ============================================================
+# CLOSE CONNECTION SAFELY
+# ============================================================
+
+def close_connection(conn, name="DB"):
+
+    if conn is None:
+        return
+
+    try:
+
+        conn.close()
+
+        print(
+            f"[{name}] CONNECTION CLOSED."
+        )
+
+    except Exception as e:
+
+        print(
+            f"[{name}] CONNECTION CLOSE FAILED :",
+            e
+        )
+
+
+# ============================================================
+# TEST CONNECTION
+# ============================================================
+
+def test_connection(conn):
+
+    cursor = None
+
+    try:
+
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT 1"
+        )
+
+        cursor.fetchone()
+
+        return True
+
+    except Exception:
+
+        return False
+
+    finally:
+
+        try:
+
+            if cursor:
+                cursor.close()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# RECONNECT DATABASE
+# ============================================================
+
+def reconnect_db(old_conn, config, name="DB"):
+
+    print(
+        f"[{name}] RECONNECT STARTED..."
+    )
+
+    close_connection(
+        old_conn,
+        name
+    )
+
+    while True:
+
+        try:
+
+            print(
+                f"[{name}] TRYING NEW CONNECTION..."
+            )
+
+            new_conn = connect_db(
+                config
+            )
+
+            if test_connection(new_conn):
+
+                print(
+                    f"[{name}] RECONNECTED SUCCESSFULLY."
+                )
+
+                return new_conn
+
+            else:
+
+                print(
+                    f"[{name}] CONNECTION TEST FAILED."
+                )
+
+                close_connection(
+                    new_conn,
+                    name
+                )
+
+        except Exception as e:
+
+            print(
+                f"[{name}] RECONNECT FAILED :",
+                e
+            )
+
+        print(
+            f"[{name}] RETRYING IN "
+            f"{DB_RECONNECT_DELAY} SECOND(S)..."
+        )
+
+        time.sleep(
+            DB_RECONNECT_DELAY
+        )
+
+
+# ============================================================
+# DATE MAPS
+# ============================================================
+
+yearMap = {
+    "B": 21,
+    "C": 22,
+    "D": 23,
+    "E": 24,
+    "F": 25,
+    "G": 26,
+    "H": 27,
+    "J": 28,
+    "K": 29,
+    "L": 30,
+    "M": 31,
+    "N": 32,
+    "P": 33,
+    "R": 34,
+    "S": 35,
+    "T": 36,
+    "V": 37,
+    "W": 38,
+    "X": 39,
+    "Y": 40,
+    "1": 41,
+    "2": 42,
+    "3": 43,
+    "4": 44,
+    "5": 45,
+    "6": 46,
+    "7": 47,
+    "8": 48,
+    "9": 49,
+    "A": 50,
+}
+
+
+monthMap = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "A": 10,
+    "B": 11,
+    "C": 12
+}
+
+
+dayMap = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "A": 10,
+    "B": 11,
+    "C": 12,
+    "D": 13,
+    "E": 14,
+    "F": 15,
+    "G": 16,
+    "H": 17,
+    "J": 18,
+    "K": 19,
+    "L": 20,
+    "M": 21,
+    "N": 22,
+    "P": 23,
+    "R": 24,
+    "S": 25,
+    "T": 26,
+    "V": 27,
+    "W": 28,
+    "X": 29,
+    "Y": 30,
+    "0": 31
+}
+
+
+# ============================================================
+# ENSURE TABLE
+# ============================================================
+
+def ensure_table(dst_cursor, tableName):
+
+    dst_cursor.execute(f"""
+    IF NOT EXISTS (
+        SELECT 1
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME = '{tableName}'
+    )
+    BEGIN
+
+        CREATE TABLE {tableName} (
+            sr_no INT IDENTITY(1,1) PRIMARY KEY,
+            cellqr NVARCHAR(50),
+            voltage NVARCHAR(50),
+            ir NVARCHAR(50),
+            class_grade NVARCHAR(30),
+            capacity NVARCHAR(50),
+            thickness NVARCHAR(50),
+            k_value NVARCHAR(50),
+            negative_voltage NVARCHAR(50),
+            cell_status NVARCHAR(20),
+            ocv_mc_no NVARCHAR(40),
+            first_para_time DATETIME,
+            last_para_time DATETIME,
+            laser_status VARCHAR(50),
+            batch VARCHAR(100),
+            plant_code VARCHAR(50)
+        )
+
+    END
+    """)
+
+
+# ============================================================
+# MOVE TO REJECTION
+# ============================================================
+
+def move_to_rejection(src_conn, row):
+
+    cursor = None
+
+    try:
+
+        cursor = src_conn.cursor()
+
+        print(
+            "INSERTING INTO REJECTION :",
+            row.cell_qrcode
+        )
+
+        cursor.execute("""
+        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
+        (
+            cell_qrcode,
+            voltage,
+            ir,
+            today_date,
+            updated_time,
+            machine_location,
+            shift,
+            used_on_line,
+            kvalue,
+            grade,
+            cell_capacity,
+            cell_class
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            row.cell_qrcode,
+            row.voltage,
+            row.ir,
+            row.today_date,
+            row.updated_time,
+            row.machine_location,
+            row.shift,
+            row.used_on_line,
+            row.kvalue,
+            row.grade,
+            row.cell_capacity,
+            row.cell_class
+        ))
+
+        # ====================================================
+        # ACKNOWLEDGEMENT
+        # ====================================================
+        #
+        # Commit means rejection insertion succeeded.
+        # Only after this succeeds will mirror be deleted.
+        #
+
+        src_conn.commit()
+
+        print(
+            "REJECTION ACKNOWLEDGED :",
+            row.cell_qrcode
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "REJECTION INSERT FAILED :",
+            e
+        )
+
+        try:
+
+            src_conn.rollback()
+
+        except Exception as rollback_error:
+
+            print(
+                "REJECTION ROLLBACK FAILED :",
+                rollback_error
+            )
+
+        return False
+
+    finally:
+
+        try:
+
+            if cursor:
+                cursor.close()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# HANDLE FAILURE
+# ============================================================
+
+def handle_failure(src_conn, row):
+
+    qr = safe(
+        row.cell_qrcode
+    )
+
+    print(
+        "FAILURE HANDLER STARTED :",
+        qr
+    )
+
+    # ========================================================
+    # INSERT INTO REJECTION
+    # ========================================================
+
+    rejection_success = move_to_rejection(
+        src_conn,
+        row
+    )
+
+    # ========================================================
+    # ONLY DELETE AFTER ACKNOWLEDGEMENT
+    # ========================================================
+
+    if rejection_success:
+
+        cursor = None
+
+        try:
+
+            cursor = src_conn.cursor()
+
+            cursor.execute("""
+            DELETE FROM taco_treceability.ocv_machine_data_mirror
+            WHERE cell_qrcode=?
+            """, qr)
+
+            src_conn.commit()
+
+            print(
+                "SOURCE DELETED AFTER REJECTION ACK :",
+                qr
+            )
+
+            return True
+
+        except Exception as delete_error:
+
+            print(
+                "DELETE AFTER REJECTION FAILED :",
+                delete_error
+            )
+
+            try:
+
+                src_conn.rollback()
+
+            except Exception as rollback_error:
+
+                print(
+                    "DELETE ROLLBACK FAILED :",
+                    rollback_error
+                )
+
+            return False
+
+        finally:
+
+            try:
+
+                if cursor:
+                    cursor.close()
+
+            except Exception:
+                pass
+
+    else:
+
+        print(
+            "REJECTION NOT ACKNOWLEDGED - SOURCE KEPT :",
+            qr
+        )
+
+        return False
+
+
+# ============================================================
+# DELETE SOURCE AFTER SQL + REDIS SUCCESS
+# ============================================================
+
+def delete_source(src_conn, qr):
+
+    cursor = None
+
+    try:
+
+        cursor = src_conn.cursor()
+
+        cursor.execute("""
+        DELETE FROM taco_treceability.ocv_machine_data_mirror
+        WHERE cell_qrcode=?
+        """, qr)
+
+        src_conn.commit()
+
+        print(
+            "SOURCE DELETED :",
+            qr
+        )
+
+        return True
+
+    except Exception as delete_error:
+
+        print(
+            "DELETE FAILED :",
+            delete_error
+        )
+
+        try:
+
+            src_conn.rollback()
+
+        except Exception as rollback_error:
+
+            print(
+                "DELETE ROLLBACK FAILED :",
+                rollback_error
+            )
+
+        return False
+
+    finally:
+
+        try:
+
+            if cursor:
+                cursor.close()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# SQL PROCESS WITH RECONNECT + RETRY
+# ============================================================
+
+def process_sql_record(
+    dst_conn,
+    tableName,
+    qr,
+    row,
+    capacity_val,
+    dateCode,
+    code12_13
+):
+
+    sql_success = False
+    connection_error = False
+
+    for sql_attempt in range(
+        1,
+        SQL_CONNECTION_RETRY_COUNT + 1
+    ):
+
+        dst_cursor = None
+
+        try:
+
+            print(
+                f"[SQL] ATTEMPT "
+                f"{sql_attempt}/"
+                f"{SQL_CONNECTION_RETRY_COUNT} :",
+                qr
+            )
+
+            # =================================================
+            # NEW CURSOR
+            # =================================================
+
+            dst_cursor = dst_conn.cursor()
+
+            # =================================================
+            # ENSURE TABLE
+            # =================================================
+
+            ensure_table(
+                dst_cursor,
+                tableName
+            )
+
+            # =================================================
+            # CHECK EXISTING RECORD
+            # =================================================
+
+            dst_cursor.execute(
+                f"""
+                SELECT cellqr
+                FROM {tableName}
+                WHERE cellqr=?
+                """,
+                qr
+            )
+
+            exists = dst_cursor.fetchone()
+
+            # =================================================
+            # UPDATE EXISTING SQL RECORD
+            # =================================================
+
+            if exists:
+
+                dst_cursor.execute(
+                    f"""
+                    UPDATE {tableName}
+                    SET
+                        voltage=?,
+                        ir=?,
+                        class_grade=?,
+                        capacity=?,
+                        k_value=?,
+                        ocv_mc_no=?,
+                        first_para_time=?,
+                        last_para_time=?,
+                        batch=?,
+                        plant_code=?
+                    WHERE cellqr=?
+                    """,
+                    (
+                        safe(row.voltage),
+                        safe(row.ir),
+                        safe(row.cell_class),
+                        capacity_val,
+                        safe(row.kvalue),
+                        safe(row.machine_location),
+                        row.today_date,
+                        row.today_date,
+                        dateCode,
+                        code12_13,
+                        qr
+                    )
+                )
+
+                print(
+                    "UPDATED :",
+                    qr
+                )
+
+            # =================================================
+            # INSERT NEW SQL RECORD
+            # =================================================
+
+            else:
+
+                dst_cursor.execute(
+                    f"""
+                    INSERT INTO {tableName}
+                    (
+                        cellqr,
+                        voltage,
+                        ir,
+                        class_grade,
+                        capacity,
+                        thickness,
+                        k_value,
+                        negative_voltage,
+                        cell_status,
+                        ocv_mc_no,
+                        first_para_time,
+                        last_para_time,
+                        laser_status,
+                        batch,
+                        plant_code
+                    )
+                    VALUES
+                    (
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        NULL,
+                        ?,
+                        NULL,
+                        'OK',
+                        ?,
+                        ?,
+                        ?,
+                        NULL,
+                        ?,
+                        ?
+                    )
+                    """,
+                    (
+                        qr,
+                        safe(row.voltage),
+                        safe(row.ir),
+                        safe(row.cell_class),
+                        capacity_val,
+                        safe(row.kvalue),
+                        safe(row.machine_location),
+                        row.today_date,
+                        row.today_date,
+                        dateCode,
+                        code12_13
+                    )
+                )
+
+                print(
+                    "INSERTED :",
+                    qr
+                )
+
+            # =================================================
+            # SQL COMMIT
+            # =================================================
+
+            dst_conn.commit()
+
+            sql_success = True
+
+            print(
+                "SQL SUCCESS :",
+                qr
+            )
+
+            return {
+                "success": True,
+                "connection_error": False,
+                "conn": dst_conn
+            }
+
+        except Exception as sql_error:
+
+            print(
+                f"[SQL] FAILED ATTEMPT "
+                f"{sql_attempt}/"
+                f"{SQL_CONNECTION_RETRY_COUNT} :",
+                sql_error
+            )
+
+            try:
+
+                dst_conn.rollback()
+
+            except Exception as rollback_error:
+
+                print(
+                    "[SQL] ROLLBACK FAILED :",
+                    rollback_error
+                )
+
+            # =================================================
+            # SQL COMMUNICATION FAILURE
+            # =================================================
+
+            if is_sql_connection_error(
+                sql_error
+            ):
+
+                connection_error = True
+
+                print(
+                    "[SQL] COMMUNICATION FAILURE DETECTED."
+                )
+
+                # ---------------------------------------------
+                # RECONNECT DESTINATION SQL
+                # ---------------------------------------------
+
+                dst_conn = reconnect_db(
+                    dst_conn,
+                    sqlConfig2,
+                    "DESTINATION SQL"
+                )
+
+                # ---------------------------------------------
+                # RETRY SAME RECORD
+                # ---------------------------------------------
+
+                if sql_attempt < SQL_CONNECTION_RETRY_COUNT:
+
+                    print(
+                        "[SQL] RETRYING SAME RECORD AFTER "
+                        "RECONNECT :",
+                        qr
+                    )
+
+                    time.sleep(
+                        SQL_CONNECTION_RETRY_DELAY
+                    )
+
+                    continue
+
+                else:
+
+                    print(
+                        "[SQL] ALL SQL CONNECTION RETRIES "
+                        "EXHAUSTED :",
+                        qr
+                    )
+
+                    # IMPORTANT:
+                    #
+                    # We DO NOT stop here.
+                    #
+                    # The caller will continue to Redis.
+                    #
+
+                    return {
+                        "success": False,
+                        "connection_error": True,
+                        "conn": dst_conn
+                    }
+
+            # =================================================
+            # NORMAL SQL ERROR
+            # =================================================
+
+            else:
+
+                print(
+                    "[SQL] NON-CONNECTION ERROR."
+                )
+
+                return {
+                    "success": False,
+                    "connection_error": False,
+                    "conn": dst_conn
+                }
+
+        finally:
+
+            try:
+
+                if dst_cursor:
+                    dst_cursor.close()
+
+            except Exception:
+                pass
+
+    return {
+        "success": sql_success,
+        "connection_error": connection_error,
+        "conn": dst_conn
+    }
+
+
+# ============================================================
+# PROCESS RECORD
+# ============================================================
+
+def process_record(src_conn, dst_conn):
+
+    src_cursor = None
+    row = None
+
+    # ========================================================
+    # STATUS FLAGS
+    # ========================================================
+
+    sql_success = False
+    redis_success = False
+    sql_connection_error = False
+
+    try:
+
+        # ====================================================
+        # GET SOURCE RECORD
+        # ====================================================
+
+        src_cursor = src_conn.cursor()
+
+        src_cursor.execute("""
+        SELECT TOP 1 *
+        FROM taco_treceability.ocv_machine_data_mirror
+        WHERE machine_location='line5_line6'
+        ORDER BY sr_no ASC
+        """)
+
+        row = src_cursor.fetchone()
+
+        if not row:
+
+            print(
+                "No records..."
+            )
+
+            return src_conn, dst_conn
+
+        qr = safe(
+            row.cell_qrcode
+        )
+
+        print(
+            "\n========= NEW RECORD ========="
+        )
+
+        print(
+            "QR :",
+            qr
+        )
+
+        # ====================================================
+        # QR VALIDATION
+        # ====================================================
+
+        if len(qr) < 16:
+
+            raise Exception(
+                "QR too short"
+            )
+
+        # ====================================================
+        # DATE CODE
+        # ====================================================
+
+        code12_13 = qr[12:14]
+
+        dateCode = (
+            qr[8:11]
+            if code12_13 == "BV"
+            else qr[14:17]
+        )
+
+        # ====================================================
+        # DATE MAPPING
+        # ====================================================
+
+        yearValue = yearMap.get(
+            dateCode[0]
+        )
+
+        monthValue = monthMap.get(
+            dateCode[1]
+        )
+
+        dayValue = dayMap.get(
+            dateCode[2]
+        )
+
+        if (
+            not yearValue
+            or not monthValue
+            or not dayValue
+        ):
+
+            raise Exception(
+                "Date mapping failed"
+            )
+
+        year = 2000 + yearValue
+
+        month = f"{monthValue:02d}"
+
+        day = f"{dayValue:02d}"
+
+        tableName = (
+            f"ocvcell_inventory_data_"
+            f"{year}_{month}_{day}"
+        )
+
+        print(
+            "TABLE :",
+            tableName
+        )
+
+        # ====================================================
+        # CAPACITY
+        # ====================================================
+
+        capacity_val = extract_capacity(
+            row.cell_capacity
+        )
+
+        # ====================================================
+        # SQL PROCESS
+        # ====================================================
+
+        sql_result = process_sql_record(
+            dst_conn,
+            tableName,
+            qr,
+            row,
+            capacity_val,
+            dateCode,
+            code12_13
+        )
+
+        # IMPORTANT:
+        #
+        # process_sql_record may have replaced the
+        # broken destination connection.
+
+        dst_conn = sql_result[
+            "conn"
+        ]
+
+        sql_success = sql_result[
+            "success"
+        ]
+
+        sql_connection_error = sql_result[
+            "connection_error"
+        ]
+
+        # ====================================================
+        # REDIS PROCESS
+        # ====================================================
+        #
+        # IMPORTANT:
+        #
+        # Redis is ALWAYS attempted.
+        #
+        # It does not matter whether SQL succeeded
+        # or failed.
+        #
+
+        try:
+
+            redis_payload = {
+                "cellqr": qr,
+                "voltage": safe(row.voltage),
+                "ir": safe(row.ir),
+                "class_grade": safe(row.cell_class),
+                "capacity": capacity_val,
+                "k_value": safe(row.kvalue),
+                "ocv_mc_no": safe(row.machine_location),
+                "first_para_time": str(row.today_date),
+                "last_para_time": str(row.today_date),
+                "batch": dateCode,
+                "plant_code": code12_13
+            }
+
+            # =================================================
+            # REDIS INSERT
+            # =================================================
+
+            r.setex(
+                f"cell:{qr}",
+                DUPLICATE_TTL_SECONDS,
+                json.dumps(redis_payload)
+            )
+
+            redis_success = True
+
+            print(
+                "REDIS SUCCESS :",
+                redis_payload
+            )
+
+        except Exception as redis_error:
+
+            print(
+                "REDIS FAILED :",
+                redis_error
+            )
+
+            redis_success = False
+
+        # ====================================================
+        # FINAL RESULT
+        # ====================================================
+
+        # ====================================================
+        # CASE 1
+        # SQL SUCCESS + REDIS SUCCESS
+        # ====================================================
+
+        if sql_success and redis_success:
+
+            print(
+                "SQL + REDIS SUCCESS :",
+                qr
+            )
+
+            delete_source(
+                src_conn,
+                qr
+            )
+
+            return src_conn, dst_conn
+
+        # ====================================================
+        # CASE 2
+        # SQL FAILED + REDIS SUCCESS
+        # ====================================================
+        #
+        # This includes:
+        #
+        #   - 08S01 communication failure
+        #   - SQL connection failure
+        #   - normal SQL failure
+        #
+        # Redis succeeded.
+        #
+        # Therefore:
+        #
+        #   Redis SUCCESS
+        #       ↓
+        #   Rejection INSERT
+        #       ↓
+        #   ACKNOWLEDGEMENT
+        #       ↓
+        #   DELETE MIRROR
+        #
+
+        if not sql_success and redis_success:
+
+            print(
+                "SQL FAILED + REDIS SUCCESS :",
+                qr
+            )
+
+            if sql_connection_error:
+
+                print(
+                    "SQL COMMUNICATION FAILURE "
+                    "BUT REDIS SUCCESSFUL :",
+                    qr
+                )
+
+            print(
+                "INSERTING FAILED SQL DATA INTO REJECTION :",
+                qr
+            )
+
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
+
+            if rejection_result:
+
+                print(
+                    "SQL FAILED DATA MOVED TO REJECTION :",
+                    qr
+                )
+
+            else:
+
+                print(
+                    "REJECTION FAILED - "
+                    "SOURCE KEPT IN MIRROR :",
+                    qr
+                )
+
+            return src_conn, dst_conn
+
+        # ====================================================
+        # CASE 3
+        # SQL SUCCESS + REDIS FAILED
+        # ====================================================
+
+        if sql_success and not redis_success:
+
+            print(
+                "SQL SUCCESS + REDIS FAILED :",
+                qr
+            )
+
+            print(
+                "INSERTING REDIS FAILED DATA INTO REJECTION :",
+                qr
+            )
+
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
+
+            if rejection_result:
+
+                print(
+                    "REDIS FAILED DATA MOVED TO REJECTION :",
+                    qr
+                )
+
+            else:
+
+                print(
+                    "REJECTION FAILED - "
+                    "SOURCE KEPT IN MIRROR :",
+                    qr
+                )
+
+            return src_conn, dst_conn
+
+        # ====================================================
+        # CASE 4
+        # SQL FAILED + REDIS FAILED
+        # ====================================================
+        #
+        # Both failed.
+        #
+        # Existing logic preserved:
+        #
+        #   Rejection INSERT
+        #       ↓
+        #   ACK
+        #       ↓
+        #   Delete Mirror
+        #
+        # If rejection also fails, mirror remains.
+        #
+
+        if not sql_success and not redis_success:
+
+            print(
+                "SQL FAILED + REDIS FAILED :",
+                qr
+            )
+
+            print(
+                "BOTH FAILED - "
+                "INSERTING INTO REJECTION :",
+                qr
+            )
+
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
+
+            if rejection_result:
+
+                print(
+                    "BOTH FAILED - DATA MOVED TO REJECTION :",
+                    qr
+                )
+
+            else:
+
+                print(
+                    "BOTH FAILED - "
+                    "SOURCE KEPT IN MIRROR :",
+                    qr
+                )
+
+            return src_conn, dst_conn
+
+        return src_conn, dst_conn
+
+    # ========================================================
+    # OUTER PROCESS ERROR
+    # ========================================================
+
+    except Exception as e:
+
+        print(
+            "PROCESS ERROR :",
+            e
+        )
+
+        # ====================================================
+        # SOURCE SQL CONNECTION FAILURE
+        # ====================================================
+
+        if is_sql_connection_error(e):
+
+            print(
+                "SOURCE SQL COMMUNICATION FAILURE DETECTED."
+            )
+
+            # Do not try rejection using a broken source
+            # connection.
+            #
+            # Main loop will reconnect source SQL.
+            #
+            # Mirror record remains safe.
+
+            src_conn = reconnect_db(
+                src_conn,
+                sqlConfig1,
+                "SOURCE SQL"
+            )
+
+            return src_conn, dst_conn
+
+        # ====================================================
+        # NORMAL UNEXPECTED ERROR
+        # ====================================================
+
+        if row:
+
+            try:
+
+                handle_failure(
+                    src_conn,
+                    row
+                )
+
+            except Exception as failure_error:
+
+                print(
+                    "FAILURE HANDLER ERROR :",
+                    failure_error
+                )
+
+        return src_conn, dst_conn
+
+    finally:
+
+        try:
+
+            if src_cursor:
+                src_cursor.close()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
+
+def start():
+
+    src_conn = None
+    dst_conn = None
+
+    # ========================================================
+    # SOURCE DATABASE INITIAL CONNECTION
+    # ========================================================
+
+    while True:
+
+        try:
+
+            print(
+                "[SOURCE SQL] CONNECTING..."
+            )
+
+            src_conn = connect_db(
+                sqlConfig1
+            )
+
+            print(
+                "[SOURCE SQL] CONNECTED SUCCESSFULLY."
+            )
+
+            break
+
+        except Exception as e:
+
+            print(
+                "[SOURCE SQL] CONNECTION FAILED :",
+                e
+            )
+
+            print(
+                f"[SOURCE SQL] RETRYING IN "
+                f"{DB_RECONNECT_DELAY} SECOND(S)..."
+            )
+
+            time.sleep(
+                DB_RECONNECT_DELAY
+            )
+
+    # ========================================================
+    # DESTINATION DATABASE INITIAL CONNECTION
+    # ========================================================
+
+    while True:
+
+        try:
+
+            print(
+                "[DESTINATION SQL] CONNECTING..."
+            )
+
+            dst_conn = connect_db(
+                sqlConfig2
+            )
+
+            print(
+                "[DESTINATION SQL] CONNECTED SUCCESSFULLY."
+            )
+
+            break
+
+        except Exception as e:
+
+            print(
+                "[DESTINATION SQL] CONNECTION FAILED :",
+                e
+            )
+
+            print(
+                f"[DESTINATION SQL] RETRYING IN "
+                f"{DB_RECONNECT_DELAY} SECOND(S)..."
+            )
+
+            time.sleep(
+                DB_RECONNECT_DELAY
+            )
+
+    # ========================================================
+    # SYSTEM START
+    # ========================================================
+
+    print(
+        "===================================================="
+    )
+
+    print(
+        " OCV CELL DATA MIRROR SERVICE"
+    )
+
+    print(
+        "===================================================="
+    )
+
+    print(
+        "SOURCE DB      : taco_treceability"
+    )
+
+    print(
+        "DESTINATION DB : ocv_inventory_master"
+    )
+
+    print(
+        "REDIS DB       :",
+        redis_db
+    )
+
+    print(
+        "SYSTEM STARTED"
+    )
+
+    print(
+        "===================================================="
+    )
+
+    # ========================================================
+    # CONTINUOUS PROCESSING LOOP
+    # ========================================================
+
+    while True:
+
+        try:
+
+            # =================================================
+            # CHECK SOURCE CONNECTION
+            # =================================================
+
+            if not test_connection(src_conn):
+
+                print(
+                    "[SOURCE SQL] CONNECTION NOT HEALTHY."
+                )
+
+                src_conn = reconnect_db(
+                    src_conn,
+                    sqlConfig1,
+                    "SOURCE SQL"
+                )
+
+            # =================================================
+            # CHECK DESTINATION CONNECTION
+            # =================================================
+
+            if not test_connection(dst_conn):
+
+                print(
+                    "[DESTINATION SQL] CONNECTION NOT HEALTHY."
+                )
+
+                dst_conn = reconnect_db(
+                    dst_conn,
+                    sqlConfig2,
+                    "DESTINATION SQL"
+                )
+
+            # =================================================
+            # PROCESS RECORD
+            # =================================================
+
+            src_conn, dst_conn = process_record(
+                src_conn,
+                dst_conn
+            )
+
+        except Exception as main_error:
+
+            print(
+                "MAIN LOOP ERROR :",
+                main_error
+            )
+
+            # =================================================
+            # SOURCE SQL RECOVERY
+            # =================================================
+
+            try:
+
+                if not test_connection(src_conn):
+
+                    print(
+                        "[MAIN] SOURCE SQL CONNECTION LOST."
+                    )
+
+                    src_conn = reconnect_db(
+                        src_conn,
+                        sqlConfig1,
+                        "SOURCE SQL"
+                    )
+
+            except Exception as source_error:
+
+                print(
+                    "[MAIN] SOURCE RECONNECT ERROR :",
+                    source_error
+                )
+
+            # =================================================
+            # DESTINATION SQL RECOVERY
+            # =================================================
+
+            try:
+
+                if not test_connection(dst_conn):
+
+                    print(
+                        "[MAIN] DESTINATION SQL CONNECTION LOST."
+                    )
+
+                    dst_conn = reconnect_db(
+                        dst_conn,
+                        sqlConfig2,
+                        "DESTINATION SQL"
+                    )
+
+            except Exception as destination_error:
+
+                print(
+                    "[MAIN] DESTINATION RECONNECT ERROR :",
+                    destination_error
+                )
+
+        # =====================================================
+        # VERY SHORT DELAY
+        # =====================================================
+
+        time.sleep(
+            0.1
+        )
+
+
+# ============================================================
+# START
+# ============================================================
+
+if __name__ == "__main__":
+
+    start()
