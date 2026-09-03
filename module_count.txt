@@ -104,5 +104,19 @@ pipeline {
                 '''
             }
         }
+
+        stage('Run FastAPI') {
+            steps {
+                bat '''
+                    echo ==============================
+                    echo Starting FastAPI
+                    echo Port: 3260
+                    echo Workers: 1
+                    echo ==============================
+
+                    python -m uvicorn app.main:app --host 0.0.0.0 --port 3260 --workers 1
+                '''
+            }
+        }
     }
 }
