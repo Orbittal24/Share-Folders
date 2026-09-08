@@ -125,26 +125,55 @@ pipeline {
     agent any
 
     stages {
+
         stage('Start Manual OCV Services') {
             steps {
+
                 bat '''
                     @echo off
 
-                    set "PM2_CONFIG=C:\Project\Services\USER_services\C01071714 path services____Shubham\TML_Lines_Live\pm2-manual_ocv.json"
+                    echo ========================================
+                    echo   STARTING MANUAL OCV SERVICES
+                    echo ========================================
+                    echo.
 
-                    echo Starting Manual OCV services...
+                    set "PM2_CONFIG=C:\\Project\\Services\\USER_services\\C01071714 path services____Shubham\\TML_Lines_Live\\pm2-manual_ocv.json"
+
+                    echo PM2 Config:
+                    echo %PM2_CONFIG%
+                    echo.
 
                     if not exist "%PM2_CONFIG%" (
-                        echo ERROR: JSON file not found:
+                        echo ERROR: PM2 JSON file not found.
+                        echo.
+                        echo Path:
                         echo %PM2_CONFIG%
                         exit /b 1
                     )
 
+                    echo JSON file found successfully.
+                    echo.
+
+                    echo Starting PM2 services...
                     pm2 start "%PM2_CONFIG%" --update-env
 
+                    if %errorlevel% neq 0 (
+                        echo ERROR: Failed to start PM2 services.
+                        exit /b 1
+                    )
+
                     echo.
-                    echo PM2 Status:
+                    echo ========================================
+                    echo          PM2 SERVICE STATUS
+                    echo ========================================
+
                     pm2 status
+
+                    echo.
+                    echo ========================================
+                    echo   MANUAL OCV SERVICES STARTED
+                    echo ========================================
+
                 '''
             }
         }
