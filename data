@@ -1,372 +1,974 @@
-import asyncio
-import json
+const net = require("net");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const XLSX = require("xlsx");
+const { SerialPort } = require("serialport");
 
 
-# ============================================================
-# TCP SERVER CONFIGURATION
-# ============================================================
+// ============================================================
+// TCP SERVER CONFIGURATION
+// ============================================================
 
-HOST = "0.0.0.0"
-PORT = 7287
+const HOST = "10.9.4.28";
+const PORT = 7287;
 
 
-# ============================================================
-# CONNECTED CLIENTS
-# ============================================================
+// ============================================================
+// SERIAL PORT CONFIGURATION
+// ============================================================
 
-connected_clients = set()
+const SERIAL_PORT = "COM4";
+const SERIAL_BAUD_RATE = 9600;
 
 
-# ============================================================
-# BROADCAST MESSAGE TO ALL CLIENTS
-# ============================================================
+// ============================================================
+// EXCEL CONFIGURATION
+// ============================================================
 
-async def broadcast_message(message):
+// Expected file:
+// C:\Users\<WindowsUser>\Desktop\buzzer_line.xlsx
+//
+// Sheet:
+// Sheet1
+//
+// Line number:
+// A1
 
-    if not connected_clients:
+const EXCEL_FILE_NAME = "buzzer_line.xlsx";
 
-        print(
-            "⚠️ No connected TCP clients."
-        )
+const EXCEL_FILE_PATH = path.join(
+    os.homedir(),
+    "Desktop",
+    EXCEL_FILE_NAME
+);
 
-        return
+const EXCEL_SHEET_NAME = "Sheet1";
+const EXCEL_LINE_CELL = "A1";
 
-    print("")
-    print("================================================")
-    print("📢 BROADCASTING TO ALL CLIENTS")
-    print("================================================")
-    print(
-        f"👥 Connected Clients : "
-        f"{len(connected_clients)}"
-    )
-    print(
-        f"📤 Message : {message.strip()}"
-    )
-    print("================================================")
 
-    disconnected_clients = set()
+// ============================================================
+// BUZZER CONFIGURATION
+// ============================================================
 
-    for writer in list(connected_clients):
+// Buzzer ON:
+// A0 01 01 A2
 
-        try:
+const RELAY_ON_COMMAND = Buffer.from([
+    0xA0,
+    0x01,
+    0x01,
+    0xA2
+]);
 
-            client_address = (
-                writer.get_extra_info("peername")
-            )
 
-            writer.write(
-                message.encode("utf-8")
-            )
+// Buzzer OFF:
+// A0 01 00 A1
 
-            await writer.drain()
+const RELAY_OFF_COMMAND = Buffer.from([
+    0xA0,
+    0x01,
+    0x00,
+    0xA1
+]);
 
-            print(
-                f"✅ Sent to : "
-                f"{client_address}"
-            )
 
-        except Exception as e:
+// Buzzer duration = 10 seconds
 
-            client_address = (
-                writer.get_extra_info("peername")
-            )
+const BUZZER_DURATION_MS = 10000;
 
-            print(
-                f"❌ Failed to send to "
-                f"{client_address}: {e}"
-            )
 
-            disconnected_clients.add(
-                writer
-            )
+// ============================================================
+// GLOBAL VARIABLES
+// ============================================================
 
-    # --------------------------------------------------------
-    # Remove disconnected clients
-    # --------------------------------------------------------
+let client = null;
 
-    for writer in disconnected_clients:
+let reconnectTimer = null;
 
-        connected_clients.discard(
-            writer
-        )
+let buzzerTimer = null;
 
-        try:
+let buzzerRunning = false;
 
-            writer.close()
 
-            await writer.wait_closed()
+// ============================================================
+// SERIAL PORT
+// ============================================================
 
-        except Exception:
+const serialPort = new SerialPort({
+    path: SERIAL_PORT,
+    baudRate: SERIAL_BAUD_RATE,
+    autoOpen: false
+});
 
-            pass
 
-    print("================================================")
-    print("✅ BROADCAST COMPLETED")
-    print("================================================")
-    print("")
+// ============================================================
+// HEX DISPLAY HELPER
+// ============================================================
+
+function bufferToHex(buffer) {
+
+    return buffer
+        .toString("hex")
+        .match(/.{1,2}/g)
+        .join(" ")
+        .toUpperCase();
+}
 
 
-# ============================================================
-# HANDLE TCP CLIENT
-# ============================================================
+// ============================================================
+// OPEN SERIAL PORT
+// ============================================================
 
-async def handle_client(
-    reader,
-    writer,
-):
+function openSerialPort() {
 
-    client_address = (
-        writer.get_extra_info("peername")
-    )
+    if (serialPort.isOpen) {
 
-    connected_clients.add(writer)
+        console.log(
+            `✅ Serial port already open: ${SERIAL_PORT}`
+        );
 
-    print("")
-    print("================================================")
-    print("✅ TCP CLIENT CONNECTED")
-    print("================================================")
-    print(
-        f"Client : {client_address}"
-    )
-    print(
-        f"Total Clients : "
-        f"{len(connected_clients)}"
-    )
-    print("================================================")
-    print("")
+        return;
+    }
 
-    try:
+    serialPort.open((error) => {
 
-        while True:
+        if (error) {
 
-            data = await reader.readline()
+            console.log("");
+            console.log("==========================================");
+            console.log("❌ SERIAL PORT OPEN ERROR");
+            console.log("==========================================");
+            console.log(
+                `Port  : ${SERIAL_PORT}`
+            );
+            console.log(
+                `Error : ${error.message}`
+            );
+            console.log("==========================================");
+            console.log("");
+
+            return;
+        }
 
-            if not data:
+        console.log("");
+        console.log("==========================================");
+        console.log("✅ SERIAL PORT OPENED");
+        console.log("==========================================");
+        console.log(
+            `Port : ${SERIAL_PORT}`
+        );
+        console.log(
+            `Baud : ${SERIAL_BAUD_RATE}`
+        );
+        console.log("==========================================");
+        console.log("");
+    });
+}
 
-                print(
-                    f"❌ Client disconnected : "
-                    f"{client_address}"
-                )
 
-                break
+// ============================================================
+// SERIAL ERROR
+// ============================================================
 
-            message = data.decode(
-                "utf-8",
-                errors="ignore",
-            ).strip()
+serialPort.on("error", (error) => {
+
+    console.log("");
+    console.log("❌ SERIAL ERROR");
+    console.log("------------------------------------------");
+    console.log(
+        error.message
+    );
+    console.log("");
+});
+
+
+// ============================================================
+// READ LINE NUMBER FROM EXCEL
+// ============================================================
+
+function getConfiguredLineFromExcel() {
+
+    try {
+
+        // ----------------------------------------------------
+        // Check Excel file
+        // ----------------------------------------------------
 
-            if not message:
+        if (!fs.existsSync(EXCEL_FILE_PATH)) {
 
-                continue
+            console.log("");
+            console.log("==========================================");
+            console.log("❌ EXCEL FILE NOT FOUND");
+            console.log("==========================================");
+            console.log(
+                `File : ${EXCEL_FILE_PATH}`
+            );
+            console.log("==========================================");
+            console.log("");
 
-            print("")
-            print("📥 DATA RECEIVED FROM FASTAPI")
-            print("------------------------------")
-            print(
-                f"Client  : {client_address}"
-            )
-            print(
-                f"Message : {message}"
-            )
+            return null;
+        }
 
-            # =================================================
-            # Validate JSON
-            # =================================================
 
-            try:
+        // ----------------------------------------------------
+        // Read workbook
+        // ----------------------------------------------------
 
-                payload = json.loads(
-                    message
-                )
+        const workbook = XLSX.readFile(
+            EXCEL_FILE_PATH
+        );
 
-                line_no = str(
-                    payload.get("line_no", "")
-                ).strip()
 
-                cellqr = str(
-                    payload.get("cellqr", "")
-                ).strip()
+        // ----------------------------------------------------
+        // Check Sheet1
+        // ----------------------------------------------------
 
-                if not line_no:
+        if (
+            !workbook.Sheets[
+                EXCEL_SHEET_NAME
+            ]
+        ) {
 
-                    print(
-                        "⚠️ line_no missing."
-                    )
+            console.log("");
+            console.log("==========================================");
+            console.log("❌ EXCEL SHEET NOT FOUND");
+            console.log("==========================================");
+            console.log(
+                `Sheet : ${EXCEL_SHEET_NAME}`
+            );
+            console.log("==========================================");
+            console.log("");
 
-                    continue
+            return null;
+        }
 
-                print(
-                    f"📡 Line   : {line_no}"
-                )
 
-                print(
-                    f"📦 CellQR : {cellqr}"
-                )
+        const worksheet =
+            workbook.Sheets[
+                EXCEL_SHEET_NAME
+            ];
+
 
-            except json.JSONDecodeError:
+        // ----------------------------------------------------
+        // Read A1
+        // ----------------------------------------------------
 
-                print(
-                    "⚠️ Invalid JSON received."
-                )
+        const excelCell =
+            worksheet[
+                EXCEL_LINE_CELL
+            ];
 
-                continue
 
-            # =================================================
-            # BROADCAST TO ALL NODE CLIENTS
-            # =================================================
+        if (
+            !excelCell ||
+            excelCell.v === undefined ||
+            excelCell.v === null
+        ) {
 
-            broadcast_payload = json.dumps(
-                {
-                    "line_no": line_no,
-                    "cellqr": cellqr,
-                }
-            ) + "\n"
+            console.log("");
+            console.log("==========================================");
+            console.log("❌ EXCEL LINE NUMBER NOT FOUND");
+            console.log("==========================================");
+            console.log(
+                `Sheet : ${EXCEL_SHEET_NAME}`
+            );
+            console.log(
+                `Cell  : ${EXCEL_LINE_CELL}`
+            );
+            console.log("==========================================");
+            console.log("");
 
-            await broadcast_message(
-                broadcast_payload
-            )
+            return null;
+        }
 
-            # =================================================
-            # ACK TO FASTAPI
-            # =================================================
 
-            response = (
-                f"SERVER RECEIVED: "
-                f"{message}\n"
-            )
+        // ----------------------------------------------------
+        // Convert Excel value to string
+        // ----------------------------------------------------
+
+        const configuredLine =
+            String(
+                excelCell.v
+            ).trim();
+
+
+        if (!configuredLine) {
 
-            try:
+            console.log(
+                "❌ Excel line number is empty."
+            );
 
-                writer.write(
-                    response.encode("utf-8")
-                )
+            return null;
+        }
 
-                await writer.drain()
 
-                print(
-                    f"📤 ACK SENT : "
-                    f"{response.strip()}"
-                )
+        return configuredLine;
 
-            except Exception as e:
+    } catch (error) {
 
-                print(
-                    f"⚠️ ACK failed: {e}"
-                )
+        console.log("");
+        console.log("==========================================");
+        console.log("❌ EXCEL READ ERROR");
+        console.log("==========================================");
+        console.log(
+            `Error : ${error.message}`
+        );
+        console.log("==========================================");
+        console.log("");
+
+        return null;
+    }
+}
+
+
+// ============================================================
+// SEND RELAY COMMAND
+// ============================================================
 
-    except asyncio.CancelledError:
+function sendRelayCommand(
+    command,
+    commandName
+) {
 
-        pass
+    // --------------------------------------------------------
+    // Check serial port
+    // --------------------------------------------------------
 
-    except Exception as e:
+    if (!serialPort.isOpen) {
 
-        print("")
-        print("❌ CLIENT ERROR")
-        print(
-            f"Client : {client_address}"
-        )
-        print(
-            f"Error  : {e}"
-        )
+        console.log("");
+        console.log("==========================================");
+        console.log(
+            `❌ RELAY ${commandName} FAILED`
+        );
+        console.log("==========================================");
+        console.log(
+            `Serial port ${SERIAL_PORT} is not open.`
+        );
+        console.log("==========================================");
+        console.log("");
+
+        return false;
+    }
+
+
+    // --------------------------------------------------------
+    // Send command
+    // --------------------------------------------------------
+
+    serialPort.write(
+        command,
+        (error) => {
+
+            if (error) {
+
+                console.log("");
+                console.log("==========================================");
+                console.log(
+                    `❌ RELAY ${commandName} ERROR`
+                );
+                console.log("==========================================");
+                console.log(
+                    `Error : ${error.message}`
+                );
+                console.log("==========================================");
+                console.log("");
 
-    finally:
+                return;
+            }
 
-        connected_clients.discard(
-            writer
-        )
 
-        try:
+            console.log("");
+            console.log(
+                `📤 RELAY ${commandName} COMMAND SENT`
+            );
+            console.log(
+                `HEX : ${bufferToHex(command)}`
+            );
+            console.log("");
+        }
+    );
 
-            writer.close()
 
-            await writer.wait_closed()
+    return true;
+}
 
-        except Exception:
 
-            pass
+// ============================================================
+// START BUZZER
+// ============================================================
 
-        print("")
-        print("================================================")
-        print("🔌 TCP CLIENT CONNECTION CLOSED")
-        print("================================================")
-        print(
-            f"Client : {client_address}"
-        )
-        print(
-            f"Remaining Clients : "
-            f"{len(connected_clients)}"
-        )
-        print("================================================")
-        print("")
+function startBuzzer(
+    lineNo,
+    cellQr
+) {
 
+    // --------------------------------------------------------
+    // Prevent overlapping buzzer cycles
+    // --------------------------------------------------------
 
-# ============================================================
-# START TCP SERVER
-# ============================================================
+    if (buzzerRunning) {
 
-async def main():
+        console.log("");
+        console.log("==========================================");
+        console.log("⚠️ BUZZER ALREADY RUNNING");
+        console.log("==========================================");
+        console.log(
+            "New buzzer event ignored while current "
+            + "10-second cycle is active."
+        );
+        console.log("==========================================");
+        console.log("");
 
-    print("")
-    print("================================================")
-    print("🚀 BUZZER TCP SERVER STARTING")
-    print("================================================")
-    print(
-        f"Host : {HOST}"
-    )
-    print(
-        f"Port : {PORT}"
-    )
-    print(
-        "Mode : ONE SERVER / MULTIPLE CLIENTS"
-    )
-    print("================================================")
-    print("")
+        return;
+    }
 
-    server = await asyncio.start_server(
-        handle_client,
-        HOST,
+
+    // --------------------------------------------------------
+    // Set buzzer state
+    // --------------------------------------------------------
+
+    buzzerRunning = true;
+
+
+    console.log("");
+    console.log("==========================================");
+    console.log("🔔 BUZZER START");
+    console.log("==========================================");
+    console.log(
+        `Line     : ${lineNo}`
+    );
+    console.log(
+        `CellQR   : ${cellQr}`
+    );
+    console.log(
+        "Duration : 10 seconds"
+    );
+    console.log("==========================================");
+    console.log("");
+
+
+    // --------------------------------------------------------
+    // RELAY ON
+    // --------------------------------------------------------
+
+    const relayOnSent =
+        sendRelayCommand(
+            RELAY_ON_COMMAND,
+            "ON"
+        );
+
+
+    // --------------------------------------------------------
+    // If relay ON could not be sent
+    // --------------------------------------------------------
+
+    if (!relayOnSent) {
+
+        buzzerRunning = false;
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // Clear old timer if somehow present
+    // --------------------------------------------------------
+
+    if (buzzerTimer) {
+
+        clearTimeout(
+            buzzerTimer
+        );
+
+        buzzerTimer = null;
+    }
+
+
+    // --------------------------------------------------------
+    // AUTO OFF AFTER 10 SECONDS
+    // --------------------------------------------------------
+
+    buzzerTimer = setTimeout(
+        () => {
+
+            console.log("");
+            console.log("==========================================");
+            console.log("⏱️ 10 SECONDS COMPLETED");
+            console.log("==========================================");
+            console.log(
+                "Sending relay OFF command..."
+            );
+            console.log("==========================================");
+            console.log("");
+
+
+            // ------------------------------------------------
+            // RELAY OFF
+            // ------------------------------------------------
+
+            sendRelayCommand(
+                RELAY_OFF_COMMAND,
+                "OFF"
+            );
+
+
+            // ------------------------------------------------
+            // Reset state
+            // ------------------------------------------------
+
+            buzzerRunning = false;
+
+            buzzerTimer = null;
+
+
+            console.log("");
+            console.log("==========================================");
+            console.log("🔕 BUZZER AUTO STOPPED");
+            console.log("==========================================");
+            console.log(
+                "Relay OFF after 10 seconds"
+            );
+            console.log("==========================================");
+            console.log("");
+
+        },
+        BUZZER_DURATION_MS
+    );
+}
+
+
+// ============================================================
+// PROCESS BUZZER EVENT
+// ============================================================
+
+function processBuzzerEvent(
+    receivedLine,
+    cellQr
+) {
+
+    // --------------------------------------------------------
+    // Read configured line from Excel
+    // --------------------------------------------------------
+
+    const configuredLine =
+        getConfiguredLineFromExcel();
+
+
+    // --------------------------------------------------------
+    // Excel unavailable
+    // --------------------------------------------------------
+
+    if (configuredLine === null) {
+
+        console.log("");
+        console.log(
+            "⚠️ BUZZER EVENT CANNOT BE PROCESSED"
+        );
+        console.log(
+            "Excel line number could not be read."
+        );
+        console.log("");
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // Display comparison
+    // --------------------------------------------------------
+
+    console.log("");
+    console.log("==========================================");
+    console.log("🔍 LINE COMPARISON");
+    console.log("==========================================");
+    console.log(
+        `Received Line : ${receivedLine}`
+    );
+    console.log(
+        `Excel Line    : ${configuredLine}`
+    );
+    console.log("==========================================");
+    console.log("");
+
+
+    // --------------------------------------------------------
+    // Compare received line with Excel line
+    // --------------------------------------------------------
+
+    if (
+        String(receivedLine).trim() ===
+        String(configuredLine).trim()
+    ) {
+
+        console.log("");
+        console.log("==========================================");
+        console.log("✅ LINE MATCHED");
+        console.log("==========================================");
+        console.log(
+            `Line ${receivedLine} belongs to this client.`
+        );
+        console.log("==========================================");
+        console.log("");
+
+
+        // ----------------------------------------------------
+        // Start buzzer
+        // ----------------------------------------------------
+
+        startBuzzer(
+            receivedLine,
+            cellQr
+        );
+
+    } else {
+
+        console.log("");
+        console.log("==========================================");
+        console.log("❌ LINE NOT MATCHED");
+        console.log("==========================================");
+        console.log(
+            `Received  : ${receivedLine}`
+        );
+        console.log(
+            `Configured: ${configuredLine}`
+        );
+        console.log(
+            "🚫 Buzzer will NOT start."
+        );
+        console.log("==========================================");
+        console.log("");
+    }
+}
+
+
+// ============================================================
+// CONNECT TO TCP SERVER
+// ============================================================
+
+function connectToServer() {
+
+    console.log("");
+    console.log("==========================================");
+    console.log("🔔 BUZZER TCP CLIENT");
+    console.log("==========================================");
+    console.log(
+        `Server : ${HOST}`
+    );
+    console.log(
+        `Port   : ${PORT}`
+    );
+    console.log("==========================================");
+    console.log("");
+
+
+    // --------------------------------------------------------
+    // Create TCP socket
+    // --------------------------------------------------------
+
+    client = new net.Socket();
+
+
+    // --------------------------------------------------------
+    // Keep connection alive
+    // --------------------------------------------------------
+
+    client.setKeepAlive(
+        true,
+        10000
+    );
+
+
+    // --------------------------------------------------------
+    // Connect to server
+    // --------------------------------------------------------
+
+    client.connect(
         PORT,
-    )
+        HOST,
+        () => {
 
-    print("")
-    print("================================================")
-    print("✅ TCP SERVER CREATED SUCCESSFULLY")
-    print("================================================")
-
-    for sock in server.sockets or []:
-
-        print(
-            f"📡 Listening : "
-            f"{sock.getsockname()}"
-        )
-
-    print(
-        "👥 Multiple clients can connect."
-    )
-
-    print(
-        "⏳ Waiting continuously for clients..."
-    )
-
-    print("================================================")
-    print("")
-
-    async with server:
-
-        await server.serve_forever()
+            console.log("");
+            console.log("==========================================");
+            console.log(
+                "✅ CONNECTED TO BUZZER TCP SERVER"
+            );
+            console.log("==========================================");
+            console.log(
+                `Server : ${HOST}:${PORT}`
+            );
+            console.log(
+                "Status : Listening for broadcasts"
+            );
+            console.log("==========================================");
+            console.log("");
+        }
+    );
 
 
-# ============================================================
-# RUN SERVER
-# ============================================================
+    // ========================================================
+    // RECEIVE TCP DATA
+    // ========================================================
 
-if __name__ == "__main__":
+    client.on(
+        "data",
+        (data) => {
 
-    try:
+            // ------------------------------------------------
+            // TCP data may contain multiple messages
+            // ------------------------------------------------
 
-        asyncio.run(main())
+            const messages =
+                data
+                    .toString("utf-8")
+                    .split("\n");
 
-    except KeyboardInterrupt:
 
-        print("")
-        print("🛑 TCP SERVER STOPPED")
+            // ------------------------------------------------
+            // Process each message
+            // ------------------------------------------------
+
+            for (
+                const message of messages
+            ) {
+
+                const trimmedMessage =
+                    message.trim();
+
+
+                // Ignore empty messages
+                if (!trimmedMessage) {
+
+                    continue;
+                }
+
+
+                console.log("");
+                console.log("==========================================");
+                console.log(
+                    "📥 BUZZER BROADCAST RECEIVED"
+                );
+                console.log("==========================================");
+                console.log(
+                    `Raw : ${trimmedMessage}`
+                );
+                console.log("==========================================");
+
+
+                // =================================================
+                // PARSE JSON
+                // =================================================
+
+                try {
+
+                    const payload =
+                        JSON.parse(
+                            trimmedMessage
+                        );
+
+
+                    // ------------------------------------------------
+                    // Get line number
+                    // ------------------------------------------------
+
+                    const lineNo =
+                        String(
+                            payload.line_no || ""
+                        ).trim();
+
+
+                    // ------------------------------------------------
+                    // Get cell QR
+                    // ------------------------------------------------
+
+                    const cellQr =
+                        String(
+                            payload.cellqr || ""
+                        ).trim();
+
+
+                    // ------------------------------------------------
+                    // Validate line number
+                    // ------------------------------------------------
+
+                    if (!lineNo) {
+
+                        console.log(
+                            "⚠️ line_no missing."
+                        );
+
+                        continue;
+                    }
+
+
+                    console.log(
+                        `📡 Line   : ${lineNo}`
+                    );
+
+                    console.log(
+                        `📦 CellQR : ${cellQr}`
+                    );
+
+
+                    // =================================================
+                    // COMPARE LINE WITH EXCEL
+                    // =================================================
+
+                    processBuzzerEvent(
+                        lineNo,
+                        cellQr
+                    );
+
+
+                } catch (error) {
+
+                    console.log("");
+                    console.log(
+                        "=========================================="
+                    );
+                    console.log(
+                        "⚠️ INVALID JSON RECEIVED"
+                    );
+                    console.log(
+                        "=========================================="
+                    );
+                    console.log(
+                        `Data : ${trimmedMessage}`
+                    );
+                    console.log(
+                        `Error: ${error.message}`
+                    );
+                    console.log(
+                        "=========================================="
+                    );
+                    console.log("");
+                }
+            }
+        }
+    );
+
+
+    // ========================================================
+    // TCP CONNECTION CLOSED
+    // ========================================================
+
+    client.on(
+        "close",
+        () => {
+
+            console.log("");
+            console.log("==========================================");
+            console.log(
+                "❌ TCP CONNECTION CLOSED"
+            );
+            console.log("==========================================");
+            console.log("");
+
+            scheduleReconnect();
+        }
+    );
+
+
+    // ========================================================
+    // TCP ERROR
+    // ========================================================
+
+    client.on(
+        "error",
+        (err) => {
+
+            console.log("");
+            console.log("==========================================");
+            console.log("❌ TCP ERROR");
+            console.log("==========================================");
+            console.log(
+                err.message
+            );
+            console.log("==========================================");
+            console.log("");
+        }
+    );
+}
+
+
+// ============================================================
+// RECONNECT
+// ============================================================
+
+function scheduleReconnect() {
+
+    // --------------------------------------------------------
+    // Prevent duplicate reconnect timers
+    // --------------------------------------------------------
+
+    if (reconnectTimer) {
+
+        return;
+    }
+
+
+    console.log(
+        "🔄 Reconnecting in 3 seconds..."
+    );
+
+
+    reconnectTimer =
+        setTimeout(
+            () => {
+
+                reconnectTimer = null;
+
+                connectToServer();
+
+            },
+            3000
+        );
+}
+
+
+// ============================================================
+// START APPLICATION
+// ============================================================
+
+console.log("");
+console.log("================================================");
+console.log("🚀 BUZZER CLIENT STARTING");
+console.log("================================================");
+console.log(
+    `TCP Server : ${HOST}:${PORT}`
+);
+console.log(
+    `Excel File : ${EXCEL_FILE_PATH}`
+);
+console.log(
+    `Excel Sheet: ${EXCEL_SHEET_NAME}`
+);
+console.log(
+    `Excel Cell : ${EXCEL_LINE_CELL}`
+);
+console.log(
+    `Serial Port: ${SERIAL_PORT}`
+);
+console.log(
+    `Baud Rate  : ${SERIAL_BAUD_RATE}`
+);
+console.log(
+    "Buzzer Time: 10 seconds"
+);
+console.log("================================================");
+console.log("");
+
+
+// ============================================================
+// OPEN SERIAL PORT
+// ============================================================
+
+openSerialPort();
+
+
+// ============================================================
+// CONNECT TCP
+// ============================================================
+
+connectToServer();
