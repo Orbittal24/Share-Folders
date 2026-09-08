@@ -121,45 +121,32 @@ pipeline {
     }
 }
 /////////////////////////
-@echo off
-setlocal
+pipeline {
+    agent any
 
-set "PM2_CONFIG=C:\Project\Services\USER_services\C01071714_path_services\__Shubham__\TML_Lines_Live\pm2-newService.json"
+    stages {
+        stage('Start Manual OCV Services') {
+            steps {
+                bat '''
+                    @echo off
 
-echo ========================================
-echo       MANUAL OCV SERVICES - PM2
-echo ========================================
-echo.
+                    set "PM2_CONFIG=C:\Project\Services\USER_services\C01071714 path services____Shubham\TML_Lines_Live\pm2-manual_ocv.json"
 
-echo PM2 Configuration:
-echo %PM2_CONFIG%
-echo.
+                    echo Starting Manual OCV services...
 
-if not exist "%PM2_CONFIG%" (
-    echo ERROR: PM2 JSON file not found.
-    exit /b 1
-)
+                    if not exist "%PM2_CONFIG%" (
+                        echo ERROR: JSON file not found:
+                        echo %PM2_CONFIG%
+                        exit /b 1
+                    )
 
-echo Starting PM2 services...
-pm2 start "%PM2_CONFIG%" --update-env
+                    pm2 start "%PM2_CONFIG%" --update-env
 
-if %errorlevel% neq 0 (
-    echo ERROR: Failed to start PM2 services.
-    exit /b 1
-)
-
-echo.
-echo ========================================
-echo          PM2 SERVICE STATUS
-echo ========================================
-
-pm2 status
-
-echo.
-echo ========================================
-echo       SERVICES STARTED SUCCESSFULLY
-echo ========================================
-
-endlocal
-exit /b 0
-
+                    echo.
+                    echo PM2 Status:
+                    pm2 status
+                '''
+            }
+        }
+    }
+}
