@@ -120,3 +120,46 @@ pipeline {
         }
     }
 }
+/////////////////////////
+@echo off
+setlocal
+
+set "PM2_CONFIG=C:\Project\Services\USER_services\C01071714_path_services\__Shubham__\TML_Lines_Live\pm2-newService.json"
+
+echo ========================================
+echo       MANUAL OCV SERVICES - PM2
+echo ========================================
+echo.
+
+echo PM2 Configuration:
+echo %PM2_CONFIG%
+echo.
+
+if not exist "%PM2_CONFIG%" (
+    echo ERROR: PM2 JSON file not found.
+    exit /b 1
+)
+
+echo Starting PM2 services...
+pm2 start "%PM2_CONFIG%" --update-env
+
+if %errorlevel% neq 0 (
+    echo ERROR: Failed to start PM2 services.
+    exit /b 1
+)
+
+echo.
+echo ========================================
+echo          PM2 SERVICE STATUS
+echo ========================================
+
+pm2 status
+
+echo.
+echo ========================================
+echo       SERVICES STARTED SUCCESSFULLY
+echo ========================================
+
+endlocal
+exit /b 0
+
