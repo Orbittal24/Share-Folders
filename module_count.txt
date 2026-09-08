@@ -125,55 +125,56 @@ pipeline {
     agent any
 
     stages {
-
         stage('Start Manual OCV Services') {
             steps {
-
                 bat '''
-                    @echo off
+                @echo off
 
-                    echo ========================================
-                    echo   STARTING MANUAL OCV SERVICES
-                    echo ========================================
-                    echo.
+                echo ========================================
+                echo   STARTING MANUAL OCV SERVICES
+                echo ========================================
+                echo.
 
-                    set "PM2_CONFIG=C:\\Project\\Services\\USER_services\\C01071714 path services____Shubham\\TML_Lines_Live\\pm2-manual_ocv.json"
+                set "PM2_CONFIG=C:/Project/Services/USER_services/C01071714_path_services_Shubham/TML Lines_Live/pm2-manual_ocv.json"
+                set "PM2_CMD=C:/Users/c01072714/AppData/Roaming/npm/pm2.cmd"
 
-                    echo PM2 Config:
-                    echo %PM2_CONFIG%
-                    echo.
+                echo PM2 Config:
+                echo %PM2_CONFIG%
+                echo.
 
-                    if not exist "%PM2_CONFIG%" (
-                        echo ERROR: PM2 JSON file not found.
-                        echo.
-                        echo Path:
-                        echo %PM2_CONFIG%
-                        exit /b 1
-                    )
+                if not exist "%PM2_CONFIG%" (
+                    echo ERROR: PM2 JSON file not found.
+                    exit /b 1
+                )
 
-                    echo JSON file found successfully.
-                    echo.
+                echo JSON file found successfully.
+                echo.
 
-                    echo Starting PM2 services...
-                    pm2 start "%PM2_CONFIG%" --update-env
+                if not exist "%PM2_CMD%" (
+                    echo ERROR: PM2 command not found.
+                    echo %PM2_CMD%
+                    exit /b 1
+                )
 
-                    if %errorlevel% neq 0 (
-                        echo ERROR: Failed to start PM2 services.
-                        exit /b 1
-                    )
+                echo PM2 command found successfully.
+                echo.
 
-                    echo.
-                    echo ========================================
-                    echo          PM2 SERVICE STATUS
-                    echo ========================================
+                echo Starting PM2 services...
+                "%PM2_CMD%" start "%PM2_CONFIG%"
 
-                    pm2 status
+                if errorlevel 1 (
+                    echo ERROR: Failed to start PM2 services.
+                    exit /b 1
+                )
 
-                    echo.
-                    echo ========================================
-                    echo   MANUAL OCV SERVICES STARTED
-                    echo ========================================
+                echo.
+                echo Checking PM2 status...
+                "%PM2_CMD%" status
 
+                echo.
+                echo ========================================
+                echo   MANUAL OCV SERVICES STARTED
+                echo ========================================
                 '''
             }
         }
