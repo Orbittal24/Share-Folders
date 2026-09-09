@@ -1,9 +1,11 @@
+ss
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const XLSX = require("xlsx");
 const { SerialPort } = require("serialport");
+const sql = require("mssql");
 
 
 // ============================================================
@@ -73,9 +75,267 @@ const RELAY_OFF_COMMAND = Buffer.from([
 ]);
 
 
-// Buzzer duration = 10 seconds
+// ============================================================
+// SQL DATABASE CONFIGURATION
+// ============================================================
 
-const BUZZER_DURATION_MS = 10000;
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin@123",
+    database: "taco_treceability",
+    server: "10.9.4.29",
+    port: 1433,
+
+    options: {
+        instanceName: "PROD_SQL_2026",
+        encrypt: false,
+        trustServerCertificate: true
+    },
+
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
+
+// ============================================================
+// INITIALIZE SQL CONNECTION POOL
+// ============================================================
+
+var dbConn = new sql.ConnectionPool(sqlConfig);
+
+console.log(
+    "1111111111111111111111...."
+);
+
+
+dbConn.connect()
+    .then(function () {
+
+        console.log(
+            "Connected....",
+            sqlConfig
+        );
+
+    })
+    .catch(function (error) {
+
+        console.log("");
+        console.log("==========================================");
+        console.log("❌ SQL DATABASE CONNECTION ERROR");
+        console.log("==========================================");
+        console.log(
+            `Error : ${error.message}`
+        );
+        console.log("==========================================");
+        console.log("");
+
+    });
+
+
+// ============================================================
+// GET BUZZER TIME FROM DATABASE
+// ============================================================
+
+async function getBuzzerDurationFromDatabase(
+    lineNo
+) {
+
+    try {
+
+        // ----------------------------------------------------
+        // Check SQL connection
+        // ----------------------------------------------------
+
+        if (
+            !dbConn ||
+            !dbConn.connected
+        ) {
+
+            console.log(
+                "🔄 SQL database reconnecting..."
+            );
+
+
+            dbConn =
+                await new sql.ConnectionPool(
+                    sqlConfig
+                ).connect();
+
+
+            console.log(
+                "✅ SQL database connected."
+            );
+        }
+
+
+        // ----------------------------------------------------
+        // Create request
+        // ----------------------------------------------------
+
+        const request =
+            dbConn.request();
+
+
+        // ----------------------------------------------------
+        // Add line number parameter
+        // ----------------------------------------------------
+
+        request.input(
+            "lineNo",
+            sql.VarChar,
+            String(lineNo).trim()
+        );
+
+
+        // ----------------------------------------------------
+        // Get time_limit
+        // ----------------------------------------------------
+
+        const result =
+            await request.query(`
+                SELECT time_limit
+                FROM taco_treceability.master_line_cell_scanning_status
+                WHERE line_no = @lineNo
+            `);
+
+
+        // ----------------------------------------------------
+        // Check record found
+        // ----------------------------------------------------
+
+        if (
+            !result.recordset ||
+            result.recordset.length === 0
+        ) {
+
+            console.log("");
+            console.log("==========================================");
+            console.log("⚠️ TIME LIMIT NOT FOUND");
+            console.log("==========================================");
+            console.log(
+                `Line : ${lineNo}`
+            );
+            console.log(
+                "No time_limit record found."
+            );
+            console.log("==========================================");
+            console.log("");
+
+            return null;
+        }
+
+
+        // ----------------------------------------------------
+        // Get database value
+        // ----------------------------------------------------
+
+        const timeLimit =
+            result.recordset[0].time_limit;
+
+
+        // ----------------------------------------------------
+        // Check null value
+        // ----------------------------------------------------
+
+        if (
+            timeLimit === null ||
+            timeLimit === undefined
+        ) {
+
+            console.log("");
+            console.log("==========================================");
+            console.log("⚠️ INVALID TIME LIMIT");
+            console.log("==========================================");
+            console.log(
+                `Line       : ${lineNo}`
+            );
+            console.log(
+                "time_limit : NULL"
+            );
+            console.log("==========================================");
+            console.log("");
+
+            return null;
+        }
+
+
+        // ----------------------------------------------------
+        // Convert to number
+        // ----------------------------------------------------
+
+        const durationSeconds =
+            Number(timeLimit);
+
+
+        // ----------------------------------------------------
+        // Validate duration
+        // ----------------------------------------------------
+
+        if (
+            !Number.isFinite(
+                durationSeconds
+            ) ||
+            durationSeconds <= 0
+        ) {
+
+            console.log("");
+            console.log("==========================================");
+            console.log("⚠️ INVALID TIME LIMIT");
+            console.log("==========================================");
+            console.log(
+                `Line       : ${lineNo}`
+            );
+            console.log(
+                `time_limit : ${timeLimit}`
+            );
+            console.log("==========================================");
+            console.log("");
+
+            return null;
+        }
+
+
+        // ----------------------------------------------------
+        // Display database value
+        // ----------------------------------------------------
+
+        console.log("");
+        console.log("==========================================");
+        console.log("⏱️ BUZZER TIME FROM DATABASE");
+        console.log("==========================================");
+        console.log(
+            `Line       : ${lineNo}`
+        );
+        console.log(
+            `time_limit : ${durationSeconds} seconds`
+        );
+        console.log("==========================================");
+        console.log("");
+
+
+        return durationSeconds;
+
+    } catch (error) {
+
+        console.log("");
+        console.log("==========================================");
+        console.log("❌ SQL TIME LIMIT READ ERROR");
+        console.log("==========================================");
+        console.log(
+            `Line  : ${lineNo}`
+        );
+        console.log(
+            `Error : ${error.message}`
+        );
+        console.log("==========================================");
+        console.log("");
+
+        return null;
+    }
+}
 
 
 // ============================================================
@@ -399,7 +659,7 @@ function sendRelayCommand(
 // START BUZZER
 // ============================================================
 
-function startBuzzer(
+async function startBuzzer(
     lineNo,
     cellQr
 ) {
@@ -416,13 +676,56 @@ function startBuzzer(
         console.log("==========================================");
         console.log(
             "New buzzer event ignored while current "
-            + "10-second cycle is active."
+            + "buzzer cycle is active."
         );
         console.log("==========================================");
         console.log("");
 
         return;
     }
+
+
+    // --------------------------------------------------------
+    // Get buzzer duration from database
+    // --------------------------------------------------------
+
+    const durationSeconds =
+        await getBuzzerDurationFromDatabase(
+            lineNo
+        );
+
+
+    // --------------------------------------------------------
+    // Database time unavailable
+    // --------------------------------------------------------
+
+    if (
+        durationSeconds === null
+    ) {
+
+        console.log("");
+        console.log("==========================================");
+        console.log(
+            "⚠️ BUZZER WILL NOT START"
+        );
+        console.log("==========================================");
+        console.log(
+            "Valid time_limit could not be read "
+            + "from database."
+        );
+        console.log("==========================================");
+        console.log("");
+
+        return;
+    }
+
+
+    // --------------------------------------------------------
+    // Convert seconds to milliseconds
+    // --------------------------------------------------------
+
+    const buzzerDurationMs =
+        durationSeconds * 1000;
 
 
     // --------------------------------------------------------
@@ -443,7 +746,7 @@ function startBuzzer(
         `CellQR   : ${cellQr}`
     );
     console.log(
-        "Duration : 10 seconds"
+        `Duration : ${durationSeconds} seconds`
     );
     console.log("==========================================");
     console.log("");
@@ -487,7 +790,7 @@ function startBuzzer(
 
 
     // --------------------------------------------------------
-    // AUTO OFF AFTER 10 SECONDS
+    // AUTO OFF AFTER DATABASE TIME LIMIT
     // --------------------------------------------------------
 
     buzzerTimer = setTimeout(
@@ -495,7 +798,9 @@ function startBuzzer(
 
             console.log("");
             console.log("==========================================");
-            console.log("⏱️ 10 SECONDS COMPLETED");
+            console.log(
+                `⏱️ ${durationSeconds} SECONDS COMPLETED`
+            );
             console.log("==========================================");
             console.log(
                 "Sending relay OFF command..."
@@ -528,13 +833,13 @@ function startBuzzer(
             console.log("🔕 BUZZER AUTO STOPPED");
             console.log("==========================================");
             console.log(
-                "Relay OFF after 10 seconds"
+                `Relay OFF after ${durationSeconds} seconds`
             );
             console.log("==========================================");
             console.log("");
 
         },
-        BUZZER_DURATION_MS
+        buzzerDurationMs
     );
 }
 
@@ -543,7 +848,7 @@ function startBuzzer(
 // PROCESS BUZZER EVENT
 // ============================================================
 
-function processBuzzerEvent(
+async function processBuzzerEvent(
     receivedLine,
     cellQr
 ) {
@@ -617,7 +922,7 @@ function processBuzzerEvent(
         // Start buzzer
         // ----------------------------------------------------
 
-        startBuzzer(
+        await startBuzzer(
             receivedLine,
             cellQr
         );
@@ -713,7 +1018,7 @@ function connectToServer() {
 
     client.on(
         "data",
-        (data) => {
+        async (data) => {
 
             // ------------------------------------------------
             // TCP data may contain multiple messages
@@ -815,7 +1120,7 @@ function connectToServer() {
                     // COMPARE LINE WITH EXCEL
                     // =================================================
 
-                    processBuzzerEvent(
+                    await processBuzzerEvent(
                         lineNo,
                         cellQr
                     );
@@ -954,7 +1259,7 @@ console.log(
     `Baud Rate  : ${SERIAL_BAUD_RATE}`
 );
 console.log(
-    "Buzzer Time: 10 seconds"
+    "Buzzer Time: Database time_limit seconds"
 );
 console.log("================================================");
 console.log("");
