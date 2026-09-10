@@ -1,138 +1,158 @@
 pipeline {
-    agent any
+agent any
 
-    stages {
+```
+stages {
 
-        stage('Start TCP Server Buzzer Service') {
-            steps {
-                bat '''
-                @echo off
+    stage('Start TCP Server Buzzer Service') {
+        steps {
+            bat '''
+            @echo off
+            setlocal
 
-                echo ========================================
-                echo   STARTING TCP SERVER BUZZER SERVICE
-                echo ========================================
-                echo.
+            echo ========================================
+            echo   STARTING TCP SERVER BUZZER SERVICE
+            echo ========================================
+            echo.
 
-                REM ========================================
-                REM SERVICE CONFIGURATION
-                REM ========================================
+            REM ========================================
+            REM SERVICE CONFIGURATION
+            REM ========================================
 
-                set "SERVICE_PATH=C:\\Project\\Services\\USER_services\\C01071714_path_services_Shubham\\TML Lines_Live\\tcp_server_buzzer"
+            set "SERVICE_PATH=C:\\Project\\Services\\USER_services\\C01071714_path_services_Shubham\\TML Lines_Live"
 
-                set "PM2_CMD=C:\\Users\\c01071714\\AppData\\Roaming\\npm\\pm2.cmd"
+            set "PM2_CMD=C:\\Users\\c01071714\\AppData\\Roaming\\npm\\pm2.cmd"
 
-                set "SERVICE_FILE=tcp_server_buzzer.py"
+            set "SERVICE_FILE=tcp_server_buzzer.bat"
 
-
-                REM ========================================
-                REM CHECK SERVICE DIRECTORY
-                REM ========================================
-
-                echo Service Path:
-                echo %SERVICE_PATH%
-                echo.
-
-                if not exist "%SERVICE_PATH%" (
-                    echo ERROR: Service directory not found.
-                    exit /b 1
-                )
-
-                echo Service directory found successfully.
-                echo.
+            set "SERVICE_NAME=tcp_server_buzzer"
 
 
-                REM ========================================
-                REM CHECK PYTHON FILE
-                REM ========================================
+            REM ========================================
+            REM CHECK SERVICE DIRECTORY
+            REM ========================================
 
-                if not exist "%SERVICE_PATH%\\%SERVICE_FILE%" (
-                    echo ERROR: Python service file not found.
-                    echo Expected:
-                    echo %SERVICE_PATH%\\%SERVICE_FILE%
-                    exit /b 1
-                )
+            echo Service Path:
+            echo %SERVICE_PATH%
+            echo.
 
-                echo Python service file found successfully.
-                echo.
+            if not exist "%SERVICE_PATH%" (
+                echo ERROR: Service directory not found.
+                exit /b 1
+            )
 
-
-                REM ========================================
-                REM CHECK PM2
-                REM ========================================
-
-                if not exist "%PM2_CMD%" (
-                    echo ERROR: PM2 command not found.
-                    echo %PM2_CMD%
-                    exit /b 1
-                )
-
-                echo PM2 command found successfully.
-                echo.
+            echo Service directory found successfully.
+            echo.
 
 
-                REM ========================================
-                REM CHANGE DIRECTORY
-                REM ========================================
+            REM ========================================
+            REM CHECK BAT FILE
+            REM ========================================
 
-                cd /d "%SERVICE_PATH%"
+            if not exist "%SERVICE_PATH%\\%SERVICE_FILE%" (
+                echo ERROR: TCP Server Buzzer BAT file not found.
+                echo Expected:
+                echo %SERVICE_PATH%\\%SERVICE_FILE%
+                exit /b 1
+            )
 
-                echo Current Directory:
-                cd
-                echo.
-
-
-                REM ========================================
-                REM START SERVICE
-                REM ========================================
-
-                echo Starting TCP Server Buzzer...
-
-                "%PM2_CMD%" start "%SERVICE_FILE%" --interpreter python --name tcp_server_buzzer
-
-                if errorlevel 1 (
-                    echo ERROR: Failed to start TCP Server Buzzer.
-                    exit /b 1
-                )
-
-                echo.
-                echo TCP Server Buzzer started successfully.
-                echo.
+            echo TCP Server Buzzer BAT file found successfully.
+            echo.
 
 
-                REM ========================================
-                REM SAVE PM2 CONFIGURATION
-                REM ========================================
+            REM ========================================
+            REM CHECK PM2
+            REM ========================================
 
-                echo Saving PM2 configuration...
+            if not exist "%PM2_CMD%" (
+                echo ERROR: PM2 command not found.
+                echo %PM2_CMD%
+                exit /b 1
+            )
 
-                "%PM2_CMD%" save
-
-                if errorlevel 1 (
-                    echo WARNING: PM2 service started but PM2 save failed.
-                )
-
-
-                REM ========================================
-                REM CHECK STATUS
-                REM ========================================
-
-                echo.
-                echo ========================================
-                echo   CHECKING PM2 STATUS
-                echo ========================================
-                echo.
-
-                "%PM2_CMD%" status
+            echo PM2 command found successfully.
+            echo.
 
 
-                echo.
-                echo ========================================
-                echo   TCP SERVER BUZZER SERVICE STARTED
-                echo ========================================
+            REM ========================================
+            REM CHANGE DIRECTORY
+            REM ========================================
 
-                exit /b 0
-                '''
-            }
+            cd /d "%SERVICE_PATH%"
+
+            echo Current Directory:
+            cd
+            echo.
+
+
+            REM ========================================
+            REM DELETE OLD PROCESS
+            REM ========================================
+
+            echo Removing old PM2 process...
+
+            "%PM2_CMD%" delete "%SERVICE_NAME%" >nul 2>&1
+
+            echo Old process removed.
+            echo.
+
+
+            REM ========================================
+            REM START SERVICE
+            REM ========================================
+
+            echo Starting TCP Server Buzzer...
+
+            "%PM2_CMD%" start "%SERVICE_FILE%" --name "%SERVICE_NAME%" --interpreter cmd.exe
+
+            if errorlevel 1 (
+                echo ERROR: Failed to start TCP Server Buzzer.
+                exit /b 1
+            )
+
+            echo.
+            echo TCP Server Buzzer started successfully.
+            echo.
+
+
+            REM ========================================
+            REM SAVE PM2 CONFIGURATION
+            REM ========================================
+
+            echo Saving PM2 configuration...
+
+            "%PM2_CMD%" save
+
+            if errorlevel 1 (
+                echo WARNING: PM2 service started but PM2 save failed.
+            )
+
+
+            REM ========================================
+            REM CHECK STATUS
+            REM ========================================
+
+            echo.
+            echo ========================================
+            echo   CHECKING PM2 STATUS
+            echo ========================================
+            echo.
+
+            "%PM2_CMD%" status
+
+
+            echo.
+            echo ========================================
+            echo   TCP SERVER BUZZER SERVICE STARTED
+            echo ========================================
+
+            endlocal
+
+            exit /b 0
+            '''
         }
     }
+}
+```
+
 }
