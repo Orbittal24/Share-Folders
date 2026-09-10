@@ -1,36 +1,138 @@
-# ============================================================
-# FORCE UTF-8 OUTPUT FOR WINDOWS PM2
-# ============================================================
+pipeline {
+    agent any
 
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
+    stages {
 
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8")
+        stage('Start TCP Server Buzzer Service') {
+            steps {
+                bat '''
+                @echo off
+
+                echo ========================================
+                echo   STARTING TCP SERVER BUZZER SERVICE
+                echo ========================================
+                echo.
+
+                REM ========================================
+                REM SERVICE CONFIGURATION
+                REM ========================================
+
+                set "SERVICE_PATH=C:\\Project\\Services\\USER_services\\C01071714_path_services_Shubham\\TML Lines_Live\\tcp_server_buzzer"
+
+                set "PM2_CMD=C:\\Users\\c01071714\\AppData\\Roaming\\npm\\pm2.cmd"
+
+                set "SERVICE_FILE=tcp_server_buzzer.py"
 
 
+                REM ========================================
+                REM CHECK SERVICE DIRECTORY
+                REM ========================================
+
+                echo Service Path:
+                echo %SERVICE_PATH%
+                echo.
+
+                if not exist "%SERVICE_PATH%" (
+                    echo ERROR: Service directory not found.
+                    exit /b 1
+                )
+
+                echo Service directory found successfully.
+                echo.
 
 
-@echo off
-echo ============================================
-echo Starting OCV Buzzer TCP Service...
-echo ============================================
+                REM ========================================
+                REM CHECK PYTHON FILE
+                REM ========================================
 
-REM Force UTF-8 encoding for Python
-set PYTHONUTF8=1
+                if not exist "%SERVICE_PATH%\\%SERVICE_FILE%" (
+                    echo ERROR: Python service file not found.
+                    echo Expected:
+                    echo %SERVICE_PATH%\\%SERVICE_FILE%
+                    exit /b 1
+                )
 
-REM Go to project folder
-cd /d "C:\Project\EV_Battery_MIS\SQL\buzzer_python"
+                echo Python service file found successfully.
+                echo.
 
-REM Start service using PM2
-pm2 start tcp_server_buzzer.py --name tcp_server_buzzer --interpreter "C:\Program Files\Python310\python.exe"
 
-echo.
-echo ============================================
-echo Service Start Command Completed
-echo ============================================
+                REM ========================================
+                REM CHECK PM2
+                REM ========================================
 
-REM Save PM2 process configuration
-pm2 save
+                if not exist "%PM2_CMD%" (
+                    echo ERROR: PM2 command not found.
+                    echo %PM2_CMD%
+                    exit /b 1
+                )
 
-pause
+                echo PM2 command found successfully.
+                echo.
+
+
+                REM ========================================
+                REM CHANGE DIRECTORY
+                REM ========================================
+
+                cd /d "%SERVICE_PATH%"
+
+                echo Current Directory:
+                cd
+                echo.
+
+
+                REM ========================================
+                REM START SERVICE
+                REM ========================================
+
+                echo Starting TCP Server Buzzer...
+
+                "%PM2_CMD%" start "%SERVICE_FILE%" --interpreter python --name tcp_server_buzzer
+
+                if errorlevel 1 (
+                    echo ERROR: Failed to start TCP Server Buzzer.
+                    exit /b 1
+                )
+
+                echo.
+                echo TCP Server Buzzer started successfully.
+                echo.
+
+
+                REM ========================================
+                REM SAVE PM2 CONFIGURATION
+                REM ========================================
+
+                echo Saving PM2 configuration...
+
+                "%PM2_CMD%" save
+
+                if errorlevel 1 (
+                    echo WARNING: PM2 service started but PM2 save failed.
+                )
+
+
+                REM ========================================
+                REM CHECK STATUS
+                REM ========================================
+
+                echo.
+                echo ========================================
+                echo   CHECKING PM2 STATUS
+                echo ========================================
+                echo.
+
+                "%PM2_CMD%" status
+
+
+                echo.
+                echo ========================================
+                echo   TCP SERVER BUZZER SERVICE STARTED
+                echo ========================================
+
+                exit /b 0
+                '''
+            }
+        }
+    }
+}
