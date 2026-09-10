@@ -1,11 +1,8 @@
-cc
-
 pipeline {
 agent any
 
 ```
 stages {
-
     stage('Start TCP Server Buzzer Service') {
         steps {
             bat '''
@@ -17,233 +14,88 @@ setlocal
 echo ========================================
 echo STARTING TCP SERVER BUZZER SERVICE
 echo ========================================
-echo.
-
-REM ========================================
-REM SERVICE CONFIGURATION
-REM ========================================
 
 set "SERVICE_PATH=C:\Project\Services\USER_services\C01071714_path_services_Shubham\TML Lines_Live"
-
 set "PM2_CMD=C:\Users\c01071714\AppData\Roaming\npm\pm2.cmd"
-
-REM IMPORTANT:
-REM This must be your actual Python file name.
 set "SERVICE_FILE=tcp_server_buzzer.py"
-
 set "SERVICE_NAME=tcp_server_buzzer"
 
-REM ========================================
-REM CHECK SERVICE DIRECTORY
-REM ========================================
-
-echo Checking service directory...
-echo %SERVICE_PATH%
 echo.
+echo Checking service directory...
 
 if not exist "%SERVICE_PATH%" (
-echo.
-echo ERROR: SERVICE DIRECTORY NOT FOUND
-echo Expected Path:
-echo %SERVICE_PATH%
-echo.
+echo ERROR: Service directory not found.
 exit /b 1
 )
 
-echo SUCCESS: Service directory found.
-echo.
+echo Service directory found.
 
-REM ========================================
-REM CHECK PYTHON SERVICE FILE
-REM ========================================
+echo.
+echo Checking Python file...
 
-echo Checking Python service file...
-echo %SERVICE_PATH%\%SERVICE_FILE%
-echo.
-
-if not exist "%SERVICE_PATH%\%SERVICE_FILE%" (
-echo.
-echo ERROR: PYTHON SERVICE FILE NOT FOUND
-echo Expected File:
-echo %SERVICE_PATH%\%SERVICE_FILE%
-echo.
+if not exist "%SERVICE_PATH%%SERVICE_FILE%" (
+echo ERROR: Python file not found.
+echo Expected: %SERVICE_PATH%%SERVICE_FILE%
 exit /b 1
 )
 
-echo SUCCESS: Python service file found.
-echo.
+echo Python file found.
 
-REM ========================================
-REM CHECK PM2
-REM ========================================
-
-echo Checking PM2 command...
-echo %PM2_CMD%
 echo.
+echo Checking PM2...
 
 if not exist "%PM2_CMD%" (
-echo.
-echo ERROR: PM2 COMMAND NOT FOUND
-echo Expected:
+echo ERROR: PM2 not found.
 echo %PM2_CMD%
-echo.
 exit /b 1
 )
 
-echo SUCCESS: PM2 command found.
+echo PM2 found.
+
 echo.
-
-REM ========================================
-REM CHANGE TO SERVICE DIRECTORY
-REM ========================================
-
-echo Changing to service directory...
+echo Changing directory...
 
 cd /d "%SERVICE_PATH%"
 
-if errorlevel 1 (
-echo.
-echo ERROR: FAILED TO CHANGE DIRECTORY
-echo.
-exit /b 1
-)
-
-echo.
-echo Current Directory:
+echo Current directory:
 cd
-echo.
-
-REM ========================================
-REM CHECK PYTHON INSTALLATION
-REM ========================================
-
-echo Checking Python installation...
-
-python --version
-
-if errorlevel 1 (
-echo.
-echo ERROR: PYTHON IS NOT AVAILABLE
-echo Jenkins cannot find Python.
-echo.
-exit /b 1
-)
 
 echo.
-echo Python found successfully.
-echo.
-
-REM ========================================
-REM REMOVE OLD PM2 PROCESS
-REM ========================================
-
-echo ========================================
-echo REMOVING OLD PM2 PROCESS
-echo ========================================
-echo.
+echo Removing old PM2 process...
 
 "%PM2_CMD%" delete "%SERVICE_NAME%" >nul 2>&1
 
-echo Old PM2 process removed if it existed.
 echo.
-
-REM ========================================
-REM START TCP SERVER
-REM ========================================
-
-echo ========================================
-echo STARTING TCP SERVER BUZZER
-echo ========================================
-echo.
+echo Starting TCP Server Buzzer...
 
 "%PM2_CMD%" start "%SERVICE_FILE%" --name "%SERVICE_NAME%" --interpreter python
 
 if errorlevel 1 (
-echo.
-echo ERROR: FAILED TO START TCP SERVER BUZZER
-echo.
-"%PM2_CMD%" status
+echo ERROR: Failed to start service.
 exit /b 1
 )
 
 echo.
-echo SUCCESS: TCP Server Buzzer started.
-echo.
-
-REM ========================================
-REM WAIT FOR SERVICE TO START
-REM ========================================
-
-echo Waiting for service to initialize...
+echo Waiting 5 seconds...
 
 timeout /t 5 /nobreak >nul
 
 echo.
-
-REM ========================================
-REM CHECK PM2 STATUS
-REM ========================================
-
-echo ========================================
-echo CHECKING PM2 STATUS
-echo ========================================
-echo.
+echo PM2 STATUS:
 
 "%PM2_CMD%" status
 
-REM ========================================
-REM SHOW SERVICE INFORMATION
-REM ========================================
-
 echo.
-echo ========================================
-echo SERVICE DETAILS
-echo ========================================
-echo.
-
-"%PM2_CMD%" describe "%SERVICE_NAME%"
-
-REM ========================================
-REM SAVE PM2 CONFIGURATION
-REM ========================================
-
-echo.
-echo ========================================
-echo SAVING PM2 CONFIGURATION
-echo ========================================
-echo.
+echo Saving PM2 configuration...
 
 "%PM2_CMD%" save
 
-if errorlevel 1 (
-echo.
-echo WARNING: PM2 service started but PM2 save failed.
-echo.
-) else (
-echo.
-echo SUCCESS: PM2 configuration saved.
-echo.
-)
-
-REM ========================================
-REM SHOW RECENT LOGS
-REM ========================================
-
-echo ========================================
-echo RECENT TCP SERVER LOGS
-echo ========================================
-echo.
-
-"%PM2_CMD%" logs "%SERVICE_NAME%" --lines 20 --nostream
-
 echo.
 echo ========================================
-echo TCP SERVER BUZZER SERVICE COMPLETED
+echo TCP SERVER BUZZER STARTED SUCCESSFULLY
 echo ========================================
-echo.
 
 endlocal
-
 exit /b 0
 '''
 }
