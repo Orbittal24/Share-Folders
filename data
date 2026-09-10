@@ -1,12 +1,36 @@
-{
-  "apps": [
-    {
-      "name": "Manual_OCV_Bajaj2w",
-      "cwd": "C:\\Project\\EV_Battery_MIS\\SQL\\buzzer_python",
-      "script": "tcp_server_buzzer.py",
-      "interpreter": "pythonw",
-      "autorestart": true,
-      "watch": false
-    }
-  ]
-}
+# ============================================================
+# FORCE UTF-8 OUTPUT FOR WINDOWS PM2
+# ============================================================
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
+
+
+@echo off
+echo ============================================
+echo Starting OCV Buzzer TCP Service...
+echo ============================================
+
+REM Force UTF-8 encoding for Python
+set PYTHONUTF8=1
+
+REM Go to project folder
+cd /d "C:\Project\EV_Battery_MIS\SQL\buzzer_python"
+
+REM Start service using PM2
+pm2 start tcp_server_buzzer.py --name tcp_server_buzzer --interpreter "C:\Program Files\Python310\python.exe"
+
+echo.
+echo ============================================
+echo Service Start Command Completed
+echo ============================================
+
+REM Save PM2 process configuration
+pm2 save
+
+pause
