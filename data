@@ -1,17 +1,1237 @@
-<service>
+"use strict";
 
-  <id>OCVMACINT Line7</id>
+// ============================================================
+// IMPORTS
+// ============================================================
 
-  <name>OCV Mac MIS Integration Backend Service (powered by Orbittal)</name>
+const W3CWebSocket = require("websocket").w3cwebsocket;
+const fs = require("fs");
+const fsp = fs.promises;
 
-  <description>This service is a service for OCV Mac MIS Integration Backend</description>
+const {
+    OPCUAClient,
+    AttributeIds,
+    TimestampsToReturn
+} = require("node-opcua");
 
-  <workingdirectory>C:\Project\SystemConfig new\SystemConfig 7 &amp; 8</workingdirectory>
 
-  <executable>C:\Program Files\nodejs\node.exe</executable>
+// ============================================================
+// CONFIGURATION
+// ============================================================
 
-  <arguments>new_tag_reader2_ocvint.js</arguments>
+// OPC-UA SERVER
+const endpointUrl = "opc.tcp://192.168.250.1:4840";
 
-  <log mode="roll"></log>
 
-</service>
+// WEBSOCKET SERVER
+const WS_URL = "ws://10.9.4.28:9669";
+const WS_PROTOCOL = "echo-protocol";
+
+
+// JSON QUEUE FILE
+const DATA_FILE = "masterDataArray.json";
+
+
+// SEND INTERVAL AFTER SUCCESSFUL ACKNOWLEDGEMENT
+const SEND_INTERVAL_MS = 250;
+
+
+// WEBSOCKET RESPONSE TIMEOUT
+const WS_RESPONSE_TIMEOUT_MS = 5000;
+
+
+// RETRY DELAY IF SERVER / NETWORK IS NOT AVAILABLE
+const RETRY_DELAY_MS = 2000;
+
+
+// ============================================================
+// OPC-UA NODES
+// ============================================================
+
+const nodes = [
+    "MES_CellData1",
+    "MES_CellData2",
+    "MES_CellData3",
+    "MES_CellData4",
+    "MES_CellData5",
+    "MES_CellData6",
+    "MES_CellData7",
+    "MES_CellData8"
+];
+
+
+// ============================================================
+// GLOBAL DATA QUEUE
+// ============================================================
+
+let objArr = [];
+
+
+// ============================================================
+// QUEUE PROCESS CONTROL
+// ============================================================
+
+let isProcessingQueue = false;
+
+let processingTimer = null;
+
+
+// ============================================================
+// FILE WRITE QUEUE
+//
+// This ensures multiple write operations do NOT overlap.
+// ============================================================
+
+let fileWritePromise = Promise.resolve();
+
+
+// ============================================================
+// HELPER - LOG WITH TIMESTAMP
+// ============================================================
+
+function log(message, ...args) {
+
+    console.log(
+        `[${new Date().toISOString()}] ${message}`,
+        ...args
+    );
+
+}
+
+
+function logError(message, error) {
+
+    console.error(
+        `[${new Date().toISOString()}] ${message}`,
+        error
+    );
+
+}
+
+
+// ============================================================
+// LOAD EXISTING DATA FROM JSON FILE
+// ============================================================
+
+async function loadMasterData() {
+
+    try {
+
+        // Check if file exists
+        if (!fs.existsSync(DATA_FILE)) {
+
+            log(`${DATA_FILE} does not exist. Creating new empty queue.`);
+
+            objArr = [];
+
+            await saveQueue();
+
+            return;
+
+        }
+
+
+        const data = await fsp.readFile(DATA_FILE, "utf8");
+
+
+        // Empty file protection
+        if (!data || data.trim() === "") {
+
+            log(`${DATA_FILE} is empty. Starting with empty queue.`);
+
+            objArr = [];
+
+            await saveQueue();
+
+            return;
+
+        }
+
+
+        const parsedData = JSON.parse(data);
+
+
+        // Ensure data is an array
+        if (!Array.isArray(parsedData)) {
+
+            throw new Error(
+                "masterDataArray.json must contain a JSON array."
+            );
+
+        }
+
+
+        objArr = parsedData;
+
+
+        log(
+            `Loaded ${objArr.length} pending objects from ${DATA_FILE}`
+        );
+
+
+    } catch (error) {
+
+        logError(
+            `ERROR loading ${DATA_FILE}. Starting with empty queue.`,
+            error
+        );
+
+
+        // Backup corrupted JSON file
+        try {
+
+            const backupFile =
+                `${DATA_FILE}.corrupt.${Date.now()}.bak`;
+
+            if (fs.existsSync(DATA_FILE)) {
+
+                await fsp.copyFile(
+                    DATA_FILE,
+                    backupFile
+                );
+
+                log(
+                    `Corrupted JSON backed up to: ${backupFile}`
+                );
+
+            }
+
+        } catch (backupError) {
+
+            logError(
+                "Could not create corrupted JSON backup",
+                backupError
+            );
+
+        }
+
+
+        objArr = [];
+
+    }
+
+}
+
+
+// ============================================================
+// SAVE QUEUE SAFELY
+//
+// All writes are serialized.
+// Temporary file + rename prevents partial JSON files.
+// ============================================================
+
+function saveQueue() {
+
+    fileWritePromise = fileWritePromise
+        .catch(() => {
+            // Keep write queue alive even after previous failure
+        })
+        .then(async () => {
+
+            try {
+
+                const tempFile = `${DATA_FILE}.tmp`;
+
+
+                // Create a snapshot at write time
+                const jsonData = JSON.stringify(
+                    objArr,
+                    null,
+                    2
+                );
+
+
+                // Write complete JSON to temporary file
+                await fsp.writeFile(
+                    tempFile,
+                    jsonData,
+                    "utf8"
+                );
+
+
+                // Replace main file
+                await fsp.rename(
+                    tempFile,
+                    DATA_FILE
+                );
+
+
+                log(
+                    `Queue saved successfully. Pending objects: ${objArr.length}`
+                );
+
+
+            } catch (error) {
+
+                logError(
+                    "ERROR saving masterDataArray.json",
+                    error
+                );
+
+                throw error;
+
+            }
+
+        });
+
+
+    return fileWritePromise;
+
+}
+
+
+// ============================================================
+// ADD NEW OBJECTS TO QUEUE
+// ============================================================
+
+async function addObjectsToQueue(objects) {
+
+    if (!Array.isArray(objects) || objects.length === 0) {
+
+        return;
+
+    }
+
+
+    // Add objects to memory queue
+    objArr.push(...objects);
+
+
+    log(
+        `Added ${objects.length} objects. Total pending: ${objArr.length}`
+    );
+
+
+    // Save queue
+    await saveQueue();
+
+
+    // Start sending process
+    scheduleQueueProcessing(0);
+
+}
+
+
+// ============================================================
+// SCHEDULE QUEUE PROCESSING
+// ============================================================
+
+function scheduleQueueProcessing(delay) {
+
+    if (processingTimer) {
+
+        clearTimeout(processingTimer);
+
+        processingTimer = null;
+
+    }
+
+
+    processingTimer = setTimeout(() => {
+
+        processingTimer = null;
+
+        processQueue();
+
+    }, delay);
+
+}
+
+
+// ============================================================
+// SEND ONE OBJECT TO WEBSOCKET SERVER
+//
+// IMPORTANT:
+// - Wait for onopen before sending
+// - Wait for server response
+// - Do NOT remove object until acknowledgement
+// ============================================================
+
+function sendOneObject(dataObject) {
+
+    return new Promise((resolve, reject) => {
+
+        let ws = null;
+
+        let finished = false;
+
+        let responseTimer = null;
+
+
+        // ----------------------------------------------------
+        // CLEANUP FUNCTION
+        // ----------------------------------------------------
+
+        function cleanup() {
+
+            if (responseTimer) {
+
+                clearTimeout(responseTimer);
+
+                responseTimer = null;
+
+            }
+
+
+            if (ws) {
+
+                try {
+
+                    ws.onopen = null;
+                    ws.onmessage = null;
+                    ws.onerror = null;
+                    ws.onclose = null;
+
+                } catch (error) {
+
+                    // Ignore cleanup errors
+
+                }
+
+            }
+
+        }
+
+
+        // ----------------------------------------------------
+        // SUCCESS
+        // ----------------------------------------------------
+
+        function success(response) {
+
+            if (finished) return;
+
+            finished = true;
+
+            cleanup();
+
+
+            try {
+
+                if (ws) {
+
+                    ws.close();
+
+                }
+
+            } catch (error) {
+
+                // Ignore close errors
+
+            }
+
+
+            resolve(response);
+
+        }
+
+
+        // ----------------------------------------------------
+        // FAILURE
+        // ----------------------------------------------------
+
+        function failure(error) {
+
+            if (finished) return;
+
+            finished = true;
+
+            cleanup();
+
+
+            try {
+
+                if (ws) {
+
+                    ws.close();
+
+                }
+
+            } catch (closeError) {
+
+                // Ignore close errors
+
+            }
+
+
+            reject(error);
+
+        }
+
+
+        try {
+
+            log(
+                `Connecting to WebSocket server: ${WS_URL}`
+            );
+
+
+            ws = new W3CWebSocket(
+                WS_URL,
+                WS_PROTOCOL
+            );
+
+
+            // ====================================================
+            // CONNECTION OPEN
+            // ====================================================
+
+            ws.onopen = function () {
+
+                log("WebSocket connected successfully.");
+
+
+                try {
+
+                    // Send ONLY after successful connection
+                    const message = JSON.stringify(dataObject);
+
+
+                    log(
+                        `Sending object: ${message}`
+                    );
+
+
+                    ws.send(message);
+
+
+                    // Start waiting for server response
+                    responseTimer = setTimeout(() => {
+
+                        failure(
+                            new Error(
+                                `Server response timeout after ${WS_RESPONSE_TIMEOUT_MS} ms`
+                            )
+                        );
+
+                    }, WS_RESPONSE_TIMEOUT_MS);
+
+
+                } catch (error) {
+
+                    failure(error);
+
+                }
+
+            };
+
+
+            // ====================================================
+            // SERVER RESPONSE
+            // ====================================================
+
+            ws.onmessage = function (event) {
+
+                log(
+                    `Server response received: ${event.data}`
+                );
+
+
+                // Any response is treated as acknowledgement.
+                //
+                // If your server sends a specific success message,
+                // we can validate it here.
+
+                success(event.data);
+
+            };
+
+
+            // ====================================================
+            // ERROR
+            // ====================================================
+
+            ws.onerror = function (error) {
+
+                logError(
+                    "WebSocket error",
+                    error
+                );
+
+
+                failure(
+                    new Error("WebSocket connection error")
+                );
+
+            };
+
+
+            // ====================================================
+            // CONNECTION CLOSED
+            // ====================================================
+
+            ws.onclose = function (event) {
+
+                if (!finished) {
+
+                    failure(
+                        new Error(
+                            `WebSocket closed before acknowledgement. Code: ${event.code}`
+                        )
+                    );
+
+                }
+
+            };
+
+
+        } catch (error) {
+
+            failure(error);
+
+        }
+
+    });
+
+}
+
+
+// ============================================================
+// MAIN QUEUE PROCESSOR
+//
+// This guarantees:
+//
+// ONLY ONE OBJECT
+// ONLY ONE CONNECTION
+// ONLY ONE SEND
+// ONLY REMOVE AFTER SUCCESS
+// ============================================================
+
+async function processQueue() {
+
+    // Prevent multiple queue processors
+    if (isProcessingQueue) {
+
+        return;
+
+    }
+
+
+    // Nothing to send
+    if (objArr.length === 0) {
+
+        return;
+
+    }
+
+
+    isProcessingQueue = true;
+
+
+    try {
+
+        // ----------------------------------------------------
+        // ALWAYS TAKE FIRST OBJECT ONLY
+        // ----------------------------------------------------
+
+        const currentObject = objArr[0];
+
+
+        log(
+            `Processing queue. Pending objects: ${objArr.length}`
+        );
+
+
+        log(
+            "Current object:",
+            currentObject
+        );
+
+
+        // ----------------------------------------------------
+        // SEND OBJECT
+        // ----------------------------------------------------
+
+        const serverResponse =
+            await sendOneObject(currentObject);
+
+
+        log(
+            `Object successfully acknowledged by server: ${serverResponse}`
+        );
+
+
+        // ----------------------------------------------------
+        // IMPORTANT:
+        // Remove ONLY after successful acknowledgement
+        // ----------------------------------------------------
+
+        // Extra protection:
+        // Remove only if the first object is still the same one.
+        if (objArr.length > 0) {
+
+            objArr.shift();
+
+
+            log(
+                `Object removed from queue after successful acknowledgement. Remaining: ${objArr.length}`
+            );
+
+
+            // Save updated queue
+            await saveQueue();
+
+        }
+
+
+        isProcessingQueue = false;
+
+
+        // ----------------------------------------------------
+        // WAIT 250ms THEN SEND NEXT OBJECT
+        // ----------------------------------------------------
+
+        if (objArr.length > 0) {
+
+            scheduleQueueProcessing(
+                SEND_INTERVAL_MS
+            );
+
+        }
+
+
+    } catch (error) {
+
+        isProcessingQueue = false;
+
+
+        logError(
+            "Failed to send object. Object will remain in queue for retry.",
+            error
+        );
+
+
+        // ----------------------------------------------------
+        // IMPORTANT:
+        // DO NOT REMOVE OBJECT
+        // Retry later
+        // ----------------------------------------------------
+
+        scheduleQueueProcessing(
+            RETRY_DELAY_MS
+        );
+
+    }
+
+}
+
+
+// ============================================================
+// CREATE 4 OBJECTS FROM OPC-UA DATA
+// ============================================================
+
+function createObjectsFromOPCData(dataValue) {
+
+    try {
+
+        if (
+            !dataValue ||
+            !dataValue.value ||
+            !Array.isArray(dataValue.value.value)
+        ) {
+
+            log(
+                "Invalid OPC-UA data received."
+            );
+
+            return [];
+
+        }
+
+
+        const values = dataValue.value.value;
+
+
+        if (values.length < 4) {
+
+            log(
+                `OPC-UA data contains only ${values.length} items. Expected 4.`
+            );
+
+            return [];
+
+        }
+
+
+        const objects = [];
+
+
+        for (let i = 0; i < 4; i++) {
+
+            const item = values[i];
+
+
+            if (!item) {
+
+                continue;
+
+            }
+
+
+            const obj = {
+
+                cell_qrcode: item["QR_code"],
+
+                voltage_val: item["pnVoltage"],
+
+                ir_val: item["pnResistance"],
+
+                material: item["nShellVoltage"]
+
+            };
+
+
+            objects.push(obj);
+
+        }
+
+
+        return objects;
+
+
+    } catch (error) {
+
+        logError(
+            "Error creating objects from OPC-UA data",
+            error
+        );
+
+
+        return [];
+
+    }
+
+}
+
+
+// ============================================================
+// OPC-UA MAIN FUNCTION
+// ============================================================
+
+async function main() {
+
+    let client = null;
+
+    let session = null;
+
+    let subscription = null;
+
+
+    try {
+
+        // ====================================================
+        // CREATE OPC-UA CLIENT
+        // ====================================================
+
+        client = OPCUAClient.create({
+
+            endpoint_must_exist: false,
+
+            connectionStrategy: {
+
+                maxRetry: 10,
+
+                initialDelay: 2000,
+
+                maxDelay: 10000
+
+            }
+
+        });
+
+
+        client.on("backoff", (retry, delay) => {
+
+            log(
+                `OPC-UA reconnecting. Retry: ${retry}, Delay: ${delay}ms`
+            );
+
+        });
+
+
+        // ====================================================
+        // CONNECT OPC-UA
+        // ====================================================
+
+        log(
+            `Connecting to OPC-UA server: ${endpointUrl}`
+        );
+
+
+        await client.connect(endpointUrl);
+
+
+        log(
+            "Connected to OPC-UA server."
+        );
+
+
+        // ====================================================
+        // CREATE SESSION
+        // ====================================================
+
+        session = await client.createSession();
+
+
+        log(
+            "OPC-UA session created."
+        );
+
+
+        // ====================================================
+        // CREATE SUBSCRIPTION
+        // ====================================================
+
+        subscription =
+            await session.createSubscription2({
+
+                requestedPublishingInterval: 1000,
+
+                requestedLifetimeCount: 100,
+
+                requestedMaxKeepAliveCount: 10,
+
+                maxNotificationsPerPublish: 10,
+
+                publishingEnabled: true,
+
+                priority: 10
+
+            });
+
+
+        subscription
+            .on("started", () => {
+
+                log(
+                    `Subscription started. ID: ${subscription.subscriptionId}`
+                );
+
+            })
+
+            .on("keepalive", () => {
+
+                log("OPC-UA subscription keepalive");
+
+            })
+
+            .on("terminated", () => {
+
+                log("OPC-UA subscription terminated");
+
+            });
+
+
+        // ====================================================
+        // MONITOR ALL 8 NODES
+        // ====================================================
+
+        const parameters = {
+
+            samplingInterval: 100,
+
+            discardOldest: true,
+
+            queueSize: 100
+
+        };
+
+
+        const monitoredItems = [];
+
+
+        for (let i = 0; i < nodes.length; i++) {
+
+            const nodeIdToMonitor =
+                `ns=4;s=${nodes[i]}`;
+
+
+            const itemToMonitor = {
+
+                nodeId: nodeIdToMonitor,
+
+                attributeId: AttributeIds.Value
+
+            };
+
+
+            log(
+                `Monitoring Node ${i + 1}: ${nodeIdToMonitor}`
+            );
+
+
+            const monitoredItem =
+                await subscription.monitor(
+
+                    itemToMonitor,
+
+                    parameters,
+
+                    TimestampsToReturn.Both
+
+                );
+
+
+            monitoredItems.push(monitoredItem);
+
+        }
+
+
+        // ====================================================
+        // HANDLE DATA CHANGES
+        // ====================================================
+
+        monitoredItems.forEach(
+            function (req, index) {
+
+                req.on(
+                    "changed",
+                    async (dataValue) => {
+
+                        try {
+
+                            log(
+                                `${nodes[index]} data changed.`
+                            );
+
+
+                            // ------------------------------------
+                            // CREATE 4 CELL OBJECTS
+                            // ------------------------------------
+
+                            const objects =
+                                createObjectsFromOPCData(
+                                    dataValue
+                                );
+
+
+                            if (objects.length === 0) {
+
+                                log(
+                                    `${nodes[index]}: No valid objects created.`
+                                );
+
+                                return;
+
+                            }
+
+
+                            // ------------------------------------
+                            // ADD TO JSON QUEUE
+                            // ------------------------------------
+
+                            await addObjectsToQueue(
+                                objects
+                            );
+
+
+                            log(
+                                `${nodes[index]}: ${objects.length} objects added successfully.`
+                            );
+
+
+                        } catch (error) {
+
+                            logError(
+                                `Error processing ${nodes[index]} data`,
+                                error
+                            );
+
+                        }
+
+                    }
+                );
+
+            }
+        );
+
+
+        // ====================================================
+        // GRACEFUL SHUTDOWN
+        // ====================================================
+
+        let shuttingDown = false;
+
+
+        async function shutdown(signal) {
+
+            if (shuttingDown) {
+
+                return;
+
+            }
+
+
+            shuttingDown = true;
+
+
+            log(
+                `${signal} received. Shutting down...`
+            );
+
+
+            try {
+
+                // Wait for pending file writes
+                await fileWritePromise;
+
+            } catch (error) {
+
+                logError(
+                    "Error waiting for file write during shutdown",
+                    error
+                );
+
+            }
+
+
+            try {
+
+                if (subscription) {
+
+                    await subscription.terminate();
+
+                }
+
+            } catch (error) {
+
+                logError(
+                    "Error terminating subscription",
+                    error
+                );
+
+            }
+
+
+            try {
+
+                if (session) {
+
+                    await session.close();
+
+                }
+
+            } catch (error) {
+
+                logError(
+                    "Error closing OPC-UA session",
+                    error
+                );
+
+            }
+
+
+            try {
+
+                if (client) {
+
+                    await client.disconnect();
+
+                }
+
+            } catch (error) {
+
+                logError(
+                    "Error disconnecting OPC-UA client",
+                    error
+                );
+
+            }
+
+
+            log("Shutdown complete.");
+
+
+            process.exit(0);
+
+        }
+
+
+        process.on(
+            "SIGINT",
+            () => shutdown("SIGINT")
+        );
+
+
+        process.on(
+            "SIGTERM",
+            () => shutdown("SIGTERM")
+        );
+
+
+    } catch (error) {
+
+        logError(
+            "FATAL OPC-UA ERROR",
+            error
+        );
+
+
+        // Do not immediately destroy queue data.
+        // WinSW can restart the process.
+
+        setTimeout(() => {
+
+            process.exit(1);
+
+        }, 5000);
+
+    }
+
+}
+
+
+// ============================================================
+// APPLICATION STARTUP
+// ============================================================
+
+async function startApplication() {
+
+    try {
+
+        log("==============================================");
+        log("OCV MAC MIS INTEGRATION SERVICE STARTING");
+        log("==============================================");
+
+
+        // Load old pending data first
+        await loadMasterData();
+
+
+        // Start processing existing queue
+        if (objArr.length > 0) {
+
+            log(
+                `Existing pending data found: ${objArr.length} objects`
+            );
+
+
+            scheduleQueueProcessing(1000);
+
+        }
+
+
+        // Start OPC-UA
+        await main();
+
+
+    } catch (error) {
+
+        logError(
+            "APPLICATION STARTUP ERROR",
+            error
+        );
+
+
+        process.exit(1);
+
+    }
+
+}
+
+
+// ============================================================
+// START APPLICATION
+// ============================================================
+
+startApplication();
