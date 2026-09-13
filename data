@@ -1,1237 +1,1690 @@
-"use strict";
-
-// ============================================================
-// IMPORTS
-// ============================================================
-
-const W3CWebSocket = require("websocket").w3cwebsocket;
-const fs = require("fs");
-const fsp = fs.promises;
-
-const {
-    OPCUAClient,
-    AttributeIds,
-    TimestampsToReturn
-} = require("node-opcua");
+import pyodbc
+import time
+import redis
+import json
+import re
 
 
-// ============================================================
-// CONFIGURATION
-// ============================================================
+# ============================================================
+# REDIS CONFIG
+# ============================================================
 
-// OPC-UA SERVER
-const endpointUrl = "opc.tcp://192.168.250.1:4840";
+redis_host = "localhost"
+redis_port = 6379
+redis_db = 31
+redis_password = "Gotion@123Strong!"
 
+r = redis.StrictRedis(
+    host=redis_host,
+    port=redis_port,
+    password=redis_password,
+    db=redis_db,
+    decode_responses=True
+)
 
-// WEBSOCKET SERVER
-const WS_URL = "ws://10.9.4.28:9669";
-const WS_PROTOCOL = "echo-protocol";
-
-
-// JSON QUEUE FILE
-const DATA_FILE = "masterDataArray.json";
-
-
-// SEND INTERVAL AFTER SUCCESSFUL ACKNOWLEDGEMENT
-const SEND_INTERVAL_MS = 250;
-
-
-// WEBSOCKET RESPONSE TIMEOUT
-const WS_RESPONSE_TIMEOUT_MS = 5000;
+DUPLICATE_TTL_SECONDS = 3 * 24 * 60 * 60
 
 
-// RETRY DELAY IF SERVER / NETWORK IS NOT AVAILABLE
-const RETRY_DELAY_MS = 2000;
+# ============================================================
+# RETRY CONFIG
+# ============================================================
+
+MAX_RETRY = 3
+RETRY_KEY_PREFIX = "retry:"
+
+# SQL connection retry
+SQL_CONNECTION_RETRY_COUNT = 5
+SQL_CONNECTION_RETRY_DELAY = 1
+
+# DB reconnect delay
+DB_RECONNECT_DELAY = 2
 
 
-// ============================================================
-// OPC-UA NODES
-// ============================================================
+# ============================================================
+# SAFE STRING
+# ============================================================
 
-const nodes = [
-    "MES_CellData1",
-    "MES_CellData2",
-    "MES_CellData3",
-    "MES_CellData4",
-    "MES_CellData5",
-    "MES_CellData6",
-    "MES_CellData7",
-    "MES_CellData8"
-];
+def safe(val):
+
+    return "" if val is None else str(val)
 
 
-// ============================================================
-// GLOBAL DATA QUEUE
-// ============================================================
+def extract_capacity(val):
 
-let objArr = [];
+    if val is None:
+        return ""
 
+    val_str = str(val)
 
-// ============================================================
-// QUEUE PROCESS CONTROL
-// ============================================================
+    match = re.search(r"\d+(\.\d+)?", val_str)
 
-let isProcessingQueue = false;
+    if match:
+        return match.group(0)
 
-let processingTimer = null;
-
-
-// ============================================================
-// FILE WRITE QUEUE
-//
-// This ensures multiple write operations do NOT overlap.
-// ============================================================
-
-let fileWritePromise = Promise.resolve();
+    return ""
 
 
-// ============================================================
-// HELPER - LOG WITH TIMESTAMP
-// ============================================================
+# ============================================================
+# DB CONFIG
+# ============================================================
 
-function log(message, ...args) {
-
-    console.log(
-        `[${new Date().toISOString()}] ${message}`,
-        ...args
-    );
-
+sqlConfig1 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "taco_treceability",
+    "user": "user_mis",
+    "password": "admin@123",
 }
 
 
-function logError(message, error) {
-
-    console.error(
-        `[${new Date().toISOString()}] ${message}`,
-        error
-    );
-
+sqlConfig2 = {
+    "server": "10.9.4.29\\PROD_SQL_2026",
+    "database": "ocv_inventory_master",
+    "user": "user_mis",
+    "password": "admin@123",
 }
 
 
-// ============================================================
-// LOAD EXISTING DATA FROM JSON FILE
-// ============================================================
+# ============================================================
+# CONNECT DB
+# ============================================================
 
-async function loadMasterData() {
+def connect_db(config):
 
-    try {
+    conn = pyodbc.connect(
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={config['server']};"
+        f"DATABASE={config['database']};"
+        f"UID={config['user']};"
+        f"PWD={config['password']};"
+        f"TrustServerCertificate=yes;"
+        f"Connection Timeout=5;"
+    )
 
-        // Check if file exists
-        if (!fs.existsSync(DATA_FILE)) {
+    conn.autocommit = False
 
-            log(`${DATA_FILE} does not exist. Creating new empty queue.`);
-
-            objArr = [];
-
-            await saveQueue();
-
-            return;
-
-        }
-
-
-        const data = await fsp.readFile(DATA_FILE, "utf8");
+    return conn
 
 
-        // Empty file protection
-        if (!data || data.trim() === "") {
+# ============================================================
+# CHECK SQL CONNECTION ERROR
+# ============================================================
 
-            log(`${DATA_FILE} is empty. Starting with empty queue.`);
+def is_sql_connection_error(error):
 
-            objArr = [];
+    error_text = str(error).upper()
 
-            await saveQueue();
+    connection_errors = [
+        "08S01",
+        "08001",
+        "08003",
+        "08004",
+        "08007",
+        "08S02",
+        "08S03",
+        "COMMUNICATION LINK FAILURE",
+        "CONNECTION IS BROKEN",
+        "CONNECTION RESET",
+        "CONNECTION WAS CLOSED",
+        "TCP PROVIDER",
+        "SQL SERVER DOES NOT EXIST",
+        "GENERAL NETWORK ERROR",
+        "SERVER IS NOT FOUND",
+        "TRANSPORT-LEVEL ERROR",
+        "BROKEN PIPE",
+        "CONNECTION FAILED"
+    ]
 
-            return;
-
-        }
-
-
-        const parsedData = JSON.parse(data);
-
-
-        // Ensure data is an array
-        if (!Array.isArray(parsedData)) {
-
-            throw new Error(
-                "masterDataArray.json must contain a JSON array."
-            );
-
-        }
-
-
-        objArr = parsedData;
-
-
-        log(
-            `Loaded ${objArr.length} pending objects from ${DATA_FILE}`
-        );
-
-
-    } catch (error) {
-
-        logError(
-            `ERROR loading ${DATA_FILE}. Starting with empty queue.`,
-            error
-        );
+    return any(
+        error_code in error_text
+        for error_code in connection_errors
+    )
 
 
-        // Backup corrupted JSON file
-        try {
+# ============================================================
+# CLOSE CONNECTION SAFELY
+# ============================================================
 
-            const backupFile =
-                `${DATA_FILE}.corrupt.${Date.now()}.bak`;
+def close_connection(conn, name="DB"):
 
-            if (fs.existsSync(DATA_FILE)) {
+    if conn is None:
+        return
 
-                await fsp.copyFile(
-                    DATA_FILE,
-                    backupFile
-                );
+    try:
 
-                log(
-                    `Corrupted JSON backed up to: ${backupFile}`
-                );
+        conn.close()
 
+        print(
+            f"[{name}] CONNECTION CLOSED."
+        )
+
+    except Exception as e:
+
+        print(
+            f"[{name}] CONNECTION CLOSE FAILED :",
+            e
+        )
+
+
+# ============================================================
+# TEST CONNECTION
+# ============================================================
+
+def test_connection(conn):
+
+    cursor = None
+
+    try:
+
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT 1"
+        )
+
+        cursor.fetchone()
+
+        return True
+
+    except Exception:
+
+        return False
+
+    finally:
+
+        try:
+
+            if cursor:
+                cursor.close()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# RECONNECT DATABASE
+# ============================================================
+
+def reconnect_db(old_conn, config, name="DB"):
+
+    print(
+        f"[{name}] RECONNECT STARTED..."
+    )
+
+    close_connection(
+        old_conn,
+        name
+    )
+
+    while True:
+
+        try:
+
+            print(
+                f"[{name}] TRYING NEW CONNECTION..."
+            )
+
+            new_conn = connect_db(
+                config
+            )
+
+            if test_connection(new_conn):
+
+                print(
+                    f"[{name}] RECONNECTED SUCCESSFULLY."
+                )
+
+                return new_conn
+
+            else:
+
+                print(
+                    f"[{name}] CONNECTION TEST FAILED."
+                )
+
+                close_connection(
+                    new_conn,
+                    name
+                )
+
+        except Exception as e:
+
+            print(
+                f"[{name}] RECONNECT FAILED :",
+                e
+            )
+
+        print(
+            f"[{name}] RETRYING IN "
+            f"{DB_RECONNECT_DELAY} SECOND(S)..."
+        )
+
+        time.sleep(
+            DB_RECONNECT_DELAY
+        )
+
+
+# ============================================================
+# DATE MAPS
+# ============================================================
+
+yearMap = {
+    "B": 21,
+    "C": 22,
+    "D": 23,
+    "E": 24,
+    "F": 25,
+    "G": 26,
+    "H": 27,
+    "J": 28,
+    "K": 29,
+    "L": 30,
+    "M": 31,
+    "N": 32,
+    "P": 33,
+    "R": 34,
+    "S": 35,
+    "T": 36,
+    "V": 37,
+    "W": 38,
+    "X": 39,
+    "Y": 40,
+    "1": 41,
+    "2": 42,
+    "3": 43,
+    "4": 44,
+    "5": 45,
+    "6": 46,
+    "7": 47,
+    "8": 48,
+    "9": 49,
+    "A": 50,
+}
+
+
+monthMap = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "A": 10,
+    "B": 11,
+    "C": 12
+}
+
+
+dayMap = {
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "A": 10,
+    "B": 11,
+    "C": 12,
+    "D": 13,
+    "E": 14,
+    "F": 15,
+    "G": 16,
+    "H": 17,
+    "J": 18,
+    "K": 19,
+    "L": 20,
+    "M": 21,
+    "N": 22,
+    "P": 23,
+    "R": 24,
+    "S": 25,
+    "T": 26,
+    "V": 27,
+    "W": 28,
+    "X": 29,
+    "Y": 30,
+    "0": 31
+}
+
+
+# ============================================================
+# ENSURE TABLE
+# ============================================================
+
+def ensure_table(dst_cursor, tableName):
+
+    dst_cursor.execute(f"""
+    IF NOT EXISTS (
+        SELECT 1
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME = '{tableName}'
+    )
+    BEGIN
+
+        CREATE TABLE {tableName} (
+            sr_no INT IDENTITY(1,1) PRIMARY KEY,
+            cellqr NVARCHAR(50),
+            voltage NVARCHAR(50),
+            ir NVARCHAR(50),
+            class_grade NVARCHAR(30),
+            capacity NVARCHAR(50),
+            thickness NVARCHAR(50),
+            k_value NVARCHAR(50),
+            negative_voltage NVARCHAR(50),
+            cell_status NVARCHAR(20),
+            ocv_mc_no NVARCHAR(40),
+            first_para_time DATETIME,
+            last_para_time DATETIME,
+            laser_status VARCHAR(50),
+            batch VARCHAR(100),
+            plant_code VARCHAR(50)
+        )
+
+    END
+    """)
+
+
+# ============================================================
+# MOVE TO REJECTION
+# ============================================================
+
+def move_to_rejection(src_conn, row):
+
+    cursor = None
+
+    try:
+
+        cursor = src_conn.cursor()
+
+        print(
+            "INSERTING INTO REJECTION :",
+            row.cell_qrcode
+        )
+
+        cursor.execute("""
+        INSERT INTO taco_treceability.ocv_machine_data_mirror_rejection
+        (
+            cell_qrcode,
+            voltage,
+            ir,
+            today_date,
+            updated_time,
+            machine_location,
+            shift,
+            used_on_line,
+            kvalue,
+            grade,
+            cell_capacity,
+            cell_class
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            row.cell_qrcode,
+            row.voltage,
+            row.ir,
+            row.today_date,
+            row.updated_time,
+            row.machine_location,
+            row.shift,
+            row.used_on_line,
+            row.kvalue,
+            row.grade,
+            row.cell_capacity,
+            row.cell_class
+        ))
+
+        # ====================================================
+        # ACKNOWLEDGEMENT
+        # ====================================================
+        #
+        # Commit means rejection insertion succeeded.
+        # Only after this succeeds will mirror be deleted.
+        #
+
+        src_conn.commit()
+
+        print(
+            "REJECTION ACKNOWLEDGED :",
+            row.cell_qrcode
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "REJECTION INSERT FAILED :",
+            e
+        )
+
+        try:
+
+            src_conn.rollback()
+
+        except Exception as rollback_error:
+
+            print(
+                "REJECTION ROLLBACK FAILED :",
+                rollback_error
+            )
+
+        return False
+
+    finally:
+
+        try:
+
+            if cursor:
+                cursor.close()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# HANDLE FAILURE
+# ============================================================
+
+def handle_failure(src_conn, row):
+
+    qr = safe(
+        row.cell_qrcode
+    )
+
+    print(
+        "FAILURE HANDLER STARTED :",
+        qr
+    )
+
+    # ========================================================
+    # INSERT INTO REJECTION
+    # ========================================================
+
+    rejection_success = move_to_rejection(
+        src_conn,
+        row
+    )
+
+    # ========================================================
+    # ONLY DELETE AFTER ACKNOWLEDGEMENT
+    # ========================================================
+
+    if rejection_success:
+
+        cursor = None
+
+        try:
+
+            cursor = src_conn.cursor()
+
+            cursor.execute("""
+            DELETE FROM taco_treceability.ocv_machine_data_mirror
+            WHERE cell_qrcode=?
+            """, qr)
+
+            src_conn.commit()
+
+            print(
+                "SOURCE DELETED AFTER REJECTION ACK :",
+                qr
+            )
+
+            return True
+
+        except Exception as delete_error:
+
+            print(
+                "DELETE AFTER REJECTION FAILED :",
+                delete_error
+            )
+
+            try:
+
+                src_conn.rollback()
+
+            except Exception as rollback_error:
+
+                print(
+                    "DELETE ROLLBACK FAILED :",
+                    rollback_error
+                )
+
+            return False
+
+        finally:
+
+            try:
+
+                if cursor:
+                    cursor.close()
+
+            except Exception:
+                pass
+
+    else:
+
+        print(
+            "REJECTION NOT ACKNOWLEDGED - SOURCE KEPT :",
+            qr
+        )
+
+        return False
+
+
+# ============================================================
+# DELETE SOURCE AFTER SQL + REDIS SUCCESS
+# ============================================================
+
+def delete_source(src_conn, qr):
+
+    cursor = None
+
+    try:
+
+        cursor = src_conn.cursor()
+
+        cursor.execute("""
+        DELETE FROM taco_treceability.ocv_machine_data_mirror
+        WHERE cell_qrcode=?
+        """, qr)
+
+        src_conn.commit()
+
+        print(
+            "SOURCE DELETED :",
+            qr
+        )
+
+        return True
+
+    except Exception as delete_error:
+
+        print(
+            "DELETE FAILED :",
+            delete_error
+        )
+
+        try:
+
+            src_conn.rollback()
+
+        except Exception as rollback_error:
+
+            print(
+                "DELETE ROLLBACK FAILED :",
+                rollback_error
+            )
+
+        return False
+
+    finally:
+
+        try:
+
+            if cursor:
+                cursor.close()
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# SQL PROCESS WITH RECONNECT + RETRY
+# ============================================================
+
+def process_sql_record(
+    dst_conn,
+    tableName,
+    qr,
+    row,
+    capacity_val,
+    dateCode,
+    code12_13
+):
+
+    sql_success = False
+    connection_error = False
+
+    for sql_attempt in range(
+        1,
+        SQL_CONNECTION_RETRY_COUNT + 1
+    ):
+
+        dst_cursor = None
+
+        try:
+
+            print(
+                f"[SQL] ATTEMPT "
+                f"{sql_attempt}/"
+                f"{SQL_CONNECTION_RETRY_COUNT} :",
+                qr
+            )
+
+            # =================================================
+            # NEW CURSOR
+            # =================================================
+
+            dst_cursor = dst_conn.cursor()
+
+            # =================================================
+            # ENSURE TABLE
+            # =================================================
+
+            ensure_table(
+                dst_cursor,
+                tableName
+            )
+
+            # =================================================
+            # CHECK EXISTING RECORD
+            # =================================================
+
+            dst_cursor.execute(
+                f"""
+                SELECT cellqr
+                FROM {tableName}
+                WHERE cellqr=?
+                """,
+                qr
+            )
+
+            exists = dst_cursor.fetchone()
+
+            # =================================================
+            # UPDATE EXISTING SQL RECORD
+            # =================================================
+
+            if exists:
+
+                dst_cursor.execute(
+                    f"""
+                    UPDATE {tableName}
+                    SET
+                        voltage=?,
+                        ir=?,
+                        class_grade=?,
+                        capacity=?,
+                        k_value=?,
+                        ocv_mc_no=?,
+                        first_para_time=?,
+                        last_para_time=?,
+                        batch=?,
+                        plant_code=?
+                    WHERE cellqr=?
+                    """,
+                    (
+                        safe(row.voltage),
+                        safe(row.ir),
+                        safe(row.cell_class),
+                        capacity_val,
+                        safe(row.kvalue),
+                        safe(row.machine_location),
+                        row.today_date,
+                        row.today_date,
+                        dateCode,
+                        code12_13,
+                        qr
+                    )
+                )
+
+                print(
+                    "UPDATED :",
+                    qr
+                )
+
+            # =================================================
+            # INSERT NEW SQL RECORD
+            # =================================================
+
+            else:
+
+                dst_cursor.execute(
+                    f"""
+                    INSERT INTO {tableName}
+                    (
+                        cellqr,
+                        voltage,
+                        ir,
+                        class_grade,
+                        capacity,
+                        thickness,
+                        k_value,
+                        negative_voltage,
+                        cell_status,
+                        ocv_mc_no,
+                        first_para_time,
+                        last_para_time,
+                        laser_status,
+                        batch,
+                        plant_code
+                    )
+                    VALUES
+                    (
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        ?,
+                        NULL,
+                        ?,
+                        NULL,
+                        'OK',
+                        ?,
+                        ?,
+                        ?,
+                        NULL,
+                        ?,
+                        ?
+                    )
+                    """,
+                    (
+                        qr,
+                        safe(row.voltage),
+                        safe(row.ir),
+                        safe(row.cell_class),
+                        capacity_val,
+                        safe(row.kvalue),
+                        safe(row.machine_location),
+                        row.today_date,
+                        row.today_date,
+                        dateCode,
+                        code12_13
+                    )
+                )
+
+                print(
+                    "INSERTED :",
+                    qr
+                )
+
+            # =================================================
+            # SQL COMMIT
+            # =================================================
+
+            dst_conn.commit()
+
+            sql_success = True
+
+            print(
+                "SQL SUCCESS :",
+                qr
+            )
+
+            return {
+                "success": True,
+                "connection_error": False,
+                "conn": dst_conn
             }
 
-        } catch (backupError) {
-
-            logError(
-                "Could not create corrupted JSON backup",
-                backupError
-            );
-
-        }
-
-
-        objArr = [];
-
-    }
-
-}
-
-
-// ============================================================
-// SAVE QUEUE SAFELY
-//
-// All writes are serialized.
-// Temporary file + rename prevents partial JSON files.
-// ============================================================
-
-function saveQueue() {
-
-    fileWritePromise = fileWritePromise
-        .catch(() => {
-            // Keep write queue alive even after previous failure
-        })
-        .then(async () => {
-
-            try {
-
-                const tempFile = `${DATA_FILE}.tmp`;
-
-
-                // Create a snapshot at write time
-                const jsonData = JSON.stringify(
-                    objArr,
-                    null,
-                    2
-                );
-
-
-                // Write complete JSON to temporary file
-                await fsp.writeFile(
-                    tempFile,
-                    jsonData,
-                    "utf8"
-                );
-
-
-                // Replace main file
-                await fsp.rename(
-                    tempFile,
-                    DATA_FILE
-                );
-
-
-                log(
-                    `Queue saved successfully. Pending objects: ${objArr.length}`
-                );
-
-
-            } catch (error) {
-
-                logError(
-                    "ERROR saving masterDataArray.json",
-                    error
-                );
-
-                throw error;
-
-            }
-
-        });
-
-
-    return fileWritePromise;
-
-}
-
-
-// ============================================================
-// ADD NEW OBJECTS TO QUEUE
-// ============================================================
-
-async function addObjectsToQueue(objects) {
-
-    if (!Array.isArray(objects) || objects.length === 0) {
-
-        return;
-
-    }
-
-
-    // Add objects to memory queue
-    objArr.push(...objects);
-
-
-    log(
-        `Added ${objects.length} objects. Total pending: ${objArr.length}`
-    );
-
-
-    // Save queue
-    await saveQueue();
-
-
-    // Start sending process
-    scheduleQueueProcessing(0);
-
-}
-
-
-// ============================================================
-// SCHEDULE QUEUE PROCESSING
-// ============================================================
-
-function scheduleQueueProcessing(delay) {
-
-    if (processingTimer) {
-
-        clearTimeout(processingTimer);
-
-        processingTimer = null;
-
-    }
-
-
-    processingTimer = setTimeout(() => {
-
-        processingTimer = null;
-
-        processQueue();
-
-    }, delay);
-
-}
-
-
-// ============================================================
-// SEND ONE OBJECT TO WEBSOCKET SERVER
-//
-// IMPORTANT:
-// - Wait for onopen before sending
-// - Wait for server response
-// - Do NOT remove object until acknowledgement
-// ============================================================
-
-function sendOneObject(dataObject) {
-
-    return new Promise((resolve, reject) => {
-
-        let ws = null;
-
-        let finished = false;
-
-        let responseTimer = null;
-
-
-        // ----------------------------------------------------
-        // CLEANUP FUNCTION
-        // ----------------------------------------------------
-
-        function cleanup() {
-
-            if (responseTimer) {
-
-                clearTimeout(responseTimer);
-
-                responseTimer = null;
-
-            }
-
-
-            if (ws) {
-
-                try {
-
-                    ws.onopen = null;
-                    ws.onmessage = null;
-                    ws.onerror = null;
-                    ws.onclose = null;
-
-                } catch (error) {
-
-                    // Ignore cleanup errors
-
+        except Exception as sql_error:
+
+            print(
+                f"[SQL] FAILED ATTEMPT "
+                f"{sql_attempt}/"
+                f"{SQL_CONNECTION_RETRY_COUNT} :",
+                sql_error
+            )
+
+            try:
+
+                dst_conn.rollback()
+
+            except Exception as rollback_error:
+
+                print(
+                    "[SQL] ROLLBACK FAILED :",
+                    rollback_error
+                )
+
+            # =================================================
+            # SQL COMMUNICATION FAILURE
+            # =================================================
+
+            if is_sql_connection_error(
+                sql_error
+            ):
+
+                connection_error = True
+
+                print(
+                    "[SQL] COMMUNICATION FAILURE DETECTED."
+                )
+
+                # ---------------------------------------------
+                # RECONNECT DESTINATION SQL
+                # ---------------------------------------------
+
+                dst_conn = reconnect_db(
+                    dst_conn,
+                    sqlConfig2,
+                    "DESTINATION SQL"
+                )
+
+                # ---------------------------------------------
+                # RETRY SAME RECORD
+                # ---------------------------------------------
+
+                if sql_attempt < SQL_CONNECTION_RETRY_COUNT:
+
+                    print(
+                        "[SQL] RETRYING SAME RECORD AFTER "
+                        "RECONNECT :",
+                        qr
+                    )
+
+                    time.sleep(
+                        SQL_CONNECTION_RETRY_DELAY
+                    )
+
+                    continue
+
+                else:
+
+                    print(
+                        "[SQL] ALL SQL CONNECTION RETRIES "
+                        "EXHAUSTED :",
+                        qr
+                    )
+
+                    # IMPORTANT:
+                    #
+                    # We DO NOT stop here.
+                    #
+                    # The caller will continue to Redis.
+                    #
+
+                    return {
+                        "success": False,
+                        "connection_error": True,
+                        "conn": dst_conn
+                    }
+
+            # =================================================
+            # NORMAL SQL ERROR
+            # =================================================
+
+            else:
+
+                print(
+                    "[SQL] NON-CONNECTION ERROR."
+                )
+
+                return {
+                    "success": False,
+                    "connection_error": False,
+                    "conn": dst_conn
                 }
 
-            }
+        finally:
 
-        }
+            try:
 
+                if dst_cursor:
+                    dst_cursor.close()
 
-        // ----------------------------------------------------
-        // SUCCESS
-        // ----------------------------------------------------
+            except Exception:
+                pass
 
-        function success(response) {
-
-            if (finished) return;
-
-            finished = true;
-
-            cleanup();
-
-
-            try {
-
-                if (ws) {
-
-                    ws.close();
-
-                }
-
-            } catch (error) {
-
-                // Ignore close errors
-
-            }
-
-
-            resolve(response);
-
-        }
-
-
-        // ----------------------------------------------------
-        // FAILURE
-        // ----------------------------------------------------
-
-        function failure(error) {
-
-            if (finished) return;
-
-            finished = true;
-
-            cleanup();
-
-
-            try {
-
-                if (ws) {
-
-                    ws.close();
-
-                }
-
-            } catch (closeError) {
-
-                // Ignore close errors
-
-            }
-
-
-            reject(error);
-
-        }
-
-
-        try {
-
-            log(
-                `Connecting to WebSocket server: ${WS_URL}`
-            );
-
-
-            ws = new W3CWebSocket(
-                WS_URL,
-                WS_PROTOCOL
-            );
-
-
-            // ====================================================
-            // CONNECTION OPEN
-            // ====================================================
-
-            ws.onopen = function () {
-
-                log("WebSocket connected successfully.");
-
-
-                try {
-
-                    // Send ONLY after successful connection
-                    const message = JSON.stringify(dataObject);
-
-
-                    log(
-                        `Sending object: ${message}`
-                    );
-
-
-                    ws.send(message);
-
-
-                    // Start waiting for server response
-                    responseTimer = setTimeout(() => {
-
-                        failure(
-                            new Error(
-                                `Server response timeout after ${WS_RESPONSE_TIMEOUT_MS} ms`
-                            )
-                        );
-
-                    }, WS_RESPONSE_TIMEOUT_MS);
-
-
-                } catch (error) {
-
-                    failure(error);
-
-                }
-
-            };
-
-
-            // ====================================================
-            // SERVER RESPONSE
-            // ====================================================
-
-            ws.onmessage = function (event) {
-
-                log(
-                    `Server response received: ${event.data}`
-                );
-
-
-                // Any response is treated as acknowledgement.
-                //
-                // If your server sends a specific success message,
-                // we can validate it here.
-
-                success(event.data);
-
-            };
-
-
-            // ====================================================
-            // ERROR
-            // ====================================================
-
-            ws.onerror = function (error) {
-
-                logError(
-                    "WebSocket error",
-                    error
-                );
-
-
-                failure(
-                    new Error("WebSocket connection error")
-                );
-
-            };
-
-
-            // ====================================================
-            // CONNECTION CLOSED
-            // ====================================================
-
-            ws.onclose = function (event) {
-
-                if (!finished) {
-
-                    failure(
-                        new Error(
-                            `WebSocket closed before acknowledgement. Code: ${event.code}`
-                        )
-                    );
-
-                }
-
-            };
-
-
-        } catch (error) {
-
-            failure(error);
-
-        }
-
-    });
-
-}
-
-
-// ============================================================
-// MAIN QUEUE PROCESSOR
-//
-// This guarantees:
-//
-// ONLY ONE OBJECT
-// ONLY ONE CONNECTION
-// ONLY ONE SEND
-// ONLY REMOVE AFTER SUCCESS
-// ============================================================
-
-async function processQueue() {
-
-    // Prevent multiple queue processors
-    if (isProcessingQueue) {
-
-        return;
-
+    return {
+        "success": sql_success,
+        "connection_error": connection_error,
+        "conn": dst_conn
     }
 
 
-    // Nothing to send
-    if (objArr.length === 0) {
+# ============================================================
+# PROCESS RECORD
+# ============================================================
 
-        return;
+def process_record(src_conn, dst_conn):
 
-    }
+    src_cursor = None
+    row = None
 
+    # ========================================================
+    # STATUS FLAGS
+    # ========================================================
 
-    isProcessingQueue = true;
+    sql_success = False
+    redis_success = False
+    sql_connection_error = False
 
+    try:
 
-    try {
+        # ====================================================
+        # SOURCE CURSOR
+        # ====================================================
 
-        // ----------------------------------------------------
-        // ALWAYS TAKE FIRST OBJECT ONLY
-        // ----------------------------------------------------
+        src_cursor = src_conn.cursor()
 
-        const currentObject = objArr[0];
+        # ====================================================
+        # NEW MODIFICATION
+        # CHECK SOURCE RECORD COUNT
+        # ====================================================
 
+        src_cursor.execute("""
+        SELECT COUNT(*)
+        FROM taco_treceability.ocv_machine_data_mirror
+        WHERE machine_location='line1_line2'
+        """)
 
-        log(
-            `Processing queue. Pending objects: ${objArr.length}`
-        );
+        mirror_count = src_cursor.fetchone()[0]
 
+        print(
+            f"[MIRROR] AVAILABLE RECORD COUNT : {mirror_count}"
+        )
 
-        log(
-            "Current object:",
-            currentObject
-        );
+        # ====================================================
+        # NEW MODIFICATION
+        # PROCESS ONLY WHEN COUNT >= 10
+        # ====================================================
 
+        if mirror_count < 10:
 
-        // ----------------------------------------------------
-        // SEND OBJECT
-        // ----------------------------------------------------
+            print(
+                f"[MIRROR] RECORD COUNT {mirror_count} < 10."
+            )
 
-        const serverResponse =
-            await sendOneObject(currentObject);
+            print(
+                "[MIRROR] WAITING FOR MINIMUM 10 RECORDS..."
+            )
 
+            return src_conn, dst_conn
 
-        log(
-            `Object successfully acknowledged by server: ${serverResponse}`
-        );
+        # ====================================================
+        # GET TOP 1 SOURCE RECORD
+        # EXISTING LOGIC
+        # ====================================================
 
+        src_cursor.execute("""
+        SELECT TOP 1 *
+        FROM taco_treceability.ocv_machine_data_mirror
+        WHERE machine_location='line1_line2'
+        ORDER BY sr_no DESC
+        """)
 
-        // ----------------------------------------------------
-        // IMPORTANT:
-        // Remove ONLY after successful acknowledgement
-        // ----------------------------------------------------
+        row = src_cursor.fetchone()
 
-        // Extra protection:
-        // Remove only if the first object is still the same one.
-        if (objArr.length > 0) {
+        if not row:
 
-            objArr.shift();
+            print(
+                "No records..."
+            )
 
+            return src_conn, dst_conn
 
-            log(
-                `Object removed from queue after successful acknowledgement. Remaining: ${objArr.length}`
-            );
+        qr = safe(
+            row.cell_qrcode
+        )
 
+        print(
+            "\n========= NEW RECORD ========="
+        )
 
-            // Save updated queue
-            await saveQueue();
+        print(
+            "QR :",
+            qr
+        )
 
-        }
+        # ====================================================
+        # QR VALIDATION
+        # ====================================================
 
+        if len(qr) < 16:
 
-        isProcessingQueue = false;
+            raise Exception(
+                "QR too short"
+            )
 
+        # ====================================================
+        # DATE CODE
+        # ====================================================
 
-        // ----------------------------------------------------
-        // WAIT 250ms THEN SEND NEXT OBJECT
-        // ----------------------------------------------------
+        code12_13 = qr[12:14]
 
-        if (objArr.length > 0) {
+        dateCode = (
+            qr[8:11]
+            if code12_13 == "BV"
+            else qr[14:17]
+        )
 
-            scheduleQueueProcessing(
-                SEND_INTERVAL_MS
-            );
+        # ====================================================
+        # DATE MAPPING
+        # ====================================================
 
-        }
+        yearValue = yearMap.get(
+            dateCode[0]
+        )
 
+        monthValue = monthMap.get(
+            dateCode[1]
+        )
 
-    } catch (error) {
-
-        isProcessingQueue = false;
-
-
-        logError(
-            "Failed to send object. Object will remain in queue for retry.",
-            error
-        );
-
-
-        // ----------------------------------------------------
-        // IMPORTANT:
-        // DO NOT REMOVE OBJECT
-        // Retry later
-        // ----------------------------------------------------
-
-        scheduleQueueProcessing(
-            RETRY_DELAY_MS
-        );
-
-    }
-
-}
-
-
-// ============================================================
-// CREATE 4 OBJECTS FROM OPC-UA DATA
-// ============================================================
-
-function createObjectsFromOPCData(dataValue) {
-
-    try {
+        dayValue = dayMap.get(
+            dateCode[2]
+        )
 
         if (
-            !dataValue ||
-            !dataValue.value ||
-            !Array.isArray(dataValue.value.value)
-        ) {
+            not yearValue
+            or not monthValue
+            or not dayValue
+        ):
 
-            log(
-                "Invalid OPC-UA data received."
-            );
+            raise Exception(
+                "Date mapping failed"
+            )
 
-            return [];
+        year = 2000 + yearValue
 
-        }
+        month = f"{monthValue:02d}"
 
+        day = f"{dayValue:02d}"
 
-        const values = dataValue.value.value;
+        tableName = (
+            f"ocvcell_inventory_data_"
+            f"{year}_{month}_{day}"
+        )
 
+        print(
+            "TABLE :",
+            tableName
+        )
 
-        if (values.length < 4) {
+        # ====================================================
+        # CAPACITY
+        # ====================================================
 
-            log(
-                `OPC-UA data contains only ${values.length} items. Expected 4.`
-            );
+        capacity_val = extract_capacity(
+            row.cell_capacity
+        )
 
-            return [];
+        # ====================================================
+        # SQL PROCESS
+        # ====================================================
 
-        }
+        sql_result = process_sql_record(
+            dst_conn,
+            tableName,
+            qr,
+            row,
+            capacity_val,
+            dateCode,
+            code12_13
+        )
 
+        # IMPORTANT:
+        #
+        # process_sql_record may have replaced the
+        # broken destination connection.
 
-        const objects = [];
+        dst_conn = sql_result[
+            "conn"
+        ]
 
+        sql_success = sql_result[
+            "success"
+        ]
 
-        for (let i = 0; i < 4; i++) {
+        sql_connection_error = sql_result[
+            "connection_error"
+        ]
 
-            const item = values[i];
+        # ====================================================
+        # REDIS PROCESS
+        # ====================================================
+        #
+        # Redis is ALWAYS attempted.
+        #
+        # It does not matter whether SQL succeeded
+        # or failed.
+        #
 
+        try:
 
-            if (!item) {
-
-                continue;
-
+            redis_payload = {
+                "cellqr": qr,
+                "voltage": safe(row.voltage),
+                "ir": safe(row.ir),
+                "class_grade": safe(row.cell_class),
+                "capacity": capacity_val,
+                "k_value": safe(row.kvalue),
+                "ocv_mc_no": safe(row.machine_location),
+                "first_para_time": str(row.today_date),
+                "last_para_time": str(row.today_date),
+                "batch": dateCode,
+                "plant_code": code12_13
             }
 
+            # =================================================
+            # REDIS INSERT
+            # =================================================
+
+            r.setex(
+                f"cell:{qr}",
+                DUPLICATE_TTL_SECONDS,
+                json.dumps(redis_payload)
+            )
+
+            redis_success = True
+
+            print(
+                "REDIS SUCCESS :",
+                redis_payload
+            )
+
+        except Exception as redis_error:
+
+            print(
+                "REDIS FAILED :",
+                redis_error
+            )
+
+            redis_success = False
+
+        # ====================================================
+        # FINAL RESULT
+        # ====================================================
+
+        # ====================================================
+        # CASE 1
+        # SQL SUCCESS + REDIS SUCCESS
+        # ====================================================
+
+        if sql_success and redis_success:
+
+            print(
+                "SQL + REDIS SUCCESS :",
+                qr
+            )
+
+            delete_source(
+                src_conn,
+                qr
+            )
+
+            return src_conn, dst_conn
+
+        # ====================================================
+        # CASE 2
+        # SQL FAILED + REDIS SUCCESS
+        # ====================================================
+        #
+        # This includes:
+        #
+        #   - 08S01 communication failure
+        #   - SQL connection failure
+        #   - normal SQL failure
+        #
+        # Redis succeeded.
+        #
+        # Therefore:
+        #
+        #   Redis SUCCESS
+        #       ↓
+        #   Rejection INSERT
+        #       ↓
+        #   ACKNOWLEDGEMENT
+        #       ↓
+        #   DELETE MIRROR
+        #
+
+        if not sql_success and redis_success:
+
+            print(
+                "SQL FAILED + REDIS SUCCESS :",
+                qr
+            )
+
+            if sql_connection_error:
+
+                print(
+                    "SQL COMMUNICATION FAILURE "
+                    "BUT REDIS SUCCESSFUL :",
+                    qr
+                )
+
+            print(
+                "INSERTING FAILED SQL DATA INTO REJECTION :",
+                qr
+            )
+
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
+
+            if rejection_result:
+
+                print(
+                    "SQL FAILED DATA MOVED TO REJECTION :",
+                    qr
+                )
+
+            else:
+
+                print(
+                    "REJECTION FAILED - "
+                    "SOURCE KEPT IN MIRROR :",
+                    qr
+                )
+
+            return src_conn, dst_conn
+
+        # ====================================================
+        # CASE 3
+        # SQL SUCCESS + REDIS FAILED
+        # ====================================================
+
+        if sql_success and not redis_success:
+
+            print(
+                "SQL SUCCESS + REDIS FAILED :",
+                qr
+            )
+
+            print(
+                "INSERTING REDIS FAILED DATA INTO REJECTION :",
+                qr
+            )
+
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
+
+            if rejection_result:
+
+                print(
+                    "REDIS FAILED DATA MOVED TO REJECTION :",
+                    qr
+                )
+
+            else:
+
+                print(
+                    "REJECTION FAILED - "
+                    "SOURCE KEPT IN MIRROR :",
+                    qr
+                )
+
+            return src_conn, dst_conn
+
+        # ====================================================
+        # CASE 4
+        # SQL FAILED + REDIS FAILED
+        # ====================================================
+        #
+        # Both failed.
+        #
+        # Existing logic preserved:
+        #
+        #   Rejection INSERT
+        #       ↓
+        #   ACK
+        #       ↓
+        #   Delete Mirror
+        #
+        # If rejection also fails, mirror remains.
+        #
 
-            const obj = {
+        if not sql_success and not redis_success:
+
+            print(
+                "SQL FAILED + REDIS FAILED :",
+                qr
+            )
 
-                cell_qrcode: item["QR_code"],
+            print(
+                "BOTH FAILED - "
+                "INSERTING INTO REJECTION :",
+                qr
+            )
 
-                voltage_val: item["pnVoltage"],
+            rejection_result = handle_failure(
+                src_conn,
+                row
+            )
 
-                ir_val: item["pnResistance"],
+            if rejection_result:
 
-                material: item["nShellVoltage"]
+                print(
+                    "BOTH FAILED - DATA MOVED TO REJECTION :",
+                    qr
+                )
 
-            };
+            else:
 
+                print(
+                    "BOTH FAILED - "
+                    "SOURCE KEPT IN MIRROR :",
+                    qr
+                )
 
-            objects.push(obj);
+            return src_conn, dst_conn
 
-        }
+        return src_conn, dst_conn
 
+    # ========================================================
+    # OUTER PROCESS ERROR
+    # ========================================================
 
-        return objects;
+    except Exception as e:
 
+        print(
+            "PROCESS ERROR :",
+            e
+        )
 
-    } catch (error) {
+        # ====================================================
+        # SOURCE SQL CONNECTION FAILURE
+        # ====================================================
 
-        logError(
-            "Error creating objects from OPC-UA data",
-            error
-        );
+        if is_sql_connection_error(e):
 
+            print(
+                "SOURCE SQL COMMUNICATION FAILURE DETECTED."
+            )
 
-        return [];
+            # Do not try rejection using a broken source
+            # connection.
+            #
+            # Main loop will reconnect source SQL.
+            #
+            # Mirror record remains safe.
 
-    }
+            src_conn = reconnect_db(
+                src_conn,
+                sqlConfig1,
+                "SOURCE SQL"
+            )
 
-}
+            return src_conn, dst_conn
 
+        # ====================================================
+        # NORMAL UNEXPECTED ERROR
+        # ====================================================
 
-// ============================================================
-// OPC-UA MAIN FUNCTION
-// ============================================================
+        if row:
 
-async function main() {
+            try:
 
-    let client = null;
+                handle_failure(
+                    src_conn,
+                    row
+                )
 
-    let session = null;
+            except Exception as failure_error:
 
-    let subscription = null;
+                print(
+                    "FAILURE HANDLER ERROR :",
+                    failure_error
+                )
 
+        return src_conn, dst_conn
 
-    try {
+    finally:
 
-        // ====================================================
-        // CREATE OPC-UA CLIENT
-        // ====================================================
+        try:
 
-        client = OPCUAClient.create({
+            if src_cursor:
+                src_cursor.close()
 
-            endpoint_must_exist: false,
+        except Exception:
+            pass
 
-            connectionStrategy: {
 
-                maxRetry: 10,
+# ============================================================
+# MAIN LOOP
+# ============================================================
 
-                initialDelay: 2000,
+def start():
 
-                maxDelay: 10000
+    src_conn = None
+    dst_conn = None
 
-            }
+    # ========================================================
+    # SOURCE DATABASE INITIAL CONNECTION
+    # ========================================================
 
-        });
+    while True:
 
+        try:
 
-        client.on("backoff", (retry, delay) => {
+            print(
+                "[SOURCE SQL] CONNECTING..."
+            )
 
-            log(
-                `OPC-UA reconnecting. Retry: ${retry}, Delay: ${delay}ms`
-            );
+            src_conn = connect_db(
+                sqlConfig1
+            )
 
-        });
+            print(
+                "[SOURCE SQL] CONNECTED SUCCESSFULLY."
+            )
 
+            break
 
-        // ====================================================
-        // CONNECT OPC-UA
-        // ====================================================
+        except Exception as e:
 
-        log(
-            `Connecting to OPC-UA server: ${endpointUrl}`
-        );
+            print(
+                "[SOURCE SQL] CONNECTION FAILED :",
+                e
+            )
 
+            print(
+                f"[SOURCE SQL] RETRYING IN "
+                f"{DB_RECONNECT_DELAY} SECOND(S)..."
+            )
 
-        await client.connect(endpointUrl);
+            time.sleep(
+                DB_RECONNECT_DELAY
+            )
 
+    # ========================================================
+    # DESTINATION DATABASE INITIAL CONNECTION
+    # ========================================================
 
-        log(
-            "Connected to OPC-UA server."
-        );
+    while True:
 
+        try:
 
-        // ====================================================
-        // CREATE SESSION
-        // ====================================================
+            print(
+                "[DESTINATION SQL] CONNECTING..."
+            )
 
-        session = await client.createSession();
+            dst_conn = connect_db(
+                sqlConfig2
+            )
 
+            print(
+                "[DESTINATION SQL] CONNECTED SUCCESSFULLY."
+            )
 
-        log(
-            "OPC-UA session created."
-        );
+            break
 
+        except Exception as e:
 
-        // ====================================================
-        // CREATE SUBSCRIPTION
-        // ====================================================
+            print(
+                "[DESTINATION SQL] CONNECTION FAILED :",
+                e
+            )
 
-        subscription =
-            await session.createSubscription2({
+            print(
+                f"[DESTINATION SQL] RETRYING IN "
+                f"{DB_RECONNECT_DELAY} SECOND(S)..."
+            )
 
-                requestedPublishingInterval: 1000,
+            time.sleep(
+                DB_RECONNECT_DELAY
+            )
 
-                requestedLifetimeCount: 100,
+    # ========================================================
+    # SYSTEM START
+    # ========================================================
 
-                requestedMaxKeepAliveCount: 10,
+    print(
+        "===================================================="
+    )
 
-                maxNotificationsPerPublish: 10,
+    print(
+        " OCV CELL DATA MIRROR SERVICE"
+    )
 
-                publishingEnabled: true,
+    print(
+        "===================================================="
+    )
 
-                priority: 10
+    print(
+        "SOURCE DB      : taco_treceability"
+    )
 
-            });
+    print(
+        "DESTINATION DB : ocv_inventory_master"
+    )
 
+    print(
+        "REDIS DB       :",
+        redis_db
+    )
 
-        subscription
-            .on("started", () => {
+    print(
+        "MINIMUM MIRROR RECORDS REQUIRED : 10"
+    )
 
-                log(
-                    `Subscription started. ID: ${subscription.subscriptionId}`
-                );
+    print(
+        "SYSTEM STARTED"
+    )
 
-            })
+    print(
+        "===================================================="
+    )
 
-            .on("keepalive", () => {
+    # ========================================================
+    # CONTINUOUS PROCESSING LOOP
+    # ========================================================
 
-                log("OPC-UA subscription keepalive");
+    while True:
 
-            })
+        try:
 
-            .on("terminated", () => {
+            # =================================================
+            # CHECK SOURCE CONNECTION
+            # =================================================
 
-                log("OPC-UA subscription terminated");
+            if not test_connection(src_conn):
 
-            });
+                print(
+                    "[SOURCE SQL] CONNECTION NOT HEALTHY."
+                )
 
+                src_conn = reconnect_db(
+                    src_conn,
+                    sqlConfig1,
+                    "SOURCE SQL"
+                )
 
-        // ====================================================
-        // MONITOR ALL 8 NODES
-        // ====================================================
+            # =================================================
+            # CHECK DESTINATION CONNECTION
+            # =================================================
 
-        const parameters = {
+            if not test_connection(dst_conn):
 
-            samplingInterval: 100,
+                print(
+                    "[DESTINATION SQL] CONNECTION NOT HEALTHY."
+                )
 
-            discardOldest: true,
+                dst_conn = reconnect_db(
+                    dst_conn,
+                    sqlConfig2,
+                    "DESTINATION SQL"
+                )
 
-            queueSize: 100
+            # =================================================
+            # PROCESS RECORD
+            # =================================================
 
-        };
+            src_conn, dst_conn = process_record(
+                src_conn,
+                dst_conn
+            )
 
+        except Exception as main_error:
 
-        const monitoredItems = [];
+            print(
+                "MAIN LOOP ERROR :",
+                main_error
+            )
 
+            # =================================================
+            # SOURCE SQL RECOVERY
+            # =================================================
 
-        for (let i = 0; i < nodes.length; i++) {
+            try:
 
-            const nodeIdToMonitor =
-                `ns=4;s=${nodes[i]}`;
+                if not test_connection(src_conn):
 
+                    print(
+                        "[MAIN] SOURCE SQL CONNECTION LOST."
+                    )
 
-            const itemToMonitor = {
+                    src_conn = reconnect_db(
+                        src_conn,
+                        sqlConfig1,
+                        "SOURCE SQL"
+                    )
 
-                nodeId: nodeIdToMonitor,
+            except Exception as source_error:
 
-                attributeId: AttributeIds.Value
+                print(
+                    "[MAIN] SOURCE RECONNECT ERROR :",
+                    source_error
+                )
 
-            };
+            # =================================================
+            # DESTINATION SQL RECOVERY
+            # =================================================
 
+            try:
 
-            log(
-                `Monitoring Node ${i + 1}: ${nodeIdToMonitor}`
-            );
+                if not test_connection(dst_conn):
 
+                    print(
+                        "[MAIN] DESTINATION SQL CONNECTION LOST."
+                    )
 
-            const monitoredItem =
-                await subscription.monitor(
+                    dst_conn = reconnect_db(
+                        dst_conn,
+                        sqlConfig2,
+                        "DESTINATION SQL"
+                    )
 
-                    itemToMonitor,
+            except Exception as destination_error:
 
-                    parameters,
+                print(
+                    "[MAIN] DESTINATION RECONNECT ERROR :",
+                    destination_error
+                )
 
-                    TimestampsToReturn.Both
+        # =====================================================
+        # VERY SHORT DELAY
+        # =====================================================
 
-                );
+        time.sleep(
+            0.1
+        )
 
 
-            monitoredItems.push(monitoredItem);
+# ============================================================
+# START
+# ============================================================
 
-        }
+if __name__ == "__main__":
 
-
-        // ====================================================
-        // HANDLE DATA CHANGES
-        // ====================================================
-
-        monitoredItems.forEach(
-            function (req, index) {
-
-                req.on(
-                    "changed",
-                    async (dataValue) => {
-
-                        try {
-
-                            log(
-                                `${nodes[index]} data changed.`
-                            );
-
-
-                            // ------------------------------------
-                            // CREATE 4 CELL OBJECTS
-                            // ------------------------------------
-
-                            const objects =
-                                createObjectsFromOPCData(
-                                    dataValue
-                                );
-
-
-                            if (objects.length === 0) {
-
-                                log(
-                                    `${nodes[index]}: No valid objects created.`
-                                );
-
-                                return;
-
-                            }
-
-
-                            // ------------------------------------
-                            // ADD TO JSON QUEUE
-                            // ------------------------------------
-
-                            await addObjectsToQueue(
-                                objects
-                            );
-
-
-                            log(
-                                `${nodes[index]}: ${objects.length} objects added successfully.`
-                            );
-
-
-                        } catch (error) {
-
-                            logError(
-                                `Error processing ${nodes[index]} data`,
-                                error
-                            );
-
-                        }
-
-                    }
-                );
-
-            }
-        );
-
-
-        // ====================================================
-        // GRACEFUL SHUTDOWN
-        // ====================================================
-
-        let shuttingDown = false;
-
-
-        async function shutdown(signal) {
-
-            if (shuttingDown) {
-
-                return;
-
-            }
-
-
-            shuttingDown = true;
-
-
-            log(
-                `${signal} received. Shutting down...`
-            );
-
-
-            try {
-
-                // Wait for pending file writes
-                await fileWritePromise;
-
-            } catch (error) {
-
-                logError(
-                    "Error waiting for file write during shutdown",
-                    error
-                );
-
-            }
-
-
-            try {
-
-                if (subscription) {
-
-                    await subscription.terminate();
-
-                }
-
-            } catch (error) {
-
-                logError(
-                    "Error terminating subscription",
-                    error
-                );
-
-            }
-
-
-            try {
-
-                if (session) {
-
-                    await session.close();
-
-                }
-
-            } catch (error) {
-
-                logError(
-                    "Error closing OPC-UA session",
-                    error
-                );
-
-            }
-
-
-            try {
-
-                if (client) {
-
-                    await client.disconnect();
-
-                }
-
-            } catch (error) {
-
-                logError(
-                    "Error disconnecting OPC-UA client",
-                    error
-                );
-
-            }
-
-
-            log("Shutdown complete.");
-
-
-            process.exit(0);
-
-        }
-
-
-        process.on(
-            "SIGINT",
-            () => shutdown("SIGINT")
-        );
-
-
-        process.on(
-            "SIGTERM",
-            () => shutdown("SIGTERM")
-        );
-
-
-    } catch (error) {
-
-        logError(
-            "FATAL OPC-UA ERROR",
-            error
-        );
-
-
-        // Do not immediately destroy queue data.
-        // WinSW can restart the process.
-
-        setTimeout(() => {
-
-            process.exit(1);
-
-        }, 5000);
-
-    }
-
-}
-
-
-// ============================================================
-// APPLICATION STARTUP
-// ============================================================
-
-async function startApplication() {
-
-    try {
-
-        log("==============================================");
-        log("OCV MAC MIS INTEGRATION SERVICE STARTING");
-        log("==============================================");
-
-
-        // Load old pending data first
-        await loadMasterData();
-
-
-        // Start processing existing queue
-        if (objArr.length > 0) {
-
-            log(
-                `Existing pending data found: ${objArr.length} objects`
-            );
-
-
-            scheduleQueueProcessing(1000);
-
-        }
-
-
-        // Start OPC-UA
-        await main();
-
-
-    } catch (error) {
-
-        logError(
-            "APPLICATION STARTUP ERROR",
-            error
-        );
-
-
-        process.exit(1);
-
-    }
-
-}
-
-
-// ============================================================
-// START APPLICATION
-// ============================================================
-
-startApplication();
+    start()
