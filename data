@@ -16,11 +16,21 @@ socket.on("get_station_status", async function (barcode) {
 
         console.log("API Result:", result);
 
-        socket.emit("set_station_status", status, barcode, FinalQRCode);
+        socket.emit(
+            "set_station_status",
+            status,
+            barcode,
+            FinalQRCode
+        );
 
     } catch (err) {
         console.error("API Error:", err.message);
 
-        socket.emit("set_station_status", "NOT OK", barcode, undefined);
+        socket.emit(
+            "set_station_status",
+            "NOT OK",
+            barcode,
+            undefined
+        );
     }
 });
