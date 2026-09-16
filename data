@@ -1,527 +1,258 @@
 // ===========================================================================
-// MES CELL DATA SERVICE
+// MES CELL DATA - TEST LISTENER
 //
-// OPC UA -> WebSocket client with corruption-safe JSON persistence and a
-// plain-English status file for the AMC team.
+// Stand-in for the real MES endpoint. Accepts the WebSocket connections made
+// by mesCellDataService.js, prints every record, and acknowledges it so the
+// sender removes it from its queue.
 //
-// Single file. Run with: node mesCellDataService.js
+// Run on 10.9.4.28 with:  node testListener.js
+//
+// NOTE: this is a TEST tool, not the MES. It validates and logs, it does not
+// store anything in your MES database.
 // ===========================================================================
 "use strict";
 
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const W3CWebSocket = require("websocket").w3cwebsocket;
-
-const {
-    OPCUAClient,
-    AttributeIds,
-    TimestampsToReturn,
-} = require("node-opcua");
+const WebSocketServer = require("websocket").server;
 
 // ===========================================================================
-// CONFIG  -- everything you might need to change lives here
+// CONFIG
 // ===========================================================================
-const ENDPOINT_URL = "opc.tcp://192.168.250.1:4840";
-const WS_URL = "ws://10.9.4.28:9814";
+const PORT = 9815;                    // NOT 9814 -- that is the live MES port
+const PROTOCOL = "echo-protocol";     // must match the sender
+const LOG_FILE = path.join(__dirname, "received_cells.log");  // NDJSON, append-only
+const WRITE_LOG = true;
 
-const DATA_FILE = "cellQueue.json";          // use a NEW path for shadow runs
-const STATUS_FILE = "SERVICE_STATUS.txt";    // the file the AMC team watches
-
-// Shadow-run switch. true  = queue and drop, nothing reaches the MES.
-//                   false = normal production sending.
-const DRY_RUN = false;
-
-const NODES = [
-    "MES_CellData1",
-    "MES_CellData2",
-    "MES_CellData3",
-    "MES_CellData4",
-    "MES_CellData5",
-    "MES_CellData6",
-    "MES_CellData7",
-    "MES_CellData8",
-];
-
-const SEND_INTERVAL_MS = 500;    // how often we try to push a record upstream
-const SEND_TIMEOUT_MS = 5000;    // give up on a socket that never answers
-const FLUSH_INTERVAL_MS = 500;   // how often the queue is persisted to disk
-const HEARTBEAT_MS = 5000;       // how often the status file is rewritten
-
-// Backlog thresholds for the status file. Tune these after watching one
-// normal shift: set WARN to roughly double your usual peak backlog.
-const BACKLOG_WARN = 500;
-const BACKLOG_FAULT = 5000;
+// Sentinel values the machine emits when it has no valid measurement.
+const VOLT_SENTINEL = 1e10;
+const IR_SENTINEL = 1e12;
 
 // ===========================================================================
-// PERSISTENCE
-//
-// Why this exists: fs.writeFile truncates then streams. With 8 monitored items
-// plus the socket handler all writing the same path, one write truncates the
-// file while another is mid-stream, and you get a file that ends inside an
-// object or carries a stray bracket. Here the in-memory array is the source of
-// truth, exactly one write is ever in flight, and the live file is swapped in
-// atomically by rename, so a reader never sees a partial file.
+// STATE
 // ===========================================================================
-class JsonArrayStore {
-    constructor(file, opts = {}) {
-        this.file = path.resolve(file);
-        this.tmp = this.file + ".tmp";
-        this.bak = this.file + ".bak";
-
-        this.flushIntervalMs = opts.flushIntervalMs || 500;
-        this.renameRetries = opts.renameRetries || 5;
-        this.pretty = opts.pretty !== false;
-
-        this.data = [];
-        this.dirty = false;
-        this.writing = false;
-        this.closed = false;
-        this.lastWriteError = null;
-
-        this.timer = setInterval(() => {
-            this.flush().catch((e) => console.error("[store] flush error:", e.message));
-        }, this.flushIntervalMs);
-        if (typeof this.timer.unref === "function") this.timer.unref();
-    }
-
-    // ---- loading ----------------------------------------------------------
-
-    /**
-     * Synchronous boot load. Tries the primary file, then the .bak, then the
-     * .tmp (in case a rename was interrupted). Never throws -- a damaged file
-     * must not take the service down.
-     */
-    load() {
-        const candidates = [this.file, this.bak, this.tmp];
-        for (const p of candidates) {
-            try {
-                if (!fs.existsSync(p)) continue;
-                const parsed = JSON.parse(fs.readFileSync(p, "utf8"));
-                if (!Array.isArray(parsed)) {
-                    console.error(`[store] ${path.basename(p)} is not an array, skipping`);
-                    continue;
-                }
-                this.data = parsed;
-                if (p !== this.file) {
-                    console.error(`[store] primary unusable, recovered ${parsed.length} records from ${path.basename(p)}`);
-                    this.dirty = true; // rewrite a clean primary on the next flush
-                }
-                console.log(`[store] loaded ${this.data.length} records from ${path.basename(p)}`);
-                return this.data;
-            } catch (err) {
-                console.error(`[store] cannot use ${path.basename(p)}: ${err.message}`);
-                this._quarantine(p);
-            }
-        }
-        console.error("[store] no usable file found, starting empty");
-        this.data = [];
-        return this.data;
-    }
-
-    /** Move a damaged file aside so it can be inspected instead of overwritten. */
-    _quarantine(p) {
-        try {
-            const dest = `${p}.corrupt.${Date.now()}`;
-            fs.renameSync(p, dest);
-            console.error(`[store] quarantined -> ${path.basename(dest)}`);
-        } catch (_) {
-            /* best effort only */
-        }
-    }
-
-    // ---- mutation (in-memory, always valid) -------------------------------
-
-    push(...items) {
-        if (items.length === 0) return;
-        this.data.push(...items);
-        this.dirty = true;
-    }
-
-    /** Remove and return the first record. Call only after the server acks it. */
-    shift() {
-        if (this.data.length === 0) return undefined;
-        const item = this.data.shift();
-        this.dirty = true;
-        return item;
-    }
-
-    peek() {
-        return this.data.length > 0 ? this.data[0] : undefined;
-    }
-
-    get length() {
-        return this.data.length;
-    }
-
-    // ---- persistence ------------------------------------------------------
-
-    async flush() {
-        if (this.writing || !this.dirty) return;
-
-        this.writing = true;
-        // Snapshot now; anything mutated after this re-sets dirty for the next tick.
-        const payload = this.pretty
-            ? JSON.stringify(this.data, null, 2)
-            : JSON.stringify(this.data);
-        this.dirty = false;
-
-        try {
-            // 1. Full payload to a temp file, fsynced, so the bytes are really
-            //    on disk before the live name points at them.
-            const fh = await fs.promises.open(this.tmp, "w");
-            try {
-                await fh.writeFile(payload, "utf8");
-                await fh.sync();
-            } finally {
-                await fh.close();
-            }
-
-            // 2. Keep the previous good version.
-            try {
-                await fs.promises.copyFile(this.file, this.bak);
-            } catch (err) {
-                if (err.code !== "ENOENT") console.error("[store] backup failed:", err.message);
-            }
-
-            // 3. Atomic swap. rename() replaces the destination on POSIX and
-            //    Windows alike; retry on transient AV / indexer locks.
-            await this._renameWithRetry();
-            this.lastWriteError = null;
-        } catch (err) {
-            this.dirty = true; // retry next tick, never drop data
-            this.lastWriteError = err.message;
-            console.error("[store] write failed, will retry:", err.message);
-        } finally {
-            this.writing = false;
-        }
-    }
-
-    async _renameWithRetry() {
-        let lastErr;
-        for (let i = 0; i < this.renameRetries; i++) {
-            try {
-                await fs.promises.rename(this.tmp, this.file);
-                return;
-            } catch (err) {
-                lastErr = err;
-                if (err.code !== "EPERM" && err.code !== "EBUSY" && err.code !== "EACCES") throw err;
-                await new Promise((r) => setTimeout(r, 50 * (i + 1)));
-            }
-        }
-        throw lastErr;
-    }
-
-    /** Final synchronous flush for SIGINT / exit paths. */
-    closeSync() {
-        if (this.closed) return;
-        this.closed = true;
-        clearInterval(this.timer);
-        try {
-            const payload = this.pretty
-                ? JSON.stringify(this.data, null, 2)
-                : JSON.stringify(this.data);
-            const fd = fs.openSync(this.tmp, "w");
-            try {
-                fs.writeFileSync(fd, payload, "utf8");
-                fs.fsyncSync(fd);
-            } finally {
-                fs.closeSync(fd);
-            }
-            fs.renameSync(this.tmp, this.file);
-            console.log(`[store] final flush: ${this.data.length} records`);
-        } catch (err) {
-            console.error("[store] final flush failed:", err.message);
-        }
-    }
-}
-
-const store = new JsonArrayStore(DATA_FILE, { flushIntervalMs: FLUSH_INTERVAL_MS });
-store.load();
-
-// ===========================================================================
-// HEALTH / STATUS FILE
-//
-// Passive only -- nothing here pings the PLC or the MES. The code paths that
-// already run set fields on `health`, and a timer formats them into a text
-// file every HEARTBEAT_MS. The timer runs whether or not cells are flowing,
-// so a frozen "Date modified" on the status file means the service is dead.
-// ===========================================================================
-const health = {
+const stats = {
     startedAt: new Date(),
-    opcuaConnected: false,
-    cellsRead: 0,
-    cellsSent: 0,
-    lastCellAt: null,
-    lastAckAt: null,
-    lastError: null,
+    connections: 0,
+    received: 0,
+    badJson: 0,
+    badShape: 0,
+    sentinel: 0,
+    ngQr: 0,
+    duplicates: 0,
 };
 
-function noteError(msg) {
-    health.lastError = { at: Date.now(), msg: msg };
-}
+const seenQr = new Set();   // in-memory only, resets on restart
 
-function fmtTime(d) {
-    if (!d) return "-";
+function ts() {
+    const d = new Date();
     const p = (n) => String(n).padStart(2, "0");
-    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ` +
-           `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
 }
 
-function fmtAgo(d) {
-    if (!d) return "never";
-    const s = Math.floor((Date.now() - d.getTime()) / 1000);
-    if (s < 60) return `${s} seconds ago`;
-    if (s < 3600) return `${Math.floor(s / 60)} minutes ago`;
-    return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
-}
-
-function overallStatus() {
-    if (!health.opcuaConnected) return ["FAULT", "Not connected to the machine"];
-    if (store.lastWriteError) return ["FAULT", "Cannot save data to disk"];
-    if (store.length > BACKLOG_FAULT) return ["FAULT", "Data is not reaching MES, backlog is large"];
-    if (store.length > BACKLOG_WARN) return ["WARNING", "Backlog is building up"];
-    if (health.lastError && Date.now() - health.lastError.at < 120000)
-        return ["WARNING", health.lastError.msg];
-    return ["OK", "Normal"];
-}
-
-function writeStatus() {
-    const [state, detail] = overallStatus();
-    const upSec = Math.floor((Date.now() - health.startedAt.getTime()) / 1000);
-    const uptime = `${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m`;
-
-    const text =
-`==================================================
-        MES CELL DATA SERVICE - STATUS
-==================================================
-
-  OVERALL           : ${state}
-  Detail            : ${detail}
-
-  Checked at        : ${fmtTime(new Date())}
-  Service running   : ${uptime}  (since ${fmtTime(health.startedAt)})
-
-  Machine (OPC UA)  : ${health.opcuaConnected ? "CONNECTED" : "NOT CONNECTED"}
-  Last cell read    : ${fmtAgo(health.lastCellAt)}
-  Last sent to MES  : ${fmtAgo(health.lastAckAt)}
-
-  Cells read        : ${health.cellsRead}
-  Cells sent        : ${health.cellsSent}
-  Waiting to send   : ${store.length}
-
-  Last error        : ${health.lastError ? health.lastError.msg : "(none)"}
-${DRY_RUN ? "\n  *** TEST MODE - nothing is being sent to MES ***\n" : ""}
---------------------------------------------------
-  CALL ORBITTAL SUPPORT IF:
-    - OVERALL is not OK, OR
-    - this file's "Date modified" in Windows
-      Explorer is more than 2 minutes old
-==================================================
-`;
+function appendLog(obj) {
+    if (!WRITE_LOG) return;
     try {
-        const tmp = STATUS_FILE + ".tmp";
-        fs.writeFileSync(tmp, text, "utf8");
-        fs.renameSync(tmp, STATUS_FILE);
+        // NDJSON: one object per line. Appends never touch existing bytes, so
+        // this file cannot be corrupted the way a rewritten array can.
+        fs.appendFileSync(LOG_FILE, JSON.stringify(obj) + "\n", "utf8");
     } catch (err) {
-        console.error("[status] write failed:", err.message);
+        console.error(`[${ts()}] log write failed: ${err.message}`);
     }
 }
 
-setInterval(writeStatus, HEARTBEAT_MS);
-writeStatus();
-
 // ===========================================================================
-// UPLINK
+// RECORD HANDLING
 // ===========================================================================
-let sendInFlight = false; // stops a second socket opening while one is pending
+function describe(rec) {
+    const notes = [];
 
-function sendOne(record) {
-    if (sendInFlight) return;
-    sendInFlight = true;
+    if (typeof rec !== "object" || rec === null || Array.isArray(rec)) {
+        stats.badShape++;
+        return { ok: false, line: `NOT AN OBJECT: ${JSON.stringify(rec)}`, notes };
+    }
 
-    let settled = false;
-    const ws = new W3CWebSocket(WS_URL, "echo-protocol");
+    const qr = rec.cell_qrcode;
+    const v = rec.voltage_val;
+    const ir = rec.ir_val;
+    const mat = rec.material;
 
-    const done = () => {
-        if (settled) return;
-        settled = true;
-        sendInFlight = false;
-        try { ws.close(); } catch (e) { /* already closing */ }
-    };
+    const missing = ["cell_qrcode", "voltage_val", "ir_val", "material"].filter(
+        (k) => !(k in rec)
+    );
+    if (missing.length) {
+        stats.badShape++;
+        notes.push(`MISSING FIELDS: ${missing.join(", ")}`);
+    }
 
-    // Without this, a server that never answers leaves sendInFlight stuck true
-    // and the queue stops draining silently.
-    const timeout = setTimeout(() => {
-        console.error("send timeout, will retry");
-        noteError("MES did not respond");
-        done();
-    }, SEND_TIMEOUT_MS);
+    if (qr === "NG" || qr === "" || qr === undefined || qr === null) {
+        stats.ngQr++;
+        notes.push("NO QR (scan failed)");
+    } else if (seenQr.has(qr)) {
+        stats.duplicates++;
+        notes.push("DUPLICATE QR");
+    } else {
+        seenQr.add(qr);
+    }
 
-    ws.onopen = () => {
-        try {
-            ws.send(JSON.stringify(record));
-        } catch (err) {
-            console.error("send failed:", err.message);
-            noteError("MES connection problem");
-            clearTimeout(timeout);
-            done();
-        }
-    };
+    if (v >= VOLT_SENTINEL || ir >= IR_SENTINEL) {
+        stats.sentinel++;
+        notes.push("SENTINEL VALUE (no valid measurement)");
+    }
 
-    ws.onmessage = (e) => {
-        console.log("Message:", e.data);
-        store.shift();                  // only on a real ack
-        health.cellsSent++;
-        health.lastAckAt = new Date();
-        console.log(`acked, ${store.length} remaining - ${new Date().toISOString()}`);
-        clearTimeout(timeout);
-        done();
-    };
+    const vStr = typeof v === "number" ? v.toFixed(4) : String(v);
+    const irStr = typeof ir === "number" ? ir.toFixed(3) : String(ir);
 
-    ws.onerror = (err) => {
-        console.error("Socket error:", err && err.message);
-        noteError("MES connection problem");
-        clearTimeout(timeout);
-        done();
-    };
-
-    ws.onclose = () => {
-        clearTimeout(timeout);
-        done();
+    return {
+        ok: notes.length === 0,
+        line: `${String(qr).padEnd(26)} V=${vStr.padStart(14)}  IR=${irStr.padStart(16)}  mat=${mat}`,
+        notes,
     };
 }
 
-setInterval(() => {
-    if (store.length === 0) return;
-    if (DRY_RUN) {
-        // Exercise the full queue path without touching the MES.
-        store.shift();
-        health.cellsSent++;
-        health.lastAckAt = new Date();
+function handlePayload(raw) {
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        stats.badJson++;
+        console.error(`[${ts()}] BAD JSON (${err.message}): ${String(raw).slice(0, 200)}`);
+        return { accepted: 0 };
+    }
+
+    // The sender may push a single object or an array, depending on whether
+    // you switch to batched sends later. Handle both.
+    const records = Array.isArray(parsed) ? parsed : [parsed];
+
+    for (const rec of records) {
+        stats.received++;
+        const d = describe(rec);
+        const tag = d.ok ? "  " : "!!";
+        console.log(`[${ts()}] ${tag} #${stats.received}  ${d.line}`);
+        if (d.notes.length) {
+            console.log(`${" ".repeat(16)}^^ ${d.notes.join(" | ")}`);
+        }
+        appendLog({ received_at: new Date().toISOString(), notes: d.notes, record: rec });
+    }
+
+    return { accepted: records.length };
+}
+
+// ===========================================================================
+// SERVER
+// ===========================================================================
+const server = http.createServer((req, res) => {
+    // Plain HTTP hit -- handy for checking the port is reachable from a browser.
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(
+        `MES test listener\nUptime: ${Math.floor((Date.now() - stats.startedAt) / 1000)}s\n` +
+        `Records received: ${stats.received}\n`
+    );
+});
+
+server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+        console.error(`\n*** PORT ${PORT} IS ALREADY IN USE ***`);
+        console.error("Something else is bound to this port -- most likely your live MES");
+        console.error("listener. Change PORT in this file to a free port, and update");
+        console.error("WS_URL in mesCellDataService.js to match.\n");
+    } else {
+        console.error("Server error:", err);
+    }
+    process.exit(1);
+});
+
+server.listen(PORT, () => {
+    console.log("==================================================");
+    console.log("  MES CELL DATA - TEST LISTENER");
+    console.log("==================================================");
+    console.log(`  Listening on : ws://0.0.0.0:${PORT}`);
+    console.log(`  Subprotocol  : ${PROTOCOL}`);
+    console.log(`  Logging to   : ${WRITE_LOG ? LOG_FILE : "(disabled)"}`);
+    console.log(`  Started      : ${stats.startedAt.toLocaleString()}`);
+    console.log("--------------------------------------------------");
+    console.log("  Waiting for data...  (Ctrl+C to stop)");
+    console.log("");
+});
+
+const wsServer = new WebSocketServer({
+    httpServer: server,
+    autoAcceptConnections: false,
+});
+
+wsServer.on("request", (request) => {
+    // The sender asks for 'echo-protocol'. Accepting a protocol it did not
+    // request makes the client drop the connection, so mirror it back.
+    let accepted;
+    try {
+        const wanted = request.requestedProtocols.includes(PROTOCOL)
+            ? PROTOCOL
+            : request.requestedProtocols[0] || null;
+        accepted = request.accept(wanted, request.origin);
+    } catch (err) {
+        console.error(`[${ts()}] connection rejected: ${err.message}`);
         return;
     }
-    sendOne(store.peek());
-}, SEND_INTERVAL_MS);
 
-// ===========================================================================
-// OPC UA INGEST
-// ===========================================================================
-async function main() {
-    try {
-        const client = OPCUAClient.create({
-            endpoint_must_exist: false,
-            connectionStrategy: {
-                maxRetry: 2,
-                initialDelay: 2000,
-                maxDelay: 10 * 1000,
-            },
-        });
-        client.on("backoff", () => console.log("retrying connection"));
+    stats.connections++;
+    const from = accepted.remoteAddress;
 
-        await client.connect(ENDPOINT_URL);
-        health.opcuaConnected = true;
+    accepted.on("message", (message) => {
+        const raw = message.type === "utf8" ? message.utf8Data : "(binary frame)";
 
-        client.on("connection_lost", () => {
-            health.opcuaConnected = false;
-            noteError("Lost connection to machine");
-            console.error("OPC UA connection lost");
-        });
-        client.on("connection_reestablished", () => {
-            health.opcuaConnected = true;
-            console.log("OPC UA connection re-established");
-        });
-
-        const session = await client.createSession();
-
-        const browseResult = await session.browse("RootFolder");
-        console.log(browseResult.references.map((r) => r.browseName.toString()).join("\n"));
-
-        const subscription = await session.createSubscription2({
-            requestedPublishingInterval: 1000,
-            requestedLifetimeCount: 100,
-            requestedMaxKeepAliveCount: 10,
-            maxNotificationsPerPublish: 10,
-            publishingEnabled: true,
-            priority: 10,
-        });
-
-        subscription
-            .on("started", () => console.log("subscription started - subscriptionId=", subscription.subscriptionId))
-            .on("keepalive", () => console.log("keepalive"))
-            .on("terminated", () => {
-                noteError("Machine data subscription stopped");
-                console.error("subscription terminated");
-            });
-
-        const parameters = {
-            samplingInterval: 100,
-            discardOldest: true,
-            queueSize: 100,
-        };
-
-        const monitoredItems = [];
-        for (let i = 0; i < NODES.length; i++) {
-            const itemToMonitor = {
-                nodeId: `ns=4;s=${NODES[i]}`,
-                attributeId: AttributeIds.Value,
-            };
-            console.log("Node" + (i + 1), itemToMonitor);
-            monitoredItems.push(await subscription.monitor(itemToMonitor, parameters, TimestampsToReturn.Both));
+        if (message.type !== "utf8") {
+            console.error(`[${ts()}] unexpected binary frame from ${from}`);
+            accepted.sendUTF(JSON.stringify({ status: "error", reason: "binary not supported" }));
+            return;
         }
 
-        monitoredItems.forEach((req, index) => {
-            req.on("changed", (dataValue) => {
-                const raw = dataValue.value.value;
-                if (!Array.isArray(raw)) {
-                    console.error(NODES[index], "unexpected payload:", typeof raw);
-                    return;
-                }
+        const result = handlePayload(raw);
 
-                const batch = raw.slice(0, 4).map((c) => ({
-                    cell_qrcode: c["QR_code"],
-                    voltage_val: c["pnVoltage"],
-                    ir_val: c["pnResistance"],
-                    material: c["haveINT"],
-                }));
+        // ACK. The sender only removes the record from its queue when it gets
+        // a reply -- without this, its backlog grows forever.
+        accepted.sendUTF(JSON.stringify({
+            status: "ok",
+            accepted: result.accepted,
+            at: new Date().toISOString(),
+        }));
+    });
 
-                store.push(...batch);          // in-memory; persisted atomically
-                health.cellsRead += batch.length;
-                health.lastCellAt = new Date();
+    accepted.on("close", () => { /* sender closes after every ack, this is normal */ });
 
-                console.log(NODES[index], "+" + batch.length, "queue:", store.length);
-            });
-        });
+    accepted.on("error", (err) => {
+        console.error(`[${ts()}] socket error from ${from}: ${err.message}`);
+    });
+});
 
-        let running = true;
-        const shutdown = async () => {
-            if (!running) return;
-            running = false;
-            console.log("shutting down client");
-            try {
-                await subscription.terminate();
-                await session.close();
-                await client.disconnect();
-            } catch (err) {
-                console.error("shutdown error:", err.message);
-            }
-            health.opcuaConnected = false;
-            store.closeSync();
-            noteError("Service was stopped");
-            writeStatus();
-            console.log("Done");
-            process.exit(0);
-        };
+// ===========================================================================
+// PERIODIC SUMMARY
+// ===========================================================================
+setInterval(() => {
+    const upSec = Math.floor((Date.now() - stats.startedAt) / 1000);
+    const rate = upSec > 0 ? (stats.received / upSec).toFixed(2) : "0.00";
+    console.log("");
+    console.log(`--- [${ts()}] SUMMARY ----------------------------`);
+    console.log(`  uptime ${Math.floor(upSec / 60)}m ${upSec % 60}s   connections ${stats.connections}`);
+    console.log(`  received ${stats.received}  (${rate}/sec)`);
+    console.log(`  bad JSON ${stats.badJson}   bad shape ${stats.badShape}`);
+    console.log(`  sentinel ${stats.sentinel}   NG/no-QR ${stats.ngQr}   duplicate QR ${stats.duplicates}`);
+    console.log(`  unique QR codes ${seenQr.size}`);
+    console.log("--------------------------------------------------");
+    console.log("");
+}, 30000);
 
-        process.on("SIGINT", shutdown);
-        process.on("SIGTERM", shutdown);
-    } catch (err) {
-        console.log("Error !!!", err);
-        health.opcuaConnected = false;
-        noteError("Service failed to start");
-        store.closeSync();
-        writeStatus();
-        process.exit(1);
-    }
-}
-
-main();
+process.on("SIGINT", () => {
+    console.log("\n\n=== FINAL TOTALS ===");
+    console.log(`  connections     : ${stats.connections}`);
+    console.log(`  records         : ${stats.received}`);
+    console.log(`  unique QR codes : ${seenQr.size}`);
+    console.log(`  bad JSON        : ${stats.badJson}`);
+    console.log(`  bad shape       : ${stats.badShape}`);
+    console.log(`  sentinel values : ${stats.sentinel}`);
+    console.log(`  NG / no QR      : ${stats.ngQr}`);
+    console.log(`  duplicate QR    : ${stats.duplicates}`);
+    if (WRITE_LOG) console.log(`  full log        : ${LOG_FILE}`);
+    console.log("");
+    process.exit(0);
+});
