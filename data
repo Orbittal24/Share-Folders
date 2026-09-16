@@ -1,71 +1,527 @@
-First — add the path variable
+// ===========================================================================
+// MES CELL DATA SERVICE
+//
+// OPC UA -> WebSocket client with corruption-safe JSON persistence and a
+// plain-English status file for the AMC team.
+//
+// Single file. Run with: node mesCellDataService.js
+// ===========================================================================
+"use strict";
 
-At the top of your file, you already have:
+const fs = require("fs");
+const path = require("path");
+const W3CWebSocket = require("websocket").w3cwebsocket;
 
-var fs = require('fs');
+const {
+    OPCUAClient,
+    AttributeIds,
+    TimestampsToReturn,
+} = require("node-opcua");
 
-Immediately after this line, add:
+// ===========================================================================
+// CONFIG  -- everything you might need to change lives here
+// ===========================================================================
+const ENDPOINT_URL = "opc.tcp://192.168.250.1:4840";
+const WS_URL = "ws://10.9.4.28:9814";
 
-const MASTER_DATA_FILE = "C:\\Project\\Services\\OCV\\masterDataArray.json";
+const DATA_FILE = "cellQueue.json";          // use a NEW path for shadow runs
+const STATUS_FILE = "SERVICE_STATUS.txt";    // the file the AMC team watches
 
-So it becomes:
+// Shadow-run switch. true  = queue and drop, nothing reaches the MES.
+//                   false = normal production sending.
+const DRY_RUN = false;
 
-var W3CWebSocket = require('websocket').w3cwebsocket;
-var fs = require('fs');
+const NODES = [
+    "MES_CellData1",
+    "MES_CellData2",
+    "MES_CellData3",
+    "MES_CellData4",
+    "MES_CellData5",
+    "MES_CellData6",
+    "MES_CellData7",
+    "MES_CellData8",
+];
 
-const MASTER_DATA_FILE = "C:\\Project\\Services\\OCV\\masterDataArray.json";
-Point 1 — Line 41
+const SEND_INTERVAL_MS = 500;    // how often we try to push a record upstream
+const SEND_TIMEOUT_MS = 5000;    // give up on a socket that never answers
+const FLUSH_INTERVAL_MS = 500;   // how often the queue is persisted to disk
+const HEARTBEAT_MS = 5000;       // how often the status file is rewritten
 
-Currently you have:
+// Backlog thresholds for the status file. Tune these after watching one
+// normal shift: set WARN to roughly double your usual peak backlog.
+const BACKLOG_WARN = 500;
+const BACKLOG_FAULT = 5000;
 
-fs.readFile("masterDataArray.json", function (err, data) {
+// ===========================================================================
+// PERSISTENCE
+//
+// Why this exists: fs.writeFile truncates then streams. With 8 monitored items
+// plus the socket handler all writing the same path, one write truncates the
+// file while another is mid-stream, and you get a file that ends inside an
+// object or carries a stray bracket. Here the in-memory array is the source of
+// truth, exactly one write is ever in flight, and the live file is swapped in
+// atomically by rename, so a reader never sees a partial file.
+// ===========================================================================
+class JsonArrayStore {
+    constructor(file, opts = {}) {
+        this.file = path.resolve(file);
+        this.tmp = this.file + ".tmp";
+        this.bak = this.file + ".bak";
 
-Change it to:
+        this.flushIntervalMs = opts.flushIntervalMs || 500;
+        this.renameRetries = opts.renameRetries || 5;
+        this.pretty = opts.pretty !== false;
 
-fs.readFile(MASTER_DATA_FILE, function (err, data) {
+        this.data = [];
+        this.dirty = false;
+        this.writing = false;
+        this.closed = false;
+        this.lastWriteError = null;
 
-This is the file reading location.
+        this.timer = setInterval(() => {
+            this.flush().catch((e) => console.error("[store] flush error:", e.message));
+        }, this.flushIntervalMs);
+        if (typeof this.timer.unref === "function") this.timer.unref();
+    }
 
-Point 2 — Line 80
+    // ---- loading ----------------------------------------------------------
 
-Currently:
+    /**
+     * Synchronous boot load. Tries the primary file, then the .bak, then the
+     * .tmp (in case a rename was interrupted). Never throws -- a damaged file
+     * must not take the service down.
+     */
+    load() {
+        const candidates = [this.file, this.bak, this.tmp];
+        for (const p of candidates) {
+            try {
+                if (!fs.existsSync(p)) continue;
+                const parsed = JSON.parse(fs.readFileSync(p, "utf8"));
+                if (!Array.isArray(parsed)) {
+                    console.error(`[store] ${path.basename(p)} is not an array, skipping`);
+                    continue;
+                }
+                this.data = parsed;
+                if (p !== this.file) {
+                    console.error(`[store] primary unusable, recovered ${parsed.length} records from ${path.basename(p)}`);
+                    this.dirty = true; // rewrite a clean primary on the next flush
+                }
+                console.log(`[store] loaded ${this.data.length} records from ${path.basename(p)}`);
+                return this.data;
+            } catch (err) {
+                console.error(`[store] cannot use ${path.basename(p)}: ${err.message}`);
+                this._quarantine(p);
+            }
+        }
+        console.error("[store] no usable file found, starting empty");
+        this.data = [];
+        return this.data;
+    }
 
-fs.writeFile("masterDataArray.json", JSON.stringify(objArr, null, 2), err => {
+    /** Move a damaged file aside so it can be inspected instead of overwritten. */
+    _quarantine(p) {
+        try {
+            const dest = `${p}.corrupt.${Date.now()}`;
+            fs.renameSync(p, dest);
+            console.error(`[store] quarantined -> ${path.basename(dest)}`);
+        } catch (_) {
+            /* best effort only */
+        }
+    }
 
-Change it to:
+    // ---- mutation (in-memory, always valid) -------------------------------
 
-fs.writeFile(MASTER_DATA_FILE, JSON.stringify(objArr, null, 2), err => {
+    push(...items) {
+        if (items.length === 0) return;
+        this.data.push(...items);
+        this.dirty = true;
+    }
 
-This is the write operation after the WebSocket sends/receives data.
+    /** Remove and return the first record. Call only after the server acks it. */
+    shift() {
+        if (this.data.length === 0) return undefined;
+        const item = this.data.shift();
+        this.dirty = true;
+        return item;
+    }
 
-Point 3 — Line 255
+    peek() {
+        return this.data.length > 0 ? this.data[0] : undefined;
+    }
 
-Currently:
+    get length() {
+        return this.data.length;
+    }
 
-fs.writeFile("masterDataArray.json", JSON.stringify(objArr, null, 2), err => {
+    // ---- persistence ------------------------------------------------------
 
-Change it to:
+    async flush() {
+        if (this.writing || !this.dirty) return;
 
-fs.writeFile(MASTER_DATA_FILE, JSON.stringify(objArr, null, 2), err => {
+        this.writing = true;
+        // Snapshot now; anything mutated after this re-sets dirty for the next tick.
+        const payload = this.pretty
+            ? JSON.stringify(this.data, null, 2)
+            : JSON.stringify(this.data);
+        this.dirty = false;
 
-This is the write operation when new OPC UA data is received.
+        try {
+            // 1. Full payload to a temp file, fsynced, so the bytes are really
+            //    on disk before the live name points at them.
+            const fh = await fs.promises.open(this.tmp, "w");
+            try {
+                await fh.writeFile(payload, "utf8");
+                await fh.sync();
+            } finally {
+                await fh.close();
+            }
 
-Final result
+            // 2. Keep the previous good version.
+            try {
+                await fs.promises.copyFile(this.file, this.bak);
+            } catch (err) {
+                if (err.code !== "ENOENT") console.error("[store] backup failed:", err.message);
+            }
 
-You should have only these 4 relevant changes:
+            // 3. Atomic swap. rename() replaces the destination on POSIX and
+            //    Windows alike; retry on transient AV / indexer locks.
+            await this._renameWithRetry();
+            this.lastWriteError = null;
+        } catch (err) {
+            this.dirty = true; // retry next tick, never drop data
+            this.lastWriteError = err.message;
+            console.error("[store] write failed, will retry:", err.message);
+        } finally {
+            this.writing = false;
+        }
+    }
 
-var fs = require('fs');
+    async _renameWithRetry() {
+        let lastErr;
+        for (let i = 0; i < this.renameRetries; i++) {
+            try {
+                await fs.promises.rename(this.tmp, this.file);
+                return;
+            } catch (err) {
+                lastErr = err;
+                if (err.code !== "EPERM" && err.code !== "EBUSY" && err.code !== "EACCES") throw err;
+                await new Promise((r) => setTimeout(r, 50 * (i + 1)));
+            }
+        }
+        throw lastErr;
+    }
 
-const MASTER_DATA_FILE = "C:\\Project\\Services\\OCV\\masterDataArray.json";
+    /** Final synchronous flush for SIGINT / exit paths. */
+    closeSync() {
+        if (this.closed) return;
+        this.closed = true;
+        clearInterval(this.timer);
+        try {
+            const payload = this.pretty
+                ? JSON.stringify(this.data, null, 2)
+                : JSON.stringify(this.data);
+            const fd = fs.openSync(this.tmp, "w");
+            try {
+                fs.writeFileSync(fd, payload, "utf8");
+                fs.fsyncSync(fd);
+            } finally {
+                fs.closeSync(fd);
+            }
+            fs.renameSync(this.tmp, this.file);
+            console.log(`[store] final flush: ${this.data.length} records`);
+        } catch (err) {
+            console.error("[store] final flush failed:", err.message);
+        }
+    }
+}
 
-Then:
+const store = new JsonArrayStore(DATA_FILE, { flushIntervalMs: FLUSH_INTERVAL_MS });
+store.load();
 
-fs.readFile(MASTER_DATA_FILE, function (err, data) {
+// ===========================================================================
+// HEALTH / STATUS FILE
+//
+// Passive only -- nothing here pings the PLC or the MES. The code paths that
+// already run set fields on `health`, and a timer formats them into a text
+// file every HEARTBEAT_MS. The timer runs whether or not cells are flowing,
+// so a frozen "Date modified" on the status file means the service is dead.
+// ===========================================================================
+const health = {
+    startedAt: new Date(),
+    opcuaConnected: false,
+    cellsRead: 0,
+    cellsSent: 0,
+    lastCellAt: null,
+    lastAckAt: null,
+    lastError: null,
+};
 
-and both:
+function noteError(msg) {
+    health.lastError = { at: Date.now(), msg: msg };
+}
 
-fs.writeFile(MASTER_DATA_FILE, JSON.stringify(objArr, null, 2), err => {
+function fmtTime(d) {
+    if (!d) return "-";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ` +
+           `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
 
-So you do not need to change any other logic or flow.
+function fmtAgo(d) {
+    if (!d) return "never";
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s} seconds ago`;
+    if (s < 3600) return `${Math.floor(s / 60)} minutes ago`;
+    return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
+}
 
-If you give me your new exact folder path, I can also show you the exact line to paste with your path.
+function overallStatus() {
+    if (!health.opcuaConnected) return ["FAULT", "Not connected to the machine"];
+    if (store.lastWriteError) return ["FAULT", "Cannot save data to disk"];
+    if (store.length > BACKLOG_FAULT) return ["FAULT", "Data is not reaching MES, backlog is large"];
+    if (store.length > BACKLOG_WARN) return ["WARNING", "Backlog is building up"];
+    if (health.lastError && Date.now() - health.lastError.at < 120000)
+        return ["WARNING", health.lastError.msg];
+    return ["OK", "Normal"];
+}
+
+function writeStatus() {
+    const [state, detail] = overallStatus();
+    const upSec = Math.floor((Date.now() - health.startedAt.getTime()) / 1000);
+    const uptime = `${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m`;
+
+    const text =
+`==================================================
+        MES CELL DATA SERVICE - STATUS
+==================================================
+
+  OVERALL           : ${state}
+  Detail            : ${detail}
+
+  Checked at        : ${fmtTime(new Date())}
+  Service running   : ${uptime}  (since ${fmtTime(health.startedAt)})
+
+  Machine (OPC UA)  : ${health.opcuaConnected ? "CONNECTED" : "NOT CONNECTED"}
+  Last cell read    : ${fmtAgo(health.lastCellAt)}
+  Last sent to MES  : ${fmtAgo(health.lastAckAt)}
+
+  Cells read        : ${health.cellsRead}
+  Cells sent        : ${health.cellsSent}
+  Waiting to send   : ${store.length}
+
+  Last error        : ${health.lastError ? health.lastError.msg : "(none)"}
+${DRY_RUN ? "\n  *** TEST MODE - nothing is being sent to MES ***\n" : ""}
+--------------------------------------------------
+  CALL ORBITTAL SUPPORT IF:
+    - OVERALL is not OK, OR
+    - this file's "Date modified" in Windows
+      Explorer is more than 2 minutes old
+==================================================
+`;
+    try {
+        const tmp = STATUS_FILE + ".tmp";
+        fs.writeFileSync(tmp, text, "utf8");
+        fs.renameSync(tmp, STATUS_FILE);
+    } catch (err) {
+        console.error("[status] write failed:", err.message);
+    }
+}
+
+setInterval(writeStatus, HEARTBEAT_MS);
+writeStatus();
+
+// ===========================================================================
+// UPLINK
+// ===========================================================================
+let sendInFlight = false; // stops a second socket opening while one is pending
+
+function sendOne(record) {
+    if (sendInFlight) return;
+    sendInFlight = true;
+
+    let settled = false;
+    const ws = new W3CWebSocket(WS_URL, "echo-protocol");
+
+    const done = () => {
+        if (settled) return;
+        settled = true;
+        sendInFlight = false;
+        try { ws.close(); } catch (e) { /* already closing */ }
+    };
+
+    // Without this, a server that never answers leaves sendInFlight stuck true
+    // and the queue stops draining silently.
+    const timeout = setTimeout(() => {
+        console.error("send timeout, will retry");
+        noteError("MES did not respond");
+        done();
+    }, SEND_TIMEOUT_MS);
+
+    ws.onopen = () => {
+        try {
+            ws.send(JSON.stringify(record));
+        } catch (err) {
+            console.error("send failed:", err.message);
+            noteError("MES connection problem");
+            clearTimeout(timeout);
+            done();
+        }
+    };
+
+    ws.onmessage = (e) => {
+        console.log("Message:", e.data);
+        store.shift();                  // only on a real ack
+        health.cellsSent++;
+        health.lastAckAt = new Date();
+        console.log(`acked, ${store.length} remaining - ${new Date().toISOString()}`);
+        clearTimeout(timeout);
+        done();
+    };
+
+    ws.onerror = (err) => {
+        console.error("Socket error:", err && err.message);
+        noteError("MES connection problem");
+        clearTimeout(timeout);
+        done();
+    };
+
+    ws.onclose = () => {
+        clearTimeout(timeout);
+        done();
+    };
+}
+
+setInterval(() => {
+    if (store.length === 0) return;
+    if (DRY_RUN) {
+        // Exercise the full queue path without touching the MES.
+        store.shift();
+        health.cellsSent++;
+        health.lastAckAt = new Date();
+        return;
+    }
+    sendOne(store.peek());
+}, SEND_INTERVAL_MS);
+
+// ===========================================================================
+// OPC UA INGEST
+// ===========================================================================
+async function main() {
+    try {
+        const client = OPCUAClient.create({
+            endpoint_must_exist: false,
+            connectionStrategy: {
+                maxRetry: 2,
+                initialDelay: 2000,
+                maxDelay: 10 * 1000,
+            },
+        });
+        client.on("backoff", () => console.log("retrying connection"));
+
+        await client.connect(ENDPOINT_URL);
+        health.opcuaConnected = true;
+
+        client.on("connection_lost", () => {
+            health.opcuaConnected = false;
+            noteError("Lost connection to machine");
+            console.error("OPC UA connection lost");
+        });
+        client.on("connection_reestablished", () => {
+            health.opcuaConnected = true;
+            console.log("OPC UA connection re-established");
+        });
+
+        const session = await client.createSession();
+
+        const browseResult = await session.browse("RootFolder");
+        console.log(browseResult.references.map((r) => r.browseName.toString()).join("\n"));
+
+        const subscription = await session.createSubscription2({
+            requestedPublishingInterval: 1000,
+            requestedLifetimeCount: 100,
+            requestedMaxKeepAliveCount: 10,
+            maxNotificationsPerPublish: 10,
+            publishingEnabled: true,
+            priority: 10,
+        });
+
+        subscription
+            .on("started", () => console.log("subscription started - subscriptionId=", subscription.subscriptionId))
+            .on("keepalive", () => console.log("keepalive"))
+            .on("terminated", () => {
+                noteError("Machine data subscription stopped");
+                console.error("subscription terminated");
+            });
+
+        const parameters = {
+            samplingInterval: 100,
+            discardOldest: true,
+            queueSize: 100,
+        };
+
+        const monitoredItems = [];
+        for (let i = 0; i < NODES.length; i++) {
+            const itemToMonitor = {
+                nodeId: `ns=4;s=${NODES[i]}`,
+                attributeId: AttributeIds.Value,
+            };
+            console.log("Node" + (i + 1), itemToMonitor);
+            monitoredItems.push(await subscription.monitor(itemToMonitor, parameters, TimestampsToReturn.Both));
+        }
+
+        monitoredItems.forEach((req, index) => {
+            req.on("changed", (dataValue) => {
+                const raw = dataValue.value.value;
+                if (!Array.isArray(raw)) {
+                    console.error(NODES[index], "unexpected payload:", typeof raw);
+                    return;
+                }
+
+                const batch = raw.slice(0, 4).map((c) => ({
+                    cell_qrcode: c["QR_code"],
+                    voltage_val: c["pnVoltage"],
+                    ir_val: c["pnResistance"],
+                    material: c["haveINT"],
+                }));
+
+                store.push(...batch);          // in-memory; persisted atomically
+                health.cellsRead += batch.length;
+                health.lastCellAt = new Date();
+
+                console.log(NODES[index], "+" + batch.length, "queue:", store.length);
+            });
+        });
+
+        let running = true;
+        const shutdown = async () => {
+            if (!running) return;
+            running = false;
+            console.log("shutting down client");
+            try {
+                await subscription.terminate();
+                await session.close();
+                await client.disconnect();
+            } catch (err) {
+                console.error("shutdown error:", err.message);
+            }
+            health.opcuaConnected = false;
+            store.closeSync();
+            noteError("Service was stopped");
+            writeStatus();
+            console.log("Done");
+            process.exit(0);
+        };
+
+        process.on("SIGINT", shutdown);
+        process.on("SIGTERM", shutdown);
+    } catch (err) {
+        console.log("Error !!!", err);
+        health.opcuaConnected = false;
+        noteError("Service failed to start");
+        store.closeSync();
+        writeStatus();
+        process.exit(1);
+    }
+}
+
+main();
