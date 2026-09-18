@@ -1,4 +1,4 @@
-const net = require("net");
+const WebSocket = require("ws");
 
 const HOST = "0.0.0.0";
 const PORT = 9094;
@@ -26,73 +26,83 @@ function separator() {
 }
 
 // ======================================================
-// TCP SERVER
+// WEBSOCKET SERVER
 // ======================================================
 
-const server = net.createServer((socket) => {
+const wss = new WebSocket.Server({
+    host: HOST,
+    port: PORT
+});
+
+// ======================================================
+// CLIENT CONNECTED
+// ======================================================
+
+wss.on("connection", (socket, request) => {
 
     clientCounter++;
 
     const clientId = clientCounter;
-    const clientAddress = `${socket.remoteAddress}:${socket.remotePort}`;
 
-    // Store client information on socket
+    const clientIP =
+        request.socket.remoteAddress || "UNKNOWN";
+
     socket.clientId = clientId;
-    socket.clientAddress = clientAddress;
+    socket.clientIP = clientIP;
 
     clients.add(socket);
 
-    // ==================================================
-    // CLIENT CONNECTED
-    // ==================================================
-
     separator();
 
-    log(`CLIENT CONNECTED`);
-    console.log(`  Client ID   : ${clientId}`);
-    console.log(`  IP Address  : ${socket.remoteAddress}`);
-    console.log(`  Port        : ${socket.remotePort}`);
-    console.log(`  Total Client: ${clients.size}`);
+    log("CLIENT CONNECTED");
+
+    console.log(`  Client ID    : ${clientId}`);
+    console.log(`  IP Address   : ${clientIP}`);
+    console.log(`  Total Clients: ${clients.size}`);
 
     separator();
 
     // ==================================================
-    // RECEIVE DATA
+    // RECEIVE MESSAGE
     // ==================================================
 
-    socket.on("data", (data) => {
+    socket.on("message", (data, isBinary) => {
 
-        const message = data.toString().trim();
+        let message;
 
-        if (!message) {
-            return;
+        if (isBinary) {
+            message = data.toString();
+        } else {
+            message = data.toString();
         }
 
         separator();
 
-        log(`DATA RECEIVED`);
+        log("DATA RECEIVED");
 
-        console.log(`  Client ID   : ${clientId}`);
-        console.log(`  Client       : ${clientAddress}`);
-        console.log(`  Message      : ${message}`);
+        console.log(`  Client ID    : ${clientId}`);
+        console.log(`  Client IP    : ${clientIP}`);
         console.log(`  Data Length  : ${data.length} bytes`);
 
-        console.log(`  Raw Data     :`, data);
+        console.log("");
+        console.log("  Message:");
+        console.log(message);
 
         separator();
 
         // ==================================================
-        // BROADCAST MESSAGE
+        // BROADCAST
         // ==================================================
 
         let broadcastCount = 0;
 
         for (const client of clients) {
 
-            if (client !== socket && !client.destroyed) {
-
-                client.write(message + "\n");
-
+            if (
+                client !== socket &&
+                client.readyState === WebSocket.OPEN
+            ) {
+                client.send(message);
                 broadcastCount++;
             }
         }
@@ -112,11 +122,11 @@ const server = net.createServer((socket) => {
 
         separator();
 
-        log(`CLIENT DISCONNECTED`);
+        log("CLIENT DISCONNECTED");
 
         console.log(`  Client ID    : ${clientId}`);
-        console.log(`  Client       : ${clientAddress}`);
-        console.log(`  Total Client : ${clients.size}`);
+        console.log(`  Client IP    : ${clientIP}`);
+        console.log(`  Total Clients: ${clients.size}`);
 
         separator();
     });
@@ -128,36 +138,60 @@ const server = net.createServer((socket) => {
     socket.on("error", (err) => {
 
         console.error("");
-        console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-        log(`CLIENT ERROR`);
+
+        console.error(
+            "============================================================"
+        );
+
+        log("CLIENT ERROR");
+
         console.error(`  Client ID : ${clientId}`);
-        console.error(`  Client    : ${clientAddress}`);
+        console.error(`  Client IP : ${clientIP}`);
         console.error(`  Error     : ${err.message}`);
-        console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+
+        console.error(
+            "============================================================"
+        );
+
         console.error("");
 
         clients.delete(socket);
     });
 
     // ==================================================
-    // WELCOME MESSAGE
+    // SEND CONNECTION ACK
     // ==================================================
 
-    socket.write("CONNECTED_TO_TCP_SERVER\n");
-
+    socket.send(
+        JSON.stringify({
+            type: "CONNECTION_ACK",
+            status: "CONNECTED",
+            client_id: clientId,
+            message: "Connected to WebSocket server"
+        })
+    );
 });
 
 // ======================================================
 // SERVER ERROR
 // ======================================================
 
-server.on("error", (err) => {
+wss.on("error", (err) => {
 
     console.error("");
-    console.error("============================================================");
-    log(`TCP SERVER ERROR`);
+
+    console.error(
+        "============================================================"
+    );
+
+    log("WEBSOCKET SERVER ERROR");
+
     console.error(`  Error : ${err.message}`);
-    console.error("============================================================");
+
+    console.error(
+        "============================================================"
+    );
+
     console.error("");
 });
 
@@ -165,22 +199,37 @@ server.on("error", (err) => {
 // SERVER START
 // ======================================================
 
-server.listen(PORT, HOST, () => {
+wss.on("listening", () => {
 
     console.log("");
-    console.log("============================================================");
-    console.log("                 TCP SERVER STARTED");
-    console.log("============================================================");
+
+    console.log(
+        "============================================================"
+    );
+
+    console.log(
+        "              WEBSOCKET SERVER STARTED"
+    );
+
+    console.log(
+        "============================================================"
+    );
 
     console.log(`  Start Time     : ${getTimestamp()}`);
     console.log(`  Host           : ${HOST}`);
     console.log(`  Port           : ${PORT}`);
-    console.log(`  Protocol       : TCP`);
+    console.log(`  Protocol       : WebSocket`);
     console.log(`  Status         : RUNNING`);
     console.log(`  Active Clients : ${clients.size}`);
 
-    console.log("============================================================");
-    console.log("  Waiting for client connections...");
-    console.log("============================================================");
+    console.log(
+        "============================================================"
+    );
+
+    console.log("  Waiting for WebSocket clients...");
+    console.log(
+        "============================================================"
+    );
+
     console.log("");
 });
