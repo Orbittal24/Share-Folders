@@ -1,258 +1,63 @@
-// ===========================================================================
-// MES CELL DATA - TEST LISTENER
-//
-// Stand-in for the real MES endpoint. Accepts the WebSocket connections made
-// by mesCellDataService.js, prints every record, and acknowledges it so the
-// sender removes it from its queue.
-//
-// Run on 10.9.4.28 with:  node testListener.js
-//
-// NOTE: this is a TEST tool, not the MES. It validates and logs, it does not
-// store anything in your MES database.
-// ===========================================================================
-"use strict";
+const net = require("net");
 
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const WebSocketServer = require("websocket").server;
+const HOST = "0.0.0.0";
+const PORT = 5000;
 
-// ===========================================================================
-// CONFIG
-// ===========================================================================
-const PORT = 9815;                    // NOT 9814 -- that is the live MES port
-const PROTOCOL = "echo-protocol";     // must match the sender
-const LOG_FILE = path.join(__dirname, "received_cells.log");  // NDJSON, append-only
-const WRITE_LOG = true;
+const clients = new Set();
 
-// Sentinel values the machine emits when it has no valid measurement.
-const VOLT_SENTINEL = 1e10;
-const IR_SENTINEL = 1e12;
+const server = net.createServer((socket) => {
+    const clientAddress = `${socket.remoteAddress}:${socket.remotePort}`;
 
-// ===========================================================================
-// STATE
-// ===========================================================================
-const stats = {
-    startedAt: new Date(),
-    connections: 0,
-    received: 0,
-    badJson: 0,
-    badShape: 0,
-    sentinel: 0,
-    ngQr: 0,
-    duplicates: 0,
-};
+    console.log(`Client connected: ${clientAddress}`);
 
-const seenQr = new Set();   // in-memory only, resets on restart
+    clients.add(socket);
 
-function ts() {
-    const d = new Date();
-    const p = (n) => String(n).padStart(2, "0");
-    return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-}
+    // Receive data from client
+    socket.on("data", (data) => {
+        const message = data.toString().trim();
 
-function appendLog(obj) {
-    if (!WRITE_LOG) return;
-    try {
-        // NDJSON: one object per line. Appends never touch existing bytes, so
-        // this file cannot be corrupted the way a rewritten array can.
-        fs.appendFileSync(LOG_FILE, JSON.stringify(obj) + "\n", "utf8");
-    } catch (err) {
-        console.error(`[${ts()}] log write failed: ${err.message}`);
-    }
-}
-
-// ===========================================================================
-// RECORD HANDLING
-// ===========================================================================
-function describe(rec) {
-    const notes = [];
-
-    if (typeof rec !== "object" || rec === null || Array.isArray(rec)) {
-        stats.badShape++;
-        return { ok: false, line: `NOT AN OBJECT: ${JSON.stringify(rec)}`, notes };
-    }
-
-    const qr = rec.cell_qrcode;
-    const v = rec.voltage_val;
-    const ir = rec.ir_val;
-    const mat = rec.material;
-
-    const missing = ["cell_qrcode", "voltage_val", "ir_val", "material"].filter(
-        (k) => !(k in rec)
-    );
-    if (missing.length) {
-        stats.badShape++;
-        notes.push(`MISSING FIELDS: ${missing.join(", ")}`);
-    }
-
-    if (qr === "NG" || qr === "" || qr === undefined || qr === null) {
-        stats.ngQr++;
-        notes.push("NO QR (scan failed)");
-    } else if (seenQr.has(qr)) {
-        stats.duplicates++;
-        notes.push("DUPLICATE QR");
-    } else {
-        seenQr.add(qr);
-    }
-
-    if (v >= VOLT_SENTINEL || ir >= IR_SENTINEL) {
-        stats.sentinel++;
-        notes.push("SENTINEL VALUE (no valid measurement)");
-    }
-
-    const vStr = typeof v === "number" ? v.toFixed(4) : String(v);
-    const irStr = typeof ir === "number" ? ir.toFixed(3) : String(ir);
-
-    return {
-        ok: notes.length === 0,
-        line: `${String(qr).padEnd(26)} V=${vStr.padStart(14)}  IR=${irStr.padStart(16)}  mat=${mat}`,
-        notes,
-    };
-}
-
-function handlePayload(raw) {
-    let parsed;
-    try {
-        parsed = JSON.parse(raw);
-    } catch (err) {
-        stats.badJson++;
-        console.error(`[${ts()}] BAD JSON (${err.message}): ${String(raw).slice(0, 200)}`);
-        return { accepted: 0 };
-    }
-
-    // The sender may push a single object or an array, depending on whether
-    // you switch to batched sends later. Handle both.
-    const records = Array.isArray(parsed) ? parsed : [parsed];
-
-    for (const rec of records) {
-        stats.received++;
-        const d = describe(rec);
-        const tag = d.ok ? "  " : "!!";
-        console.log(`[${ts()}] ${tag} #${stats.received}  ${d.line}`);
-        if (d.notes.length) {
-            console.log(`${" ".repeat(16)}^^ ${d.notes.join(" | ")}`);
-        }
-        appendLog({ received_at: new Date().toISOString(), notes: d.notes, record: rec });
-    }
-
-    return { accepted: records.length };
-}
-
-// ===========================================================================
-// SERVER
-// ===========================================================================
-const server = http.createServer((req, res) => {
-    // Plain HTTP hit -- handy for checking the port is reachable from a browser.
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end(
-        `MES test listener\nUptime: ${Math.floor((Date.now() - stats.startedAt) / 1000)}s\n` +
-        `Records received: ${stats.received}\n`
-    );
-});
-
-server.on("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-        console.error(`\n*** PORT ${PORT} IS ALREADY IN USE ***`);
-        console.error("Something else is bound to this port -- most likely your live MES");
-        console.error("listener. Change PORT in this file to a free port, and update");
-        console.error("WS_URL in mesCellDataService.js to match.\n");
-    } else {
-        console.error("Server error:", err);
-    }
-    process.exit(1);
-});
-
-server.listen(PORT, () => {
-    console.log("==================================================");
-    console.log("  MES CELL DATA - TEST LISTENER");
-    console.log("==================================================");
-    console.log(`  Listening on : ws://0.0.0.0:${PORT}`);
-    console.log(`  Subprotocol  : ${PROTOCOL}`);
-    console.log(`  Logging to   : ${WRITE_LOG ? LOG_FILE : "(disabled)"}`);
-    console.log(`  Started      : ${stats.startedAt.toLocaleString()}`);
-    console.log("--------------------------------------------------");
-    console.log("  Waiting for data...  (Ctrl+C to stop)");
-    console.log("");
-});
-
-const wsServer = new WebSocketServer({
-    httpServer: server,
-    autoAcceptConnections: false,
-});
-
-wsServer.on("request", (request) => {
-    // The sender asks for 'echo-protocol'. Accepting a protocol it did not
-    // request makes the client drop the connection, so mirror it back.
-    let accepted;
-    try {
-        const wanted = request.requestedProtocols.includes(PROTOCOL)
-            ? PROTOCOL
-            : request.requestedProtocols[0] || null;
-        accepted = request.accept(wanted, request.origin);
-    } catch (err) {
-        console.error(`[${ts()}] connection rejected: ${err.message}`);
-        return;
-    }
-
-    stats.connections++;
-    const from = accepted.remoteAddress;
-
-    accepted.on("message", (message) => {
-        const raw = message.type === "utf8" ? message.utf8Data : "(binary frame)";
-
-        if (message.type !== "utf8") {
-            console.error(`[${ts()}] unexpected binary frame from ${from}`);
-            accepted.sendUTF(JSON.stringify({ status: "error", reason: "binary not supported" }));
+        if (!message) {
             return;
         }
 
-        const result = handlePayload(raw);
+        console.log(`Received from ${clientAddress}: ${message}`);
 
-        // ACK. The sender only removes the record from its queue when it gets
-        // a reply -- without this, its backlog grows forever.
-        accepted.sendUTF(JSON.stringify({
-            status: "ok",
-            accepted: result.accepted,
-            at: new Date().toISOString(),
-        }));
+        // Broadcast message to all other clients
+        for (const client of clients) {
+            if (client !== socket && !client.destroyed) {
+                client.write(message + "\n");
+            }
+        }
     });
 
-    accepted.on("close", () => { /* sender closes after every ack, this is normal */ });
-
-    accepted.on("error", (err) => {
-        console.error(`[${ts()}] socket error from ${from}: ${err.message}`);
+    // Client disconnected
+    socket.on("close", () => {
+        console.log(`Client disconnected: ${clientAddress}`);
+        clients.delete(socket);
     });
+
+    // Socket error
+    socket.on("error", (err) => {
+        console.error(`Client error ${clientAddress}:`, err.message);
+        clients.delete(socket);
+    });
+
+    // Optional welcome message
+    socket.write("CONNECTED_TO_TCP_SERVER\n");
 });
 
-// ===========================================================================
-// PERIODIC SUMMARY
-// ===========================================================================
-setInterval(() => {
-    const upSec = Math.floor((Date.now() - stats.startedAt) / 1000);
-    const rate = upSec > 0 ? (stats.received / upSec).toFixed(2) : "0.00";
-    console.log("");
-    console.log(`--- [${ts()}] SUMMARY ----------------------------`);
-    console.log(`  uptime ${Math.floor(upSec / 60)}m ${upSec % 60}s   connections ${stats.connections}`);
-    console.log(`  received ${stats.received}  (${rate}/sec)`);
-    console.log(`  bad JSON ${stats.badJson}   bad shape ${stats.badShape}`);
-    console.log(`  sentinel ${stats.sentinel}   NG/no-QR ${stats.ngQr}   duplicate QR ${stats.duplicates}`);
-    console.log(`  unique QR codes ${seenQr.size}`);
-    console.log("--------------------------------------------------");
-    console.log("");
-}, 30000);
+// Server error
+server.on("error", (err) => {
+    console.error("TCP Server Error:", err.message);
+});
 
-process.on("SIGINT", () => {
-    console.log("\n\n=== FINAL TOTALS ===");
-    console.log(`  connections     : ${stats.connections}`);
-    console.log(`  records         : ${stats.received}`);
-    console.log(`  unique QR codes : ${seenQr.size}`);
-    console.log(`  bad JSON        : ${stats.badJson}`);
-    console.log(`  bad shape       : ${stats.badShape}`);
-    console.log(`  sentinel values : ${stats.sentinel}`);
-    console.log(`  NG / no QR      : ${stats.ngQr}`);
-    console.log(`  duplicate QR    : ${stats.duplicates}`);
-    if (WRITE_LOG) console.log(`  full log        : ${LOG_FILE}`);
-    console.log("");
-    process.exit(0);
+// Start server
+server.listen(PORT, HOST, () => {
+    console.log("========================================");
+    console.log("      TCP SERVER STARTED");
+    console.log("========================================");
+    console.log(`Host    : ${HOST}`);
+    console.log(`Port    : ${PORT}`);
+    console.log("Waiting for clients...");
+    console.log("========================================");
 });
