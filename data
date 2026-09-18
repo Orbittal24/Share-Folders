@@ -1,63 +1,186 @@
 const net = require("net");
 
 const HOST = "0.0.0.0";
-const PORT = 5000;
+const PORT = 9094;
 
 const clients = new Set();
+let clientCounter = 0;
+
+// ======================================================
+// HELPER FUNCTIONS
+// ======================================================
+
+function getTimestamp() {
+    return new Date().toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour12: false
+    });
+}
+
+function log(message) {
+    console.log(`[${getTimestamp()}] ${message}`);
+}
+
+function separator() {
+    console.log("------------------------------------------------------------");
+}
+
+// ======================================================
+// TCP SERVER
+// ======================================================
 
 const server = net.createServer((socket) => {
+
+    clientCounter++;
+
+    const clientId = clientCounter;
     const clientAddress = `${socket.remoteAddress}:${socket.remotePort}`;
 
-    console.log(`Client connected: ${clientAddress}`);
+    // Store client information on socket
+    socket.clientId = clientId;
+    socket.clientAddress = clientAddress;
 
     clients.add(socket);
 
-    // Receive data from client
+    // ==================================================
+    // CLIENT CONNECTED
+    // ==================================================
+
+    separator();
+
+    log(`CLIENT CONNECTED`);
+    console.log(`  Client ID   : ${clientId}`);
+    console.log(`  IP Address  : ${socket.remoteAddress}`);
+    console.log(`  Port        : ${socket.remotePort}`);
+    console.log(`  Total Client: ${clients.size}`);
+
+    separator();
+
+    // ==================================================
+    // RECEIVE DATA
+    // ==================================================
+
     socket.on("data", (data) => {
+
         const message = data.toString().trim();
 
         if (!message) {
             return;
         }
 
-        console.log(`Received from ${clientAddress}: ${message}`);
+        separator();
 
-        // Broadcast message to all other clients
+        log(`DATA RECEIVED`);
+
+        console.log(`  Client ID   : ${clientId}`);
+        console.log(`  Client       : ${clientAddress}`);
+        console.log(`  Message      : ${message}`);
+        console.log(`  Data Length  : ${data.length} bytes`);
+
+        console.log(`  Raw Data     :`, data);
+
+        separator();
+
+        // ==================================================
+        // BROADCAST MESSAGE
+        // ==================================================
+
+        let broadcastCount = 0;
+
         for (const client of clients) {
+
             if (client !== socket && !client.destroyed) {
+
                 client.write(message + "\n");
+
+                broadcastCount++;
             }
         }
+
+        log(`MESSAGE BROADCASTED TO ${broadcastCount} CLIENT(S)`);
+
+        separator();
     });
 
-    // Client disconnected
+    // ==================================================
+    // CLIENT DISCONNECTED
+    // ==================================================
+
     socket.on("close", () => {
-        console.log(`Client disconnected: ${clientAddress}`);
+
         clients.delete(socket);
+
+        separator();
+
+        log(`CLIENT DISCONNECTED`);
+
+        console.log(`  Client ID    : ${clientId}`);
+        console.log(`  Client       : ${clientAddress}`);
+        console.log(`  Total Client : ${clients.size}`);
+
+        separator();
     });
 
-    // Socket error
+    // ==================================================
+    // CLIENT ERROR
+    // ==================================================
+
     socket.on("error", (err) => {
-        console.error(`Client error ${clientAddress}:`, err.message);
+
+        console.error("");
+        console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        log(`CLIENT ERROR`);
+        console.error(`  Client ID : ${clientId}`);
+        console.error(`  Client    : ${clientAddress}`);
+        console.error(`  Error     : ${err.message}`);
+        console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+        console.error("");
+
         clients.delete(socket);
     });
 
-    // Optional welcome message
+    // ==================================================
+    // WELCOME MESSAGE
+    // ==================================================
+
     socket.write("CONNECTED_TO_TCP_SERVER\n");
+
 });
 
-// Server error
+// ======================================================
+// SERVER ERROR
+// ======================================================
+
 server.on("error", (err) => {
-    console.error("TCP Server Error:", err.message);
+
+    console.error("");
+    console.error("============================================================");
+    log(`TCP SERVER ERROR`);
+    console.error(`  Error : ${err.message}`);
+    console.error("============================================================");
+    console.error("");
 });
 
-// Start server
+// ======================================================
+// SERVER START
+// ======================================================
+
 server.listen(PORT, HOST, () => {
-    console.log("========================================");
-    console.log("      TCP SERVER STARTED");
-    console.log("========================================");
-    console.log(`Host    : ${HOST}`);
-    console.log(`Port    : ${PORT}`);
-    console.log("Waiting for clients...");
-    console.log("========================================");
+
+    console.log("");
+    console.log("============================================================");
+    console.log("                 TCP SERVER STARTED");
+    console.log("============================================================");
+
+    console.log(`  Start Time     : ${getTimestamp()}`);
+    console.log(`  Host           : ${HOST}`);
+    console.log(`  Port           : ${PORT}`);
+    console.log(`  Protocol       : TCP`);
+    console.log(`  Status         : RUNNING`);
+    console.log(`  Active Clients : ${clients.size}`);
+
+    console.log("============================================================");
+    console.log("  Waiting for client connections...");
+    console.log("============================================================");
+    console.log("");
 });
