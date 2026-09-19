@@ -1,235 +1,137 @@
-const WebSocket = require("ws");
+```javascript
+const {
+    OPCUAClient,
+    AttributeIds,
+    TimestampsToReturn
+} = require("node-opcua");
 
-const HOST = "0.0.0.0";
-const PORT = 9094;
+const endpointUrl = "opc.tcp://192.168.250.1:4840";
 
-const clients = new Set();
-let clientCounter = 0;
+// OPC UA tags
+const nodes = [
+    "MES_CellData1",
+    "MES_CellData2",
+    "MES_CellData3",
+    "MES_CellData4",
+    "MES_CellData5",
+    "MES_CellData6",
+    "MES_CellData7",
+    "MES_CellData8"
+];
 
-// ======================================================
-// HELPER FUNCTIONS
-// ======================================================
+async function main() {
 
-function getTimestamp() {
-    return new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        hour12: false
-    });
-}
+    try {
 
-function log(message) {
-    console.log(`[${getTimestamp()}] ${message}`);
-}
-
-function separator() {
-    console.log("------------------------------------------------------------");
-}
-
-// ======================================================
-// WEBSOCKET SERVER
-// ======================================================
-
-const wss = new WebSocket.Server({
-    host: HOST,
-    port: PORT
-});
-
-// ======================================================
-// CLIENT CONNECTED
-// ======================================================
-
-wss.on("connection", (socket, request) => {
-
-    clientCounter++;
-
-    const clientId = clientCounter;
-
-    const clientIP =
-        request.socket.remoteAddress || "UNKNOWN";
-
-    socket.clientId = clientId;
-    socket.clientIP = clientIP;
-
-    clients.add(socket);
-
-    separator();
-
-    log("CLIENT CONNECTED");
-
-    console.log(`  Client ID    : ${clientId}`);
-    console.log(`  IP Address   : ${clientIP}`);
-    console.log(`  Total Clients: ${clients.size}`);
-
-    separator();
-
-    // ==================================================
-    // RECEIVE MESSAGE
-    // ==================================================
-
-    socket.on("message", (data, isBinary) => {
-
-        let message;
-
-        if (isBinary) {
-            message = data.toString();
-        } else {
-            message = data.toString();
-        }
-
-        separator();
-
-        log("DATA RECEIVED");
-
-        console.log(`  Client ID    : ${clientId}`);
-        console.log(`  Client IP    : ${clientIP}`);
-        console.log(`  Data Length  : ${data.length} bytes`);
-
-        console.log("");
-        console.log("  Message:");
-        console.log(message);
-
-        separator();
-
-        // ==================================================
-        // BROADCAST
-        // ==================================================
-
-        let broadcastCount = 0;
-
-        for (const client of clients) {
-
-            if (
-                client !== socket &&
-                client.readyState === WebSocket.OPEN
-            ) {
-                client.send(message);
-                broadcastCount++;
+        // Create OPC UA client
+        const client = OPCUAClient.create({
+            endpoint_must_exist: false,
+            connectionStrategy: {
+                maxRetry: 5,
+                initialDelay: 2000,
+                maxDelay: 10000
             }
+        });
+
+        client.on("backoff", () => {
+            console.log("Retrying OPC UA connection...");
+        });
+
+        // Connect
+        console.log("Connecting to OPC UA server...");
+        await client.connect(endpointUrl);
+
+        console.log("Connected to OPC UA server");
+
+        // Create session
+        const session = await client.createSession();
+
+        console.log("OPC UA session created");
+
+        // Create subscription
+        const subscription = await session.createSubscription2({
+            requestedPublishingInterval: 1000,
+            requestedLifetimeCount: 100,
+            requestedMaxKeepAliveCount: 10,
+            maxNotificationsPerPublish: 100,
+            publishingEnabled: true,
+            priority: 10
+        });
+
+        subscription.on("started", () => {
+            console.log(
+                "Subscription started. ID =",
+                subscription.subscriptionId
+            );
+        });
+
+        subscription.on("keepalive", () => {
+            console.log("OPC UA KeepAlive");
+        });
+
+        subscription.on("terminated", () => {
+            console.log("Subscription terminated");
+        });
+
+        // Monitoring parameters
+        const parameters = {
+            samplingInterval: 100,
+            discardOldest: true,
+            queueSize: 100
+        };
+
+        // Monitor all tags
+        for (let i = 0; i < nodes.length; i++) {
+
+            const nodeId = `ns=4;s=${nodes[i]}`;
+
+            const itemToMonitor = {
+                nodeId: nodeId,
+                attributeId: AttributeIds.Value
+            };
+
+            const monitoredItem = await subscription.monitor(
+                itemToMonitor,
+                parameters,
+                TimestampsToReturn.Both
+            );
+
+            console.log(`Monitoring: ${nodes[i]}`);
+
+            monitoredItem.on("changed", (dataValue) => {
+
+                const value = dataValue.value.value;
+
+                console.log("\n=================================");
+                console.log(`TAG: ${nodes[i]}`);
+                console.log("VALUE:", value);
+                console.log("TYPE:", typeof value);
+                console.log("TIME:", new Date());
+                console.log("=================================");
+            });
         }
 
-        log(`MESSAGE BROADCASTED TO ${broadcastCount} CLIENT(S)`);
+        console.log("\nAll tags are being monitored...\n");
 
-        separator();
-    });
+        // Graceful shutdown
+        process.on("SIGINT", async () => {
 
-    // ==================================================
-    // CLIENT DISCONNECTED
-    // ==================================================
+            console.log("\nShutting down OPC UA client...");
 
-    socket.on("close", () => {
+            await subscription.terminate();
+            await session.close();
+            await client.disconnect();
 
-        clients.delete(socket);
+            console.log("Disconnected");
+            process.exit(0);
+        });
 
-        separator();
+    } catch (err) {
 
-        log("CLIENT DISCONNECTED");
+        console.error("OPC UA Error:", err);
 
-        console.log(`  Client ID    : ${clientId}`);
-        console.log(`  Client IP    : ${clientIP}`);
-        console.log(`  Total Clients: ${clients.size}`);
+    }
+}
 
-        separator();
-    });
-
-    // ==================================================
-    // CLIENT ERROR
-    // ==================================================
-
-    socket.on("error", (err) => {
-
-        console.error("");
-
-        console.error(
-            "============================================================"
-        );
-
-        log("CLIENT ERROR");
-
-        console.error(`  Client ID : ${clientId}`);
-        console.error(`  Client IP : ${clientIP}`);
-        console.error(`  Error     : ${err.message}`);
-
-        console.error(
-            "============================================================"
-        );
-
-        console.error("");
-
-        clients.delete(socket);
-    });
-
-    // ==================================================
-    // SEND CONNECTION ACK
-    // ==================================================
-
-    socket.send(
-        JSON.stringify({
-            type: "CONNECTION_ACK",
-            status: "CONNECTED",
-            client_id: clientId,
-            message: "Connected to WebSocket server"
-        })
-    );
-});
-
-// ======================================================
-// SERVER ERROR
-// ======================================================
-
-wss.on("error", (err) => {
-
-    console.error("");
-
-    console.error(
-        "============================================================"
-    );
-
-    log("WEBSOCKET SERVER ERROR");
-
-    console.error(`  Error : ${err.message}`);
-
-    console.error(
-        "============================================================"
-    );
-
-    console.error("");
-});
-
-// ======================================================
-// SERVER START
-// ======================================================
-
-wss.on("listening", () => {
-
-    console.log("");
-
-    console.log(
-        "============================================================"
-    );
-
-    console.log(
-        "              WEBSOCKET SERVER STARTED"
-    );
-
-    console.log(
-        "============================================================"
-    );
-
-    console.log(`  Start Time     : ${getTimestamp()}`);
-    console.log(`  Host           : ${HOST}`);
-    console.log(`  Port           : ${PORT}`);
-    console.log(`  Protocol       : WebSocket`);
-    console.log(`  Status         : RUNNING`);
-    console.log(`  Active Clients : ${clients.size}`);
-
-    console.log(
-        "============================================================"
-    );
-
-    console.log("  Waiting for WebSocket clients...");
-    console.log(
-        "============================================================"
-    );
-
-    console.log("");
-});
+main();
+```
