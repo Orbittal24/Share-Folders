@@ -1242,35 +1242,44 @@ END
 
 // module_count - 3 month data
 
-WITH AllCompletionData AS
+DECLARE @SQL NVARCHAR(MAX);
+
+SELECT @SQL =
+    STRING_AGG(
+        CAST(
+        '
+        SELECT
+            pack_no,
+            pack_id,
+            completion_time
+        FROM [taco_treceability_station_status_history].[dbo].['
+        + TABLE_NAME + ']
+        WHERE station_name = ''voltage_ir_status''
+        '
+        AS NVARCHAR(MAX)),
+        ' UNION ALL '
+    )
+FROM [taco_treceability_station_status_history].INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME LIKE 'module_completion_%'
+  AND (
+        TABLE_NAME LIKE 'module_completion_%_06_2026'
+        OR TABLE_NAME LIKE 'module_completion_%_07_2026'
+        OR TABLE_NAME LIKE 'module_completion_%_08_2026'
+      );
+
+
+IF @SQL IS NULL
+BEGIN
+    PRINT 'No matching tables found.';
+    RETURN;
+END;
+
+
+SET @SQL = '
+
+WITH AllModuleCompletion AS
 (
-    SELECT
-        pack_no,
-        pack_id,
-        completion_time,
-        station_name
-    FROM [taco_treceability_station_status_history].[dbo].[module_completion_06_2026]
-    WHERE station_name = 'voltage_ir_status'
-
-    UNION ALL
-
-    SELECT
-        pack_no,
-        pack_id,
-        completion_time,
-        station_name
-    FROM [taco_treceability_station_status_history].[dbo].[module_completion_07_2026]
-    WHERE station_name = 'voltage_ir_status'
-
-    UNION ALL
-
-    SELECT
-        pack_no,
-        pack_id,
-        completion_time,
-        station_name
-    FROM [taco_treceability_station_status_history].[dbo].[module_completion_08_2026]
-    WHERE station_name = 'voltage_ir_status'
+    ' + @SQL + '
 ),
 
 LatestPackCompletion AS
@@ -1279,7 +1288,7 @@ LatestPackCompletion AS
         pack_no,
         pack_id,
         MAX(completion_time) AS LatestCompletionTime
-    FROM AllCompletionData
+    FROM AllModuleCompletion
     GROUP BY
         pack_no,
         pack_id
@@ -1303,7 +1312,7 @@ ModuleCounts AS
         pack_id,
         DATEDIFF(HOUR, 0, completion_time) AS HourBucket,
         COUNT(*) AS ModuleCount
-    FROM AllCompletionData
+    FROM AllModuleCompletion
     GROUP BY
         pack_id,
         DATEDIFF(HOUR, 0, completion_time)
@@ -1317,7 +1326,7 @@ SELECT
         DATEADD(HOUR, x.HourBucket, 0),
         108
     )
-    + ' - ' +
+    + '' - '' +
     CONVERT(
         VARCHAR(5),
         DATEADD(
@@ -1360,3 +1369,7 @@ GROUP BY
 ORDER BY
     x.HourBucket,
     mp.Pack_Name;
+';
+
+
+EXEC sp_executesql @SQL;
