@@ -1198,27 +1198,28 @@ EXEC sp_executesql @SQL, N'@CellQR NVARCHAR(100)', @CellQR;
 
 /////////////////////////// 3 month data query
 
-DECLARE @SQL NVARCHAR(MAX) = '';
+DECLARE @SQL NVARCHAR(MAX);
 
-SELECT @SQL = STRING_AGG(
-'
-SELECT
-    mp.Pack_Name,
-    mm.Module_Name,
-    mch.pack_no,
-    mch.line_id,
-    mch.completion_time
-FROM [taco_treceability_station_status_history].[dbo].['
-    + TABLE_NAME + '] mch
-LEFT JOIN [taco_treceability_master].[taco_treceability].[master_pack] mp
-    ON mch.pack_id = mp.Pack_ID
-LEFT JOIN [taco_treceability_master].[taco_treceability].[master_module] mm
-    ON mch.module_id = mm.Module_ID
-WHERE mch.station_name = ''voltage_ir_status''
-',
-'
-UNION ALL
-')
+SELECT @SQL =
+    STRING_AGG(
+        CAST(
+        '
+        SELECT
+            mp.Pack_Name,
+            mm.Module_Name,
+            mch.pack_no,
+            mch.line_id,
+            mch.completion_time
+        FROM [taco_treceability_station_status_history].[dbo].['
+        + TABLE_NAME + '] mch
+        LEFT JOIN [taco_treceability_master].[taco_treceability].[master_pack] mp
+            ON mch.pack_id = mp.Pack_ID
+        LEFT JOIN [taco_treceability_master].[taco_treceability].[master_module] mm
+            ON mch.module_id = mm.Module_ID
+        WHERE mch.station_name = ''voltage_ir_status''
+        ' AS NVARCHAR(MAX)),
+        ' UNION ALL '
+    )
 FROM [taco_treceability_station_status_history].INFORMATION_SCHEMA.TABLES
 WHERE TABLE_NAME LIKE 'module_completion_%'
   AND (
@@ -1227,7 +1228,14 @@ WHERE TABLE_NAME LIKE 'module_completion_%'
         OR TABLE_NAME LIKE 'module_completion_%_08_2026'
       );
 
-SET @SQL = @SQL + '
-ORDER BY completion_time DESC;';
+IF @SQL IS NOT NULL
+BEGIN
+    SET @SQL = @SQL + '
+    ORDER BY completion_time DESC;';
 
-EXEC sp_executesql @SQL;
+    EXEC sp_executesql @SQL;
+END
+ELSE
+BEGIN
+    PRINT 'No matching tables found.';
+END
