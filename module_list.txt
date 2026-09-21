@@ -1194,3 +1194,51 @@ WHERE t.TABLE_TYPE = 'BASE TABLE'
     AND c.COLUMN_NAME = 'pack_id';  -- Only tables that have pack_id column
 
 EXEC sp_executesql @SQL, N'@CellQR NVARCHAR(100)', @CellQR;
+
+
+/////////////////////////// 3 month data query
+
+SELECT
+    mp.Pack_Name,
+    mm.Module_Name,
+    mch.pack_no,
+    mch.line_id,
+    mch.completion_time
+FROM [taco_treceability_station_status_history].[dbo].[module_completion_06_2026] mch
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_pack] mp
+    ON mch.pack_id = mp.Pack_ID
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_module] mm
+    ON mch.module_id = mm.Module_ID
+WHERE mch.station_name = 'voltage_ir_status'
+
+UNION ALL
+
+SELECT
+    mp.Pack_Name,
+    mm.Module_Name,
+    mch.pack_no,
+    mch.line_id,
+    mch.completion_time
+FROM [taco_treceability_station_status_history].[dbo].[module_completion_07_2026] mch
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_pack] mp
+    ON mch.pack_id = mp.Pack_ID
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_module] mm
+    ON mch.module_id = mm.Module_ID
+WHERE mch.station_name = 'voltage_ir_status'
+
+UNION ALL
+
+SELECT
+    mp.Pack_Name,
+    mm.Module_Name,
+    mch.pack_no,
+    mch.line_id,
+    mch.completion_time
+FROM [taco_treceability_station_status_history].[dbo].[module_completion_08_2026] mch
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_pack] mp
+    ON mch.pack_id = mp.Pack_ID
+LEFT JOIN [taco_treceability_master].[taco_treceability].[master_module] mm
+    ON mch.module_id = mm.Module_ID
+WHERE mch.station_name = 'voltage_ir_status'
+
+ORDER BY completion_time DESC;
