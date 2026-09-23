@@ -14,8 +14,10 @@ r = redis.StrictRedis(
 
 TARGET_PREFIX = "2026-01"    # "2026-01" = all of Jan 2026, "2026-01-15" = one day
 SCAN_COUNT = 5000
-DRY_RUN = True               # True = only list, False = actually delete
+DRY_RUN = False              # True = only list, False = actually delete
 PRINT_EACH = True            # print every cellqr to console (set False if the list is huge)
+
+print("Redis version:", r.info("server")["redis_version"])
 
 mode = "dryrun" if DRY_RUN else "deleted"
 csv_file = f"cells_{TARGET_PREFIX}_{mode}_{datetime.now():%Y%m%d_%H%M%S}.csv"
@@ -56,8 +58,9 @@ with open(csv_file, "w", newline="", encoding="utf-8") as f:
 
             if to_delete:
                 if not DRY_RUN:
-                    r.unlink(*to_delete)
-                matched += len(to_delete)
+                    matched += r.delete(*to_delete)   # DEL works on Redis 3.x (UNLINK needs 4.0+)
+                else:
+                    matched += len(to_delete)
                 f.flush()
 
             print(f"scanned={scanned}  {'would delete' if DRY_RUN else 'deleted'}={matched}  skipped={skipped}")
