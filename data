@@ -1,755 +1,999 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>Pack Module Barcode Checker</title>
-
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            background: #f4f6f9;
-            color: #222;
-        }
-
-        .container {
-            width: 95%;
-            max-width: 1200px;
-            margin: 30px auto;
-            background: white;
-            padding: 25px;
-            border-radius: 10px;
-            box-shadow: 0 3px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        h1 {
-            margin-top: 0;
-            text-align: center;
-            color: #1f4e78;
-        }
-
-        .form-row {
-            display: flex;
-            gap: 20px;
-            align-items: flex-start;
-            margin-top: 25px;
-        }
-
-        .form-group {
-            flex: 1;
-            position: relative;
-        }
-
-        label {
-            display: block;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
-
-        input,
-        select,
-        button {
-            width: 100%;
-            height: 42px;
-            padding: 8px 12px;
-            font-size: 15px;
-            border-radius: 5px;
-            border: 1px solid #bbb;
-        }
-
-        input:focus,
-        select:focus {
-            outline: none;
-            border-color: #1f4e78;
-        }
-
-        .error {
-            color: #d60000;
-            font-size: 13px;
-            margin-top: 5px;
-            min-height: 18px;
-        }
-
-        .button-container {
-            width: 120px;
-            margin-top: 25px;
-        }
-
-        button {
-            border: none;
-            background: #1f4e78;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-        button:hover {
-            background: #163b5c;
-        }
-
-        button:disabled {
-            background: #999;
-            cursor: not-allowed;
-        }
-
-        .message {
-            margin-top: 20px;
-            padding: 12px;
-            border-radius: 5px;
-            display: none;
-        }
-
-        .success {
-            background: #dff5e1;
-            color: #146c2e;
-            border: 1px solid #9ad5a5;
-        }
-
-        .failure {
-            background: #ffe0e0;
-            color: #a00000;
-            border: 1px solid #e0a0a0;
-        }
-
-        .info {
-            background: #e5f1ff;
-            color: #13558a;
-            border: 1px solid #9cc7ee;
-        }
-
-        .results {
-            margin-top: 30px;
-        }
-
-        .results-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .results-header h2 {
-            margin: 0;
-            color: #1f4e78;
-        }
-
-        .table-container {
-            overflow-x: auto;
-            border: 1px solid #ddd;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 900px;
-        }
-
-        th,
-        td {
-            padding: 10px;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-
-        th {
-            background: #1f4e78;
-            color: white;
-        }
-
-        tr:nth-child(even) {
-            background: #f7f7f7;
-        }
-
-        .changed {
-            color: #008000;
-            font-weight: bold;
-        }
-
-        .no-data {
-            text-align: center;
-            padding: 20px;
-            color: #777;
-        }
-
-        .loading {
-            display: none;
-            text-align: center;
-            margin-top: 15px;
-            font-weight: bold;
-            color: #1f4e78;
-        }
-
-        .pack-info {
-            display: flex;
-            gap: 20px;
-            margin-top: 20px;
-            padding: 15px;
-            background: #f1f5f9;
-            border-radius: 6px;
-        }
+const express = require("express");
+const sql = require("mssql");
+const path = require("path");
 
-        .pack-info div {
-            flex: 1;
-        }
+const app = express();
 
-        .pack-info span {
-            font-weight: bold;
-            color: #1f4e78;
-        }
-
-        @media (max-width: 700px) {
-            .form-row {
-                flex-direction: column;
-            }
-
-            .button-container {
-                width: 100%;
-                margin-top: 0;
-            }
+const PORT = 3000;
 
-            .pack-info {
-                flex-direction: column;
-                gap: 8px;
-            }
-        }
-    </style>
-</head>
 
-<body>
+// ============================================================
+// MIDDLEWARE
+// ============================================================
 
-<div class="container">
+app.use(express.json());
 
-    <h1>Pack Module Barcode Checker</h1>
+app.use(express.urlencoded({
+    extended: true
+}));
 
-    <div class="form-row">
 
-        <!-- PACK NO -->
-        <div class="form-group">
+// ============================================================
+// SERVE FRONTEND
+// ============================================================
 
-            <label for="packNo">
-                Pack No <span style="color:red">*</span>
-            </label>
+app.use(express.static(__dirname));
 
-            <input
-                type="text"
-                id="packNo"
-                maxlength="6"
-                inputmode="numeric"
-                placeholder="Enter 6 digit Pack No"
-                autocomplete="off"
-            >
 
-            <div id="packNoError" class="error"></div>
+// ============================================================
+// SQL CONFIGURATION
+// ============================================================
 
-        </div>
+const baseSqlConfig = {
 
+    user: "user_mis",
 
-        <!-- PACK NAME -->
-        <div class="form-group">
+    password: "admin@123",
 
-            <label for="packName">
-                Pack Name <span style="color:red">*</span>
-            </label>
+    server: "10.9.4.29",
 
-            <select id="packName">
-                <option value="">Loading Pack Names...</option>
-            </select>
+    port: 1433,
 
-            <div id="packNameError" class="error"></div>
+    options: {
 
-        </div>
+        instanceName: "PROD_SQL_2026",
 
+        encrypt: false,
 
-        <!-- OK BUTTON -->
-        <div class="button-container">
+        trustServerCertificate: true
 
-            <button id="okButton" onclick="processPack()">
-                OK
-            </button>
+    },
 
-        </div>
+    pool: {
 
-    </div>
+        max: 10,
 
+        min: 0,
 
-    <div id="loading" class="loading">
-        Processing... Please wait.
-    </div>
+        idleTimeoutMillis: 30000
 
+    }
 
-    <div id="message" class="message"></div>
+};
 
 
-    <!-- PACK INFORMATION -->
+// ============================================================
+// DATABASE NAMES
+// ============================================================
 
-    <div id="packInfo" class="pack-info" style="display:none;">
+const DATABASES = {
 
-        <div>
-            Pack ID:
-            <span id="displayPackId"></span>
-        </div>
+    MASTER: "taco_treceability_master",
 
-        <div>
-            Line ID:
-            <span id="displayLineId"></span>
-        </div>
+    CELL_SCANNING: "cell_scanning_master",
 
-        <div>
-            Line No:
-            <span id="displayLineNo"></span>
-        </div>
+    COMPLETED_HISTORY: "completed_packs_history"
 
-        <div>
-            Pack Creation Date:
-            <span id="displayCreationDate"></span>
-        </div>
+};
 
-    </div>
 
+// ============================================================
+// CONNECTION POOLS
+// ============================================================
 
-    <!-- RESULTS -->
+let masterPool = null;
 
-    <div class="results">
+let cellScanningPool = null;
 
-        <div class="results-header">
-            <h2>Module Barcode Results</h2>
-        </div>
+let completedHistoryPool = null;
 
-        <div class="table-container">
 
-            <table>
+// ============================================================
+// CREATE DATABASE CONFIG
+// ============================================================
 
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>History Table</th>
-                        <th>Module Barcode</th>
-                        <th>Modified Barcode</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
+function getDbConfig(databaseName) {
 
-                <tbody id="resultsBody">
+    return {
 
-                    <tr>
-                        <td colspan="5" class="no-data">
-                            No data available
-                        </td>
-                    </tr>
+        ...baseSqlConfig,
 
-                </tbody>
+        database: databaseName
 
-            </table>
+    };
 
-        </div>
+}
 
-    </div>
 
-</div>
+// ============================================================
+// GET MASTER DB CONNECTION
+// ============================================================
 
+async function getMasterPool() {
 
-<script>
+    if (masterPool && masterPool.connected) {
 
-    const API_BASE = "";
+        return masterPool;
 
+    }
 
-    // ============================================================
-    // LOAD PACK NAMES
-    // ============================================================
 
-    async function loadPackNames() {
+    masterPool =
+        await new sql.ConnectionPool(
+            getDbConfig(DATABASES.MASTER)
+        ).connect();
 
-        const select = document.getElementById("packName");
+
+    masterPool.on("error", err => {
+
+        console.error(
+            "Master DB Pool Error:",
+            err.message
+        );
+
+    });
+
+
+    console.log(
+        "Connected to:",
+        DATABASES.MASTER
+    );
+
+
+    return masterPool;
+}
+
+
+// ============================================================
+// GET CELL SCANNING DB CONNECTION
+// ============================================================
+
+async function getCellScanningPool() {
+
+    if (
+        cellScanningPool &&
+        cellScanningPool.connected
+    ) {
+
+        return cellScanningPool;
+
+    }
+
+
+    cellScanningPool =
+        await new sql.ConnectionPool(
+            getDbConfig(DATABASES.CELL_SCANNING)
+        ).connect();
+
+
+    cellScanningPool.on("error", err => {
+
+        console.error(
+            "Cell Scanning DB Pool Error:",
+            err.message
+        );
+
+    });
+
+
+    console.log(
+        "Connected to:",
+        DATABASES.CELL_SCANNING
+    );
+
+
+    return cellScanningPool;
+}
+
+
+// ============================================================
+// GET COMPLETED HISTORY DB CONNECTION
+// ============================================================
+
+async function getCompletedHistoryPool() {
+
+    if (
+        completedHistoryPool &&
+        completedHistoryPool.connected
+    ) {
+
+        return completedHistoryPool;
+
+    }
+
+
+    completedHistoryPool =
+        await new sql.ConnectionPool(
+            getDbConfig(DATABASES.COMPLETED_HISTORY)
+        ).connect();
+
+
+    completedHistoryPool.on("error", err => {
+
+        console.error(
+            "Completed History DB Pool Error:",
+            err.message
+        );
+
+    });
+
+
+    console.log(
+        "Connected to:",
+        DATABASES.COMPLETED_HISTORY
+    );
+
+
+    return completedHistoryPool;
+}
+
+
+// ============================================================
+// GET PACK NAMES
+// ============================================================
+
+app.get(
+    "/api/pack-names",
+    async (req, res) => {
 
         try {
 
-            const response = await fetch(
-                `${API_BASE}/api/pack-names`
-            );
+            const pool =
+                await getMasterPool();
 
-            const result = await response.json();
 
-            if (!response.ok) {
-                throw new Error(result.message || "Failed to load Pack Names");
-            }
+            const result =
+                await pool
+                    .request()
+                    .query(`
 
-            select.innerHTML =
-                `<option value="">Select Pack Name</option>`;
+                        SELECT
+                            Pack_ID,
+                            Pack_Name,
+                            Total_Module_Count
 
-            result.data.forEach(pack => {
+                        FROM taco_treceability.master_pack
 
-                const option = document.createElement("option");
+                        ORDER BY Pack_Name
 
-                option.value = pack.Pack_ID;
+                    `);
 
-                option.textContent = pack.Pack_Name;
 
-                option.dataset.totalModules =
-                    pack.Total_Module_Count;
+            res.json({
 
-                select.appendChild(option);
+                success: true,
+
+                data: result.recordset
 
             });
 
+
         } catch (error) {
 
-            console.error(error);
-
-            select.innerHTML =
-                `<option value="">Failed to load Pack Names</option>`;
-
-            showMessage(
-                "Failed to load Pack Names. Please check backend/database connection.",
-                "failure"
+            console.error(
+                "Pack Name Error:",
+                error
             );
+
+
+            res.status(500).json({
+
+                success: false,
+
+                message:
+                    "Failed to fetch Pack Names.",
+
+                error:
+                    error.message
+
+            });
+
         }
+
     }
+);
 
 
-    // ============================================================
-    // PACK NUMBER VALIDATION
-    // ============================================================
+// ============================================================
+// PROCESS PACK
+// ============================================================
 
-    document
-        .getElementById("packNo")
-        .addEventListener("input", function () {
-
-            // Only numbers
-            this.value = this.value.replace(/\D/g, "");
-
-            const error =
-                document.getElementById("packNoError");
-
-            if (this.value.length === 0) {
-
-                error.textContent = "";
-
-            } else if (this.value.length < 6) {
-
-                error.textContent =
-                    "Pack No must contain exactly 6 digits.";
-
-            } else {
-
-                error.textContent = "";
-            }
-
-        });
-
-
-    // ============================================================
-    // PACK NAME CHANGE
-    // ============================================================
-
-    document
-        .getElementById("packName")
-        .addEventListener("change", function () {
-
-            document.getElementById("packNameError").textContent = "";
-
-        });
-
-
-    // ============================================================
-    // PROCESS PACK
-    // ============================================================
-
-    async function processPack() {
-
-        const packNo =
-            document.getElementById("packNo").value.trim();
-
-        const packSelect =
-            document.getElementById("packName");
-
-        const packId =
-            packSelect.value;
-
-        const packName =
-            packSelect.options[packSelect.selectedIndex]?.text || "";
-
-
-        // --------------------------------------------------------
-        // VALIDATION
-        // --------------------------------------------------------
-
-        let valid = true;
-
-
-        if (!/^\d{6}$/.test(packNo)) {
-
-            document.getElementById("packNoError").textContent =
-                "Pack No must contain exactly 6 digits.";
-
-            valid = false;
-
-        } else {
-
-            document.getElementById("packNoError").textContent = "";
-        }
-
-
-        if (!packId) {
-
-            document.getElementById("packNameError").textContent =
-                "Please select a Pack Name.";
-
-            valid = false;
-
-        } else {
-
-            document.getElementById("packNameError").textContent = "";
-        }
-
-
-        if (!valid) {
-            return;
-        }
-
-
-        // --------------------------------------------------------
-        // UI
-        // --------------------------------------------------------
-
-        const button =
-            document.getElementById("okButton");
-
-        const loading =
-            document.getElementById("loading");
-
-        button.disabled = true;
-
-        loading.style.display = "block";
-
-        hideMessage();
-
-        document.getElementById("packInfo").style.display = "none";
-
-        document.getElementById("resultsBody").innerHTML =
-            `<tr>
-                <td colspan="5" class="no-data">
-                    Processing...
-                </td>
-            </tr>`;
-
+app.post(
+    "/api/process-pack",
+    async (req, res) => {
 
         try {
 
-            const response = await fetch(
-                `${API_BASE}/api/process-pack`,
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-
-                    body: JSON.stringify({
-
-                        packNo: packNo,
-
-                        packId: packId,
-
-                        packName: packName
-
-                    })
-                }
-            );
+            const {
+                packNo,
+                packId
+            } = req.body;
 
 
-            const result = await response.json();
+            // ------------------------------------------------
+            // VALIDATION
+            // ------------------------------------------------
 
+            if (!packNo) {
 
-            if (!response.ok) {
+                return res.status(400).json({
 
-                throw new Error(
-                    result.message || "Processing failed."
-                );
+                    success: false,
+
+                    message:
+                        "Pack No is required."
+
+                });
+
             }
 
 
-            // ----------------------------------------------------
-            // SHOW PACK INFORMATION
-            // ----------------------------------------------------
+            if (!/^\d{6}$/.test(String(packNo))) {
 
-            document.getElementById("displayPackId").textContent =
-                result.packId || "";
+                return res.status(400).json({
 
-            document.getElementById("displayLineId").textContent =
-                result.lineId || "";
+                    success: false,
 
-            document.getElementById("displayLineNo").textContent =
-                result.lineNo || "";
+                    message:
+                        "Pack No must contain exactly 6 digits."
 
-            document.getElementById("displayCreationDate").textContent =
-                result.packCreationDate || "";
+                });
 
-            document.getElementById("packInfo").style.display =
-                "flex";
+            }
 
 
-            // ----------------------------------------------------
-            // SHOW RESULTS
-            // ----------------------------------------------------
+            if (!packId) {
 
-            displayResults(result.records || []);
+                return res.status(400).json({
+
+                    success: false,
+
+                    message:
+                        "Pack ID is required."
+
+                });
+
+            }
 
 
-            showMessage(
-                result.message || "Processing completed successfully.",
-                "success"
+            // ------------------------------------------------
+            // STEP 1
+            // Pack_duplicate_checker
+            // ------------------------------------------------
+
+            const cellPool =
+                await getCellScanningPool();
+
+
+            const duplicateResult =
+                await cellPool
+                    .request()
+
+                    .input(
+                        "PackNo",
+                        sql.VarChar,
+                        String(packNo)
+                    )
+
+                    .input(
+                        "PackID",
+                        sql.VarChar,
+                        String(packId)
+                    )
+
+                    .query(`
+
+                        SELECT
+                            Line_Id,
+                            pack_creation_Date
+
+                        FROM Pack_duplicate_checker
+
+                        WHERE Pack_No = @PackNo
+
+                        AND Pack_ID = @PackID
+
+                    `);
+
+
+            if (
+                duplicateResult.recordset.length === 0
+            ) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        "No record found in Pack_duplicate_checker for the given Pack No and Pack ID."
+
+                });
+
+            }
+
+
+            // ------------------------------------------------
+            // TAKE ALL MATCHING RECORDS
+            // ------------------------------------------------
+
+            const duplicateRecords =
+                duplicateResult.recordset;
+
+
+            // ------------------------------------------------
+            // USE FIRST RECORD
+            // ------------------------------------------------
+
+            const duplicateRecord =
+                duplicateRecords[0];
+
+
+            const lineId =
+                duplicateRecord.Line_Id;
+
+
+            // ------------------------------------------------
+            // EXTRACT YYYY_MM_DD
+            // ------------------------------------------------
+
+            const rawCreationDate =
+                duplicateRecord.pack_creation_Date;
+
+
+            let packCreationDate;
+
+
+            if (rawCreationDate instanceof Date) {
+
+                const year =
+                    rawCreationDate
+                        .getFullYear();
+
+                const month =
+                    String(
+                        rawCreationDate.getMonth() + 1
+                    ).padStart(2, "0");
+
+                const day =
+                    String(
+                        rawCreationDate.getDate()
+                    ).padStart(2, "0");
+
+
+                packCreationDate =
+                    `${year}_${month}_${day}`;
+
+            } else {
+
+                const dateString =
+                    String(rawCreationDate);
+
+
+                const match =
+                    dateString.match(
+                        /(\d{4})[-_](\d{2})[-_](\d{2})/
+                    );
+
+
+                if (!match) {
+
+                    throw new Error(
+                        "Unable to extract pack_creation_Date."
+                    );
+
+                }
+
+
+                packCreationDate =
+                    `${match[1]}_${match[2]}_${match[3]}`;
+
+            }
+
+
+            console.log(
+                "Pack Creation Date:",
+                packCreationDate
             );
+
+
+            // ------------------------------------------------
+            // STEP 2
+            // GET LINE NO
+            // ------------------------------------------------
+
+            const masterPool =
+                await getMasterPool();
+
+
+            const lineResult =
+                await masterPool
+
+                    .request()
+
+                    .input(
+                        "LineId",
+                        sql.VarChar,
+                        String(lineId)
+                    )
+
+                    .query(`
+
+                        SELECT
+                            line_no
+
+                        FROM taco_treceability.master_line
+
+                        WHERE Srno = @LineId
+
+                    `);
+
+
+            if (
+                lineResult.recordset.length === 0
+            ) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        `No line found for Line_Id ${lineId}.`
+
+                });
+
+            }
+
+
+            const lineNo =
+                lineResult.recordset[0].line_no;
+
+
+            console.log(
+                "Line ID:",
+                lineId
+            );
+
+
+            console.log(
+                "Line No:",
+                lineNo
+            );
+
+
+            // ------------------------------------------------
+            // STEP 3
+            // FIND HISTORY TABLES
+            // ------------------------------------------------
+
+            const historyPool =
+                await getCompletedHistoryPool();
+
+
+            const tableResult =
+                await historyPool
+
+                    .request()
+
+                    .input(
+                        "CreationDate",
+                        sql.VarChar,
+                        packCreationDate
+                    )
+
+                    .query(`
+
+                        SELECT
+                            TABLE_NAME
+
+                        FROM INFORMATION_SCHEMA.TABLES
+
+                        WHERE TABLE_TYPE = 'BASE TABLE'
+
+                        AND TABLE_NAME LIKE
+                            'pack_history_' +
+                            @CreationDate +
+                            '_%'
+
+                    `);
+
+
+            let historyTables =
+                tableResult.recordset
+                    .map(row => row.TABLE_NAME);
+
+
+            // ------------------------------------------------
+            // SAFETY CHECK TABLE NAME
+            // ------------------------------------------------
+
+            historyTables =
+                historyTables.filter(
+                    tableName => {
+
+                        const parts =
+                            tableName.split("_");
+
+
+                        /*
+                            pack_history_2026_03_14_2026_03_15
+
+                            position:
+                            0 = pack
+                            1 = history
+                            2 = 2026
+                            3 = 03
+                            4 = 14
+                            5 = 2026
+                            6 = 03
+                            7 = 15
+                        */
+
+                        if (parts.length < 8) {
+
+                            return false;
+
+                        }
+
+
+                        const dateAtPosition2 =
+                            `${parts[2]}_${parts[3]}_${parts[4]}`;
+
+
+                        return (
+                            dateAtPosition2 ===
+                            packCreationDate
+                        );
+
+                    }
+                );
+
+
+            console.log(
+                "History Tables:",
+                historyTables
+            );
+
+
+            if (historyTables.length === 0) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        `No pack history table found for ${packCreationDate}.`
+
+                });
+
+            }
+
+
+            // ------------------------------------------------
+            // STEP 4
+            // SEARCH ALL HISTORY TABLES
+            // ------------------------------------------------
+
+            const allRecords = [];
+
+
+            for (
+                const tableName of historyTables
+            ) {
+
+                /*
+                    Table names cannot be SQL parameters,
+                    therefore validate them before inserting
+                    into the SQL statement.
+                */
+
+                if (
+                    !/^pack_history_\d{4}_\d{2}_\d{2}_\d{4}_\d{2}_\d{2}$/
+                        .test(tableName)
+                ) {
+
+                    console.log(
+                        "Skipping invalid table:",
+                        tableName
+                    );
+
+                    continue;
+
+                }
+
+
+                const query = `
+
+                    SELECT
+                        sr_no,
+                        pack_name,
+                        pack_id,
+                        line_id,
+                        pack_no,
+                        module_barcode,
+                        module_number,
+                        module_name,
+                        cellqr,
+                        module_status,
+                        cellqr_status,
+                        cell_ir,
+                        cell_voltage,
+                        cell_kvalue,
+                        cell_negativeVolatge,
+                        cell_class_grade,
+                        cell_capacity,
+                        cell_thickness,
+                        cell_laserStatus,
+                        cell_count,
+                        cell_batch,
+                        cell_plantCode,
+                        ocv_scanned_time,
+                        ocv_mc_no,
+                        current_dateTime,
+                        updated_dateTime
+
+                    FROM
+                        [${tableName}]
+
+                    WHERE
+                        pack_id = @PackID
+
+                    AND
+                        pack_no = @PackNo
+
+                    ORDER BY
+                        sr_no
+
+                `;
+
+
+                const result =
+                    await historyPool
+
+                        .request()
+
+                        .input(
+                            "PackID",
+                            sql.VarChar,
+                            String(packId)
+                        )
+
+                        .input(
+                            "PackNo",
+                            sql.VarChar,
+                            String(packNo)
+                        )
+
+                        .query(query);
+
+
+                for (
+                    const row of result.recordset
+                ) {
+
+                    const moduleBarcode =
+                        row.module_barcode == null
+                            ? ""
+                            : String(row.module_barcode);
+
+
+                    // --------------------------------------------
+                    // REPLACE ONLY "None"
+                    // --------------------------------------------
+
+                    const modifiedBarcode =
+                        moduleBarcode.replace(
+                            /None/g,
+                            String(lineNo)
+                        );
+
+
+                    allRecords.push({
+
+                        tableName,
+
+                        srNo:
+                            row.sr_no,
+
+                        moduleBarcode,
+
+                        modifiedBarcode,
+
+                        moduleNumber:
+                            row.module_number,
+
+                        moduleName:
+                            row.module_name,
+
+                        lineId:
+                            row.line_id
+
+                    });
+
+                }
+
+            }
+
+
+            // ------------------------------------------------
+            // RESPONSE
+            // ------------------------------------------------
+
+            const replacedCount =
+                allRecords.filter(
+                    record =>
+                        record.moduleBarcode !==
+                        record.modifiedBarcode
+                ).length;
+
+
+            res.json({
+
+                success: true,
+
+                message:
+                    allRecords.length > 0
+
+                        ? `${allRecords.length} module barcode record(s) found. ${replacedCount} barcode(s) contained "None".`
+
+                        : "No matching module barcode records found.",
+
+                packNo,
+
+                packId,
+
+                lineId,
+
+                lineNo,
+
+                packCreationDate,
+
+                historyTables,
+
+                records:
+                    allRecords
+
+            });
 
 
         } catch (error) {
 
-            console.error(error);
-
-            document.getElementById("resultsBody").innerHTML =
-                `<tr>
-                    <td colspan="5" class="no-data">
-                        No data available
-                    </td>
-                </tr>`;
-
-
-            showMessage(
-                error.message || "Something went wrong.",
-                "failure"
+            console.error(
+                "Process Pack Error:",
+                error
             );
 
-        } finally {
 
-            button.disabled = false;
+            res.status(500).json({
 
-            loading.style.display = "none";
-        }
-    }
+                success: false,
 
+                message:
+                    "Error while processing pack.",
 
-    // ============================================================
-    // DISPLAY RESULTS
-    // ============================================================
+                error:
+                    error.message
 
-    function displayResults(records) {
+            });
 
-        const tbody =
-            document.getElementById("resultsBody");
-
-
-        if (!records || records.length === 0) {
-
-            tbody.innerHTML =
-                `<tr>
-                    <td colspan="5" class="no-data">
-                        No module barcode records found.
-                    </td>
-                </tr>`;
-
-            return;
         }
 
-
-        tbody.innerHTML = "";
-
-
-        records.forEach((record, index) => {
-
-            const row =
-                document.createElement("tr");
+    }
+);
 
 
-            const changed =
-                record.moduleBarcode !==
-                record.modifiedBarcode;
+// ============================================================
+// DEFAULT ROUTE
+// ============================================================
+
+app.get("/", (req, res) => {
+
+    res.sendFile(
+        path.join(
+            __dirname,
+            "index.html"
+        )
+    );
+
+});
 
 
-            row.innerHTML = `
+// ============================================================
+// START SERVER
+// ============================================================
 
-                <td>${index + 1}</td>
+async function startServer() {
 
-                <td>${escapeHtml(record.tableName || "")}</td>
+    try {
 
-                <td>${escapeHtml(record.moduleBarcode || "")}</td>
+        // Test master connection
+        await getMasterPool();
 
-                <td class="${changed ? "changed" : ""}">
-                    ${escapeHtml(record.modifiedBarcode || "")}
-                </td>
-
-                <td>
-                    ${
-                        changed
-                        ? "None replaced"
-                        : "No None found"
-                    }
-                </td>
-
-            `;
+        console.log(
+            "Master database connection successful."
+        );
 
 
-            tbody.appendChild(row);
+        app.listen(
+            PORT,
+            "0.0.0.0",
+            () => {
 
-        });
+                console.log(
+                    `Server running on http://localhost:${PORT}`
+                );
+
+            }
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Unable to start application:",
+            error
+        );
+
+        process.exit(1);
+
+    }
+
+}
+
+
+startServer();
+
+
+// ============================================================
+// GRACEFUL SHUTDOWN
+// ============================================================
+
+async function shutdown() {
+
+    console.log(
+        "Closing database connections..."
+    );
+
+
+    try {
+
+        if (masterPool) {
+
+            await masterPool.close();
+
+        }
+
+        if (cellScanningPool) {
+
+            await cellScanningPool.close();
+
+        }
+
+        if (completedHistoryPool) {
+
+            await completedHistoryPool.close();
+
+        }
+
+    } catch (error) {
+
+        console.error(
+            "Error while closing DB connections:",
+            error
+        );
 
     }
 
 
-    // ============================================================
-    // MESSAGE
-    // ============================================================
+    process.exit(0);
 
-    function showMessage(message, type) {
-
-        const element =
-            document.getElementById("message");
-
-        element.textContent = message;
-
-        element.className =
-            `message ${type}`;
-
-        element.style.display = "block";
-    }
+}
 
 
-    function hideMessage() {
+process.on(
+    "SIGINT",
+    shutdown
+);
 
-        const element =
-            document.getElementById("message");
-
-        element.style.display = "none";
-    }
-
-
-    // ============================================================
-    // HTML ESCAPE
-    // ============================================================
-
-    function escapeHtml(value) {
-
-        return String(value)
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
-    }
-
-
-    // ============================================================
-    // INITIAL LOAD
-    // ============================================================
-
-    loadPackNames();
-
-</script>
-
-</body>
-</html>
+process.on(
+    "SIGTERM",
+    shutdown
+);
