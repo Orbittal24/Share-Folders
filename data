@@ -89,7 +89,7 @@ let completedHistoryPool = null;
 
 
 // ============================================================
-// CREATE DATABASE CONFIG
+// DATABASE CONFIG
 // ============================================================
 
 function getDbConfig(databaseName) {
@@ -106,7 +106,7 @@ function getDbConfig(databaseName) {
 
 
 // ============================================================
-// GET MASTER DATABASE CONNECTION
+// MASTER DATABASE CONNECTION
 // ============================================================
 
 async function getMasterPool() {
@@ -148,7 +148,7 @@ async function getMasterPool() {
 
 
 // ============================================================
-// GET CELL SCANNING DATABASE CONNECTION
+// CELL SCANNING DATABASE CONNECTION
 // ============================================================
 
 async function getCellScanningPool() {
@@ -190,7 +190,7 @@ async function getCellScanningPool() {
 
 
 // ============================================================
-// GET COMPLETED HISTORY DATABASE CONNECTION
+// COMPLETED HISTORY DATABASE CONNECTION
 // ============================================================
 
 async function getCompletedHistoryPool() {
@@ -314,7 +314,7 @@ app.post(
 
 
             // ====================================================
-            // VALIDATION
+            // VALIDATE PACK NO
             // ====================================================
 
             if (!packNo) {
@@ -330,8 +330,6 @@ app.post(
 
             }
 
-
-            // Pack No must be exactly 6 digits
 
             if (
                 !/^\d{6}$/.test(
@@ -351,6 +349,10 @@ app.post(
             }
 
 
+            // ====================================================
+            // VALIDATE PACK ID
+            // ====================================================
+
             if (!packId) {
 
                 return res.status(400).json({
@@ -366,17 +368,32 @@ app.post(
 
 
             console.log("");
-            console.log("============================================");
-            console.log("PROCESSING PACK");
-            console.log("Pack No :", packNo);
-            console.log("Pack ID :", packId);
-            console.log("============================================");
+            console.log(
+                "============================================"
+            );
+
+            console.log(
+                "PROCESSING PACK"
+            );
+
+            console.log(
+                "Pack No :",
+                packNo
+            );
+
+            console.log(
+                "Pack ID :",
+                packId
+            );
+
+            console.log(
+                "============================================"
+            );
 
 
             // ====================================================
             // STEP 1
-            // GET LINE_ID AND PACK CREATION DATE
-            // FROM Pack_duplicate_checker
+            // GET LINE_ID + PACK CREATION DATE
             // ====================================================
 
             const cellPool =
@@ -431,7 +448,7 @@ app.post(
 
 
             // ====================================================
-            // USE FIRST MATCHING RECORD
+            // TAKE FIRST MATCHING RECORD
             // ====================================================
 
             const duplicateRecord =
@@ -444,7 +461,7 @@ app.post(
 
             // ====================================================
             // STEP 2
-            // EXTRACT YYYY_MM_DD FROM DATE
+            // EXTRACT PACK CREATION DATE
             // ====================================================
 
             const rawCreationDate =
@@ -570,16 +587,6 @@ app.post(
                 lineResult.recordset[0].line_no;
 
 
-            console.log(
-                "Line No:",
-                lineNo
-            );
-
-
-            // ====================================================
-            // NORMALIZE LINE NO
-            // ====================================================
-
             const finalLineNo =
                 lineNo == null
                     ? ""
@@ -598,6 +605,12 @@ app.post(
                 });
 
             }
+
+
+            console.log(
+                "Line No:",
+                finalLineNo
+            );
 
 
             // ====================================================
@@ -644,22 +657,7 @@ app.post(
 
 
             // ====================================================
-            // SAFETY CHECK
-            //
-            // Expected:
-            //
-            // pack_history_2026_03_14_2026_03_15
-            //
-            // parts:
-            //
-            // 0 = pack
-            // 1 = history
-            // 2 = 2026
-            // 3 = 03
-            // 4 = 14
-            // 5 = 2026
-            // 6 = 03
-            // 7 = 15
+            // VALIDATE HISTORY TABLE NAMES
             // ====================================================
 
             historyTables =
@@ -693,16 +691,15 @@ app.post(
 
 
             console.log(
-                "History Tables Found:"
+                "History Tables:"
             );
 
 
             historyTables.forEach(
-                table => {
+                tableName => {
 
                     console.log(
-                        "  ",
-                        table
+                        tableName
                     );
 
                 }
@@ -728,20 +725,6 @@ app.post(
             // ====================================================
             // STEP 5
             // SEARCH ALL HISTORY TABLES
-            //
-            // IMPORTANT:
-            //
-            // SEARCH IS NOW USING:
-            //
-            // line_id = Line_Id
-            // pack_no = Pack_No
-            //
-            // Example:
-            //
-            // WHERE line_id = '13'
-            // AND pack_no = '004323'
-            //
-            // This matches your working SQL query.
             // ====================================================
 
             const allRecords = [];
@@ -752,7 +735,7 @@ app.post(
             ) {
 
                 // ------------------------------------------------
-                // Validate table name before putting it in SQL
+                // Validate table name
                 // ------------------------------------------------
 
                 if (
@@ -770,77 +753,26 @@ app.post(
                 }
 
 
-                // ------------------------------------------------
-                // HISTORY QUERY
-                // ------------------------------------------------
+                // =================================================
+                // YOUR SHORT QUERY
+                // =================================================
 
                 const query = `
 
                     SELECT
-
-                        sr_no,
-
                         pack_name,
-
                         pack_id,
-
                         line_id,
-
                         pack_no,
+                        module_barcode
 
-                        module_barcode,
+                    FROM [${tableName}]
 
-                        module_number,
+                    WHERE line_id = @LineID
 
-                        module_name,
+                    AND pack_no = @PackNo
 
-                        cellqr,
-
-                        module_status,
-
-                        cellqr_status,
-
-                        cell_ir,
-
-                        cell_voltage,
-
-                        cell_kvalue,
-
-                        cell_negativeVolatge,
-
-                        cell_class_grade,
-
-                        cell_capacity,
-
-                        cell_thickness,
-
-                        cell_laserStatus,
-
-                        cell_count,
-
-                        cell_batch,
-
-                        cell_plantCode,
-
-                        ocv_scanned_time,
-
-                        ocv_mc_no,
-
-                        current_dateTime,
-
-                        updated_dateTime
-
-                    FROM
-                        [${tableName}]
-
-                    WHERE
-                        line_id = @LineID
-
-                    AND
-                        pack_no = @PackNo
-
-                    ORDER BY
-                        sr_no
+                    ORDER BY sr_no
 
                 `;
 
@@ -863,6 +795,10 @@ app.post(
                     packNo
                 );
 
+
+                // =================================================
+                // EXECUTE QUERY
+                // =================================================
 
                 const result =
                     await historyPool
@@ -890,16 +826,16 @@ app.post(
 
 
                 // =================================================
-                // PROCESS EACH RECORD
+                // PROCESS RECORDS
                 // =================================================
 
                 for (
                     const row of result.recordset
                 ) {
 
-                    // ------------------------------------------------
+                    // ---------------------------------------------
                     // ORIGINAL MODULE BARCODE
-                    // ------------------------------------------------
+                    // ---------------------------------------------
 
                     const moduleBarcode =
                         row.module_barcode == null
@@ -909,92 +845,67 @@ app.post(
                             ).trim();
 
 
-                    // ------------------------------------------------
-                    // REPLACE "None" WITH LINE NO
-                    // ------------------------------------------------
+                    // ---------------------------------------------
+                    // REPLACE NONE WITH LINE NO
+                    // ---------------------------------------------
 
-                    let modifiedBarcode =
-                        moduleBarcode;
-
-
-                    if (
-                        moduleBarcode.includes("None")
-                    ) {
-
-                        modifiedBarcode =
-                            moduleBarcode
-                                .split("None")
-                                .join(finalLineNo);
-
-                    }
+                    const modifiedBarcode =
+                        moduleBarcode.replaceAll(
+                            "None",
+                            finalLineNo
+                        );
 
 
-                    // ------------------------------------------------
-                    // DEBUG LOG
-                    // ------------------------------------------------
+                    // ---------------------------------------------
+                    // DEBUG
+                    // ---------------------------------------------
 
                     console.log(
                         "--------------------------------------------"
                     );
-
 
                     console.log(
                         "Table:",
                         tableName
                     );
 
-
                     console.log(
                         "Line ID:",
                         lineId
                     );
-
 
                     console.log(
                         "Line No:",
                         finalLineNo
                     );
 
-
                     console.log(
                         "Pack No:",
                         packNo
                     );
-
 
                     console.log(
                         "Original Barcode:",
                         moduleBarcode
                     );
 
-
                     console.log(
                         "Modified Barcode:",
                         modifiedBarcode
                     );
-
-
-                    console.log(
-                        "None Found:",
-                        moduleBarcode.includes("None")
-                    );
-
 
                     console.log(
                         "--------------------------------------------"
                     );
 
 
-                    // ------------------------------------------------
+                    // ---------------------------------------------
                     // STORE RESULT
-                    // ------------------------------------------------
+                    // ---------------------------------------------
 
                     allRecords.push({
 
                         tableName,
-
-                        srNo:
-                            row.sr_no,
 
                         packName:
                             row.pack_name,
@@ -1010,13 +921,7 @@ app.post(
 
                         moduleBarcode,
 
-                        modifiedBarcode,
-
-                        moduleNumber:
-                            row.module_number,
-
-                        moduleName:
-                            row.module_name
+                        modifiedBarcode
 
                     });
 
@@ -1026,7 +931,6 @@ app.post(
 
 
             // ====================================================
-            // STEP 6
             // COUNT REPLACED RECORDS
             // ====================================================
 
@@ -1039,8 +943,7 @@ app.post(
 
 
             // ====================================================
-            // STEP 7
-            // RESPONSE
+            // FINAL RESPONSE
             // ====================================================
 
             console.log("");
@@ -1048,18 +951,15 @@ app.post(
                 "============================================"
             );
 
-
             console.log(
-                "TOTAL RECORDS:",
+                "Total Records:",
                 allRecords.length
             );
 
-
             console.log(
-                "TOTAL NONE REPLACED:",
+                "None Replaced:",
                 replacedCount
             );
-
 
             console.log(
                 "============================================"
@@ -1083,7 +983,8 @@ app.post(
 
                 lineId,
 
-                lineNo: finalLineNo,
+                lineNo:
+                    finalLineNo,
 
                 packCreationDate,
 
@@ -1160,10 +1061,6 @@ async function startServer() {
 
     try {
 
-        // --------------------------------------------------------
-        // Test MASTER connection
-        // --------------------------------------------------------
-
         await getMasterPool();
 
 
@@ -1171,10 +1068,6 @@ async function startServer() {
             "Master database connection successful."
         );
 
-
-        // --------------------------------------------------------
-        // START SERVER
-        // --------------------------------------------------------
 
         app.listen(
             PORT,
