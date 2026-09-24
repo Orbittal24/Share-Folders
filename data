@@ -4,7 +4,7 @@ const path = require("path");
 
 const app = express();
 
-const PORT = 3000;
+const PORT = 3200;
 
 
 // ============================================================
@@ -106,12 +106,15 @@ function getDbConfig(databaseName) {
 
 
 // ============================================================
-// GET MASTER DB CONNECTION
+// GET MASTER DATABASE CONNECTION
 // ============================================================
 
 async function getMasterPool() {
 
-    if (masterPool && masterPool.connected) {
+    if (
+        masterPool &&
+        masterPool.connected
+    ) {
 
         return masterPool;
 
@@ -145,7 +148,7 @@ async function getMasterPool() {
 
 
 // ============================================================
-// GET CELL SCANNING DB CONNECTION
+// GET CELL SCANNING DATABASE CONNECTION
 // ============================================================
 
 async function getCellScanningPool() {
@@ -187,7 +190,7 @@ async function getCellScanningPool() {
 
 
 // ============================================================
-// GET COMPLETED HISTORY DB CONNECTION
+// GET COMPLETED HISTORY DATABASE CONNECTION
 // ============================================================
 
 async function getCompletedHistoryPool() {
@@ -310,9 +313,9 @@ app.post(
             } = req.body;
 
 
-            // ------------------------------------------------
+            // ====================================================
             // VALIDATION
-            // ------------------------------------------------
+            // ====================================================
 
             if (!packNo) {
 
@@ -328,7 +331,13 @@ app.post(
             }
 
 
-            if (!/^\d{6}$/.test(String(packNo))) {
+            // Pack No must be exactly 6 digits
+
+            if (
+                !/^\d{6}$/.test(
+                    String(packNo)
+                )
+            ) {
 
                 return res.status(400).json({
 
@@ -356,10 +365,19 @@ app.post(
             }
 
 
-            // ------------------------------------------------
+            console.log("");
+            console.log("============================================");
+            console.log("PROCESSING PACK");
+            console.log("Pack No :", packNo);
+            console.log("Pack ID :", packId);
+            console.log("============================================");
+
+
+            // ====================================================
             // STEP 1
-            // Pack_duplicate_checker
-            // ------------------------------------------------
+            // GET LINE_ID AND PACK CREATION DATE
+            // FROM Pack_duplicate_checker
+            // ====================================================
 
             const cellPool =
                 await getCellScanningPool();
@@ -412,29 +430,22 @@ app.post(
             }
 
 
-            // ------------------------------------------------
-            // TAKE ALL MATCHING RECORDS
-            // ------------------------------------------------
-
-            const duplicateRecords =
-                duplicateResult.recordset;
-
-
-            // ------------------------------------------------
-            // USE FIRST RECORD
-            // ------------------------------------------------
+            // ====================================================
+            // USE FIRST MATCHING RECORD
+            // ====================================================
 
             const duplicateRecord =
-                duplicateRecords[0];
+                duplicateResult.recordset[0];
 
 
             const lineId =
                 duplicateRecord.Line_Id;
 
 
-            // ------------------------------------------------
-            // EXTRACT YYYY_MM_DD
-            // ------------------------------------------------
+            // ====================================================
+            // STEP 2
+            // EXTRACT YYYY_MM_DD FROM DATE
+            // ====================================================
 
             const rawCreationDate =
                 duplicateRecord.pack_creation_Date;
@@ -443,16 +454,20 @@ app.post(
             let packCreationDate;
 
 
-            if (rawCreationDate instanceof Date) {
+            if (
+                rawCreationDate instanceof Date
+            ) {
 
                 const year =
                     rawCreationDate
                         .getFullYear();
 
+
                 const month =
                     String(
                         rawCreationDate.getMonth() + 1
                     ).padStart(2, "0");
+
 
                 const day =
                     String(
@@ -466,7 +481,9 @@ app.post(
             } else {
 
                 const dateString =
-                    String(rawCreationDate);
+                    String(
+                        rawCreationDate
+                    );
 
 
                 const match =
@@ -491,15 +508,21 @@ app.post(
 
 
             console.log(
+                "Line ID:",
+                lineId
+            );
+
+
+            console.log(
                 "Pack Creation Date:",
                 packCreationDate
             );
 
 
-            // ------------------------------------------------
-            // STEP 2
-            // GET LINE NO
-            // ------------------------------------------------
+            // ====================================================
+            // STEP 3
+            // GET LINE NO FROM MASTER_LINE
+            // ====================================================
 
             const masterPool =
                 await getMasterPool();
@@ -507,7 +530,6 @@ app.post(
 
             const lineResult =
                 await masterPool
-
                     .request()
 
                     .input(
@@ -549,21 +571,39 @@ app.post(
 
 
             console.log(
-                "Line ID:",
-                lineId
-            );
-
-
-            console.log(
                 "Line No:",
                 lineNo
             );
 
 
-            // ------------------------------------------------
-            // STEP 3
+            // ====================================================
+            // NORMALIZE LINE NO
+            // ====================================================
+
+            const finalLineNo =
+                lineNo == null
+                    ? ""
+                    : String(lineNo).trim();
+
+
+            if (!finalLineNo) {
+
+                return res.status(404).json({
+
+                    success: false,
+
+                    message:
+                        `Line No is empty for Line_Id ${lineId}.`
+
+                });
+
+            }
+
+
+            // ====================================================
+            // STEP 4
             // FIND HISTORY TABLES
-            // ------------------------------------------------
+            // ====================================================
 
             const historyPool =
                 await getCompletedHistoryPool();
@@ -571,7 +611,6 @@ app.post(
 
             const tableResult =
                 await historyPool
-
                     .request()
 
                     .input(
@@ -599,12 +638,29 @@ app.post(
 
             let historyTables =
                 tableResult.recordset
-                    .map(row => row.TABLE_NAME);
+                    .map(
+                        row => row.TABLE_NAME
+                    );
 
 
-            // ------------------------------------------------
-            // SAFETY CHECK TABLE NAME
-            // ------------------------------------------------
+            // ====================================================
+            // SAFETY CHECK
+            //
+            // Expected:
+            //
+            // pack_history_2026_03_14_2026_03_15
+            //
+            // parts:
+            //
+            // 0 = pack
+            // 1 = history
+            // 2 = 2026
+            // 3 = 03
+            // 4 = 14
+            // 5 = 2026
+            // 6 = 03
+            // 7 = 15
+            // ====================================================
 
             historyTables =
                 historyTables.filter(
@@ -614,21 +670,9 @@ app.post(
                             tableName.split("_");
 
 
-                        /*
-                            pack_history_2026_03_14_2026_03_15
-
-                            position:
-                            0 = pack
-                            1 = history
-                            2 = 2026
-                            3 = 03
-                            4 = 14
-                            5 = 2026
-                            6 = 03
-                            7 = 15
-                        */
-
-                        if (parts.length < 8) {
+                        if (
+                            parts.length < 8
+                        ) {
 
                             return false;
 
@@ -649,12 +693,25 @@ app.post(
 
 
             console.log(
-                "History Tables:",
-                historyTables
+                "History Tables Found:"
             );
 
 
-            if (historyTables.length === 0) {
+            historyTables.forEach(
+                table => {
+
+                    console.log(
+                        "  ",
+                        table
+                    );
+
+                }
+            );
+
+
+            if (
+                historyTables.length === 0
+            ) {
 
                 return res.status(404).json({
 
@@ -668,10 +725,24 @@ app.post(
             }
 
 
-            // ------------------------------------------------
-            // STEP 4
+            // ====================================================
+            // STEP 5
             // SEARCH ALL HISTORY TABLES
-            // ------------------------------------------------
+            //
+            // IMPORTANT:
+            //
+            // SEARCH IS NOW USING:
+            //
+            // line_id = Line_Id
+            // pack_no = Pack_No
+            //
+            // Example:
+            //
+            // WHERE line_id = '13'
+            // AND pack_no = '004323'
+            //
+            // This matches your working SQL query.
+            // ====================================================
 
             const allRecords = [];
 
@@ -680,11 +751,9 @@ app.post(
                 const tableName of historyTables
             ) {
 
-                /*
-                    Table names cannot be SQL parameters,
-                    therefore validate them before inserting
-                    into the SQL statement.
-                */
+                // ------------------------------------------------
+                // Validate table name before putting it in SQL
+                // ------------------------------------------------
 
                 if (
                     !/^pack_history_\d{4}_\d{2}_\d{2}_\d{4}_\d{2}_\d{2}$/
@@ -701,41 +770,71 @@ app.post(
                 }
 
 
+                // ------------------------------------------------
+                // HISTORY QUERY
+                // ------------------------------------------------
+
                 const query = `
 
                     SELECT
+
                         sr_no,
+
                         pack_name,
+
                         pack_id,
+
                         line_id,
+
                         pack_no,
+
                         module_barcode,
+
                         module_number,
+
                         module_name,
+
                         cellqr,
+
                         module_status,
+
                         cellqr_status,
+
                         cell_ir,
+
                         cell_voltage,
+
                         cell_kvalue,
+
                         cell_negativeVolatge,
+
                         cell_class_grade,
+
                         cell_capacity,
+
                         cell_thickness,
+
                         cell_laserStatus,
+
                         cell_count,
+
                         cell_batch,
+
                         cell_plantCode,
+
                         ocv_scanned_time,
+
                         ocv_mc_no,
+
                         current_dateTime,
+
                         updated_dateTime
 
                     FROM
                         [${tableName}]
 
                     WHERE
-                        pack_id = @PackID
+                        line_id = @LineID
 
                     AND
                         pack_no = @PackNo
@@ -746,15 +845,33 @@ app.post(
                 `;
 
 
+                console.log("");
+                console.log(
+                    "Searching Table:",
+                    tableName
+                );
+
+
+                console.log(
+                    "Line ID:",
+                    lineId
+                );
+
+
+                console.log(
+                    "Pack No:",
+                    packNo
+                );
+
+
                 const result =
                     await historyPool
-
                         .request()
 
                         .input(
-                            "PackID",
+                            "LineID",
                             sql.VarChar,
-                            String(packId)
+                            String(lineId)
                         )
 
                         .input(
@@ -766,26 +883,111 @@ app.post(
                         .query(query);
 
 
+                console.log(
+                    "Records Found:",
+                    result.recordset.length
+                );
+
+
+                // =================================================
+                // PROCESS EACH RECORD
+                // =================================================
+
                 for (
                     const row of result.recordset
                 ) {
 
+                    // ------------------------------------------------
+                    // ORIGINAL MODULE BARCODE
+                    // ------------------------------------------------
+
                     const moduleBarcode =
                         row.module_barcode == null
                             ? ""
-                            : String(row.module_barcode);
+                            : String(
+                                row.module_barcode
+                            ).trim();
 
 
-                    // --------------------------------------------
-                    // REPLACE ONLY "None"
-                    // --------------------------------------------
+                    // ------------------------------------------------
+                    // REPLACE "None" WITH LINE NO
+                    // ------------------------------------------------
 
-                    const modifiedBarcode =
-                        moduleBarcode.replace(
-                            /None/g,
-                            String(lineNo)
-                        );
+                    let modifiedBarcode =
+                        moduleBarcode;
 
+
+                    if (
+                        moduleBarcode.includes("None")
+                    ) {
+
+                        modifiedBarcode =
+                            moduleBarcode
+                                .split("None")
+                                .join(finalLineNo);
+
+                    }
+
+
+                    // ------------------------------------------------
+                    // DEBUG LOG
+                    // ------------------------------------------------
+
+                    console.log(
+                        "--------------------------------------------"
+                    );
+
+
+                    console.log(
+                        "Table:",
+                        tableName
+                    );
+
+
+                    console.log(
+                        "Line ID:",
+                        lineId
+                    );
+
+
+                    console.log(
+                        "Line No:",
+                        finalLineNo
+                    );
+
+
+                    console.log(
+                        "Pack No:",
+                        packNo
+                    );
+
+
+                    console.log(
+                        "Original Barcode:",
+                        moduleBarcode
+                    );
+
+
+                    console.log(
+                        "Modified Barcode:",
+                        modifiedBarcode
+                    );
+
+
+                    console.log(
+                        "None Found:",
+                        moduleBarcode.includes("None")
+                    );
+
+
+                    console.log(
+                        "--------------------------------------------"
+                    );
+
+
+                    // ------------------------------------------------
+                    // STORE RESULT
+                    // ------------------------------------------------
 
                     allRecords.push({
 
@@ -793,6 +995,18 @@ app.post(
 
                         srNo:
                             row.sr_no,
+
+                        packName:
+                            row.pack_name,
+
+                        packId:
+                            row.pack_id,
+
+                        lineId:
+                            row.line_id,
+
+                        packNo:
+                            row.pack_no,
 
                         moduleBarcode,
 
@@ -802,10 +1016,7 @@ app.post(
                             row.module_number,
 
                         moduleName:
-                            row.module_name,
-
-                        lineId:
-                            row.line_id
+                            row.module_name
 
                     });
 
@@ -814,9 +1025,10 @@ app.post(
             }
 
 
-            // ------------------------------------------------
-            // RESPONSE
-            // ------------------------------------------------
+            // ====================================================
+            // STEP 6
+            // COUNT REPLACED RECORDS
+            // ====================================================
 
             const replacedCount =
                 allRecords.filter(
@@ -824,6 +1036,34 @@ app.post(
                         record.moduleBarcode !==
                         record.modifiedBarcode
                 ).length;
+
+
+            // ====================================================
+            // STEP 7
+            // RESPONSE
+            // ====================================================
+
+            console.log("");
+            console.log(
+                "============================================"
+            );
+
+
+            console.log(
+                "TOTAL RECORDS:",
+                allRecords.length
+            );
+
+
+            console.log(
+                "TOTAL NONE REPLACED:",
+                replacedCount
+            );
+
+
+            console.log(
+                "============================================"
+            );
 
 
             res.json({
@@ -843,7 +1083,7 @@ app.post(
 
                 lineId,
 
-                lineNo,
+                lineNo: finalLineNo,
 
                 packCreationDate,
 
@@ -857,9 +1097,21 @@ app.post(
 
         } catch (error) {
 
+            console.error("");
             console.error(
-                "Process Pack Error:",
+                "============================================"
+            );
+
+            console.error(
+                "PROCESS PACK ERROR"
+            );
+
+            console.error(
                 error
+            );
+
+            console.error(
+                "============================================"
             );
 
 
@@ -885,16 +1137,19 @@ app.post(
 // DEFAULT ROUTE
 // ============================================================
 
-app.get("/", (req, res) => {
+app.get(
+    "/",
+    (req, res) => {
 
-    res.sendFile(
-        path.join(
-            __dirname,
-            "index.html"
-        )
-    );
+        res.sendFile(
+            path.join(
+                __dirname,
+                "none_in_barcode.html"
+            )
+        );
 
-});
+    }
+);
 
 
 // ============================================================
@@ -905,25 +1160,43 @@ async function startServer() {
 
     try {
 
-        // Test master connection
+        // --------------------------------------------------------
+        // Test MASTER connection
+        // --------------------------------------------------------
+
         await getMasterPool();
+
 
         console.log(
             "Master database connection successful."
         );
 
 
+        // --------------------------------------------------------
+        // START SERVER
+        // --------------------------------------------------------
+
         app.listen(
             PORT,
             "0.0.0.0",
             () => {
 
+                console.log("");
+                console.log(
+                    "============================================"
+                );
+
                 console.log(
                     `Server running on http://localhost:${PORT}`
                 );
 
+                console.log(
+                    "============================================"
+                );
+
             }
         );
+
 
     } catch (error) {
 
@@ -931,6 +1204,7 @@ async function startServer() {
             "Unable to start application:",
             error
         );
+
 
         process.exit(1);
 
@@ -961,17 +1235,20 @@ async function shutdown() {
 
         }
 
+
         if (cellScanningPool) {
 
             await cellScanningPool.close();
 
         }
 
+
         if (completedHistoryPool) {
 
             await completedHistoryPool.close();
 
         }
+
 
     } catch (error) {
 
@@ -988,10 +1265,15 @@ async function shutdown() {
 }
 
 
+// ============================================================
+// PROCESS SIGNALS
+// ============================================================
+
 process.on(
     "SIGINT",
     shutdown
 );
+
 
 process.on(
     "SIGTERM",
