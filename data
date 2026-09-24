@@ -89,7 +89,7 @@ let completedHistoryPool = null;
 
 
 // ============================================================
-// DATABASE CONFIG
+// CREATE DATABASE CONFIG
 // ============================================================
 
 function getDbConfig(databaseName) {
@@ -106,7 +106,7 @@ function getDbConfig(databaseName) {
 
 
 // ============================================================
-// MASTER DATABASE CONNECTION
+// GET MASTER DATABASE CONNECTION
 // ============================================================
 
 async function getMasterPool() {
@@ -148,7 +148,7 @@ async function getMasterPool() {
 
 
 // ============================================================
-// CELL SCANNING DATABASE CONNECTION
+// GET CELL SCANNING DATABASE CONNECTION
 // ============================================================
 
 async function getCellScanningPool() {
@@ -190,7 +190,7 @@ async function getCellScanningPool() {
 
 
 // ============================================================
-// COMPLETED HISTORY DATABASE CONNECTION
+// GET COMPLETED HISTORY DATABASE CONNECTION
 // ============================================================
 
 async function getCompletedHistoryPool() {
@@ -394,6 +394,7 @@ app.post(
             // ====================================================
             // STEP 1
             // GET LINE_ID + PACK CREATION DATE
+            // FROM Pack_duplicate_checker
             // ====================================================
 
             const cellPool =
@@ -699,6 +700,7 @@ app.post(
                 tableName => {
 
                     console.log(
+                        "  ",
                         tableName
                     );
 
@@ -724,7 +726,7 @@ app.post(
 
             // ====================================================
             // STEP 5
-            // SEARCH ALL HISTORY TABLES
+            // PROCESS ALL HISTORY TABLES
             // ====================================================
 
             const allRecords = [];
@@ -735,7 +737,7 @@ app.post(
             ) {
 
                 // ------------------------------------------------
-                // Validate table name
+                // SAFETY CHECK TABLE NAME
                 // ------------------------------------------------
 
                 if (
@@ -753,8 +755,98 @@ app.post(
                 }
 
 
+                console.log("");
+                console.log(
+                    "============================================"
+                );
+
+                console.log(
+                    "PROCESSING TABLE:",
+                    tableName
+                );
+
+                console.log(
+                    "Line ID:",
+                    lineId
+                );
+
+                console.log(
+                    "Line No:",
+                    finalLineNo
+                );
+
+                console.log(
+                    "Pack No:",
+                    packNo
+                );
+
+                console.log(
+                    "============================================"
+                );
+
+
                 // =================================================
-                // YOUR SHORT QUERY
+                // STEP 5A
+                // UPDATE DATABASE
+                //
+                // IMPORTANT:
+                // This actually changes module_barcode in SQL.
+                // =================================================
+
+                const updateQuery = `
+
+                    UPDATE [${tableName}]
+
+                    SET module_barcode =
+                        REPLACE(
+                            module_barcode,
+                            'None',
+                            @LineNo
+                        )
+
+                    WHERE line_id = @LineID
+
+                    AND pack_no = @PackNo
+
+                    AND module_barcode LIKE '%None%'
+
+                `;
+
+
+                const updateResult =
+                    await historyPool
+                        .request()
+
+                        .input(
+                            "LineNo",
+                            sql.VarChar,
+                            finalLineNo
+                        )
+
+                        .input(
+                            "LineID",
+                            sql.VarChar,
+                            String(lineId)
+                        )
+
+                        .input(
+                            "PackNo",
+                            sql.VarChar,
+                            String(packNo)
+                        )
+
+                        .query(updateQuery);
+
+
+                console.log(
+                    "Database Rows Updated:",
+                    updateResult.rowsAffected
+                );
+
+
+                // =================================================
+                // STEP 5B
+                // SELECT UPDATED RECORDS
                 // =================================================
 
                 const query = `
@@ -777,29 +869,6 @@ app.post(
                 `;
 
 
-                console.log("");
-                console.log(
-                    "Searching Table:",
-                    tableName
-                );
-
-
-                console.log(
-                    "Line ID:",
-                    lineId
-                );
-
-
-                console.log(
-                    "Pack No:",
-                    packNo
-                );
-
-
-                // =================================================
-                // EXECUTE QUERY
-                // =================================================
-
                 const result =
                     await historyPool
                         .request()
@@ -820,22 +889,19 @@ app.post(
 
 
                 console.log(
-                    "Records Found:",
+                    "Records Found After Update:",
                     result.recordset.length
                 );
 
 
                 // =================================================
-                // PROCESS RECORDS
+                // STEP 5C
+                // ADD UPDATED RECORDS TO RESPONSE
                 // =================================================
 
                 for (
                     const row of result.recordset
                 ) {
-
-                    // ---------------------------------------------
-                    // ORIGINAL MODULE BARCODE
-                    // ---------------------------------------------
 
                     const moduleBarcode =
                         row.module_barcode == null
@@ -845,63 +911,11 @@ app.post(
                             ).trim();
 
 
-                    // ---------------------------------------------
-                    // REPLACE NONE WITH LINE NO
-                    // ---------------------------------------------
-
-                    const modifiedBarcode =
-                        moduleBarcode.replaceAll(
-                            "None",
-                            finalLineNo
-                        );
-
-
-                    // ---------------------------------------------
-                    // DEBUG
-                    // ---------------------------------------------
-
                     console.log(
-                        "--------------------------------------------"
-                    );
-
-                    console.log(
-                        "Table:",
-                        tableName
-                    );
-
-                    console.log(
-                        "Line ID:",
-                        lineId
-                    );
-
-                    console.log(
-                        "Line No:",
-                        finalLineNo
-                    );
-
-                    console.log(
-                        "Pack No:",
-                        packNo
-                    );
-
-                    console.log(
-                        "Original Barcode:",
+                        "Updated Module Barcode:",
                         moduleBarcode
                     );
 
-                    console.log(
-                        "Modified Barcode:",
-                        modifiedBarcode
-                    );
-
-                    console.log(
-                        "--------------------------------------------"
-                    );
-
-
-                    // ---------------------------------------------
-                    // STORE RESULT
-                    // ---------------------------------------------
 
                     allRecords.push({
 
@@ -919,9 +933,7 @@ app.post(
                         packNo:
                             row.pack_no,
 
-                        moduleBarcode,
-
-                        modifiedBarcode
+                        moduleBarcode
 
                     });
 
@@ -931,15 +943,11 @@ app.post(
 
 
             // ====================================================
-            // COUNT REPLACED RECORDS
+            // COUNT UPDATED RECORDS
             // ====================================================
 
-            const replacedCount =
-                allRecords.filter(
-                    record =>
-                        record.moduleBarcode !==
-                        record.modifiedBarcode
-                ).length;
+            const totalRecords =
+                allRecords.length;
 
 
             // ====================================================
@@ -952,13 +960,12 @@ app.post(
             );
 
             console.log(
-                "Total Records:",
-                allRecords.length
+                "PROCESS COMPLETED"
             );
 
             console.log(
-                "None Replaced:",
-                replacedCount
+                "Total Records:",
+                totalRecords
             );
 
             console.log(
@@ -971,9 +978,9 @@ app.post(
                 success: true,
 
                 message:
-                    allRecords.length > 0
+                    totalRecords > 0
 
-                        ? `${allRecords.length} module barcode record(s) found. ${replacedCount} barcode(s) contained "None".`
+                        ? `${totalRecords} module barcode record(s) found and processed successfully.`
 
                         : "No matching module barcode records found.",
 
@@ -1061,6 +1068,10 @@ async function startServer() {
 
     try {
 
+        // --------------------------------------------------------
+        // Test MASTER connection
+        // --------------------------------------------------------
+
         await getMasterPool();
 
 
@@ -1068,6 +1079,10 @@ async function startServer() {
             "Master database connection successful."
         );
 
+
+        // --------------------------------------------------------
+        // START SERVER
+        // --------------------------------------------------------
 
         app.listen(
             PORT,
