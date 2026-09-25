@@ -821,7 +821,7 @@ app.post(
             ) {
 
                 // ------------------------------------------------
-                // SAFETY CHECK
+                // SAFETY CHECK TABLE NAME
                 // ------------------------------------------------
 
                 if (
@@ -872,6 +872,9 @@ app.post(
 
                 // =================================================
                 // UPDATE PACK HISTORY
+                //
+                // IMPORTANT:
+                // Pack History is searched by Pack_No.
                 // =================================================
 
                 const updateQuery = `
@@ -885,9 +888,7 @@ app.post(
                             @LineNo
                         )
 
-                    WHERE line_id = @LineID
-
-                    AND pack_no = @PackNo
+                    WHERE pack_no = @PackNo
 
                     AND module_barcode LIKE '%None%'
 
@@ -902,12 +903,6 @@ app.post(
                             "LineNo",
                             sql.VarChar,
                             finalLineNo
-                        )
-
-                        .input(
-                            "LineID",
-                            sql.VarChar,
-                            String(lineId)
                         )
 
                         .input(
@@ -929,6 +924,9 @@ app.post(
 
                 // =================================================
                 // SELECT PACK HISTORY RECORDS
+                //
+                // IMPORTANT:
+                // Pack History is searched by Pack_No.
                 // =================================================
 
                 const query = `
@@ -942,9 +940,7 @@ app.post(
 
                     FROM [${tableName}]
 
-                    WHERE line_id = @LineID
-
-                    AND pack_no = @PackNo
+                    WHERE pack_no = @PackNo
 
                     ORDER BY sr_no
 
@@ -954,12 +950,6 @@ app.post(
                 const result =
                     await historyPool
                         .request()
-
-                        .input(
-                            "LineID",
-                            sql.VarChar,
-                            String(lineId)
-                        )
 
                         .input(
                             "PackNo",
@@ -1029,15 +1019,15 @@ app.post(
             // STEP 6
             // MODULE REGISTER DATE CONVERSION
             //
-            // 2026_08_03
+            // 2026_03_10
             //
             // becomes
             //
-            // 03_08_26
+            // 10_03_26
             //
             // Table:
             //
-            // module_register_03_08_26
+            // module_register_10_03_26
             // ====================================================
 
             const dateParts =
@@ -1200,10 +1190,6 @@ app.post(
             // ====================================================
             // STEP 6C
             // UPDATE MODULE_QR
-            //
-            // IMPORTANT:
-            // Module Register table uses Module_QR
-            // NOT module_barcode
             // ====================================================
 
             const moduleRegisterUpdateQuery = `
@@ -1217,9 +1203,7 @@ app.post(
                         @LineNo
                     )
 
-                WHERE Line_ID = @LineID
-
-                AND Pack_No = @PackNo
+                WHERE Pack_No = @PackNo
 
                 AND Module_QR LIKE '%None%'
 
@@ -1234,12 +1218,6 @@ app.post(
                         "LineNo",
                         sql.VarChar,
                         finalLineNo
-                    )
-
-                    .input(
-                        "LineID",
-                        sql.VarChar,
-                        String(lineId)
                     )
 
                     .input(
@@ -1278,9 +1256,7 @@ app.post(
 
                 FROM [taco_treceability].[${moduleRegisterTable}]
 
-                WHERE Line_ID = @LineID
-
-                AND Pack_No = @PackNo
+                WHERE Pack_No = @PackNo
 
                 ORDER BY srno
 
@@ -1290,12 +1266,6 @@ app.post(
             const moduleRegisterResult =
                 await modulePool
                     .request()
-
-                    .input(
-                        "LineID",
-                        sql.VarChar,
-                        String(lineId)
-                    )
 
                     .input(
                         "PackNo",
@@ -1510,10 +1480,6 @@ async function startServer() {
 
     try {
 
-        // --------------------------------------------------------
-        // TEST MASTER CONNECTION
-        // --------------------------------------------------------
-
         await getMasterPool();
 
 
@@ -1521,10 +1487,6 @@ async function startServer() {
             "Master database connection successful."
         );
 
-
-        // --------------------------------------------------------
-        // START SERVER
-        // --------------------------------------------------------
 
         app.listen(
             PORT,
