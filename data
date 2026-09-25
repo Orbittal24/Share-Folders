@@ -872,9 +872,6 @@ app.post(
 
                 // =================================================
                 // UPDATE PACK HISTORY
-                //
-                // IMPORTANT:
-                // Pack History is searched by Pack_No.
                 // =================================================
 
                 const updateQuery = `
@@ -924,9 +921,6 @@ app.post(
 
                 // =================================================
                 // SELECT PACK HISTORY RECORDS
-                //
-                // IMPORTANT:
-                // Pack History is searched by Pack_No.
                 // =================================================
 
                 const query = `
@@ -1017,15 +1011,11 @@ app.post(
 
             // ====================================================
             // STEP 6
-            // MODULE REGISTER DATE CONVERSION
+            // MODULE REGISTER TABLE NAME
             //
             // 2026_03_10
             //
             // becomes
-            //
-            // 10_03_26
-            //
-            // Table:
             //
             // module_register_10_03_26
             // ====================================================
@@ -1064,7 +1054,7 @@ app.post(
 
 
             // ====================================================
-            // SAFETY CHECK MODULE REGISTER TABLE
+            // SAFETY CHECK
             // ====================================================
 
             if (
@@ -1127,7 +1117,6 @@ app.post(
 
 
             // ====================================================
-            // STEP 6A
             // GET MODULE REGISTER CONNECTION
             // ====================================================
 
@@ -1136,7 +1125,6 @@ app.post(
 
 
             // ====================================================
-            // STEP 6B
             // CHECK MODULE REGISTER TABLE
             // ====================================================
 
@@ -1188,8 +1176,10 @@ app.post(
 
 
             // ====================================================
-            // STEP 6C
-            // UPDATE MODULE_QR
+            // UPDATE MODULE REGISTER
+            //
+            // IMPORTANT:
+            // Module Register uses Module_QR.
             // ====================================================
 
             const moduleRegisterUpdateQuery = `
@@ -1238,7 +1228,6 @@ app.post(
 
 
             // ====================================================
-            // STEP 6D
             // SELECT MODULE REGISTER RECORDS
             // ====================================================
 
@@ -1285,7 +1274,6 @@ app.post(
 
 
             // ====================================================
-            // STEP 6E
             // PREPARE MODULE REGISTER RESPONSE
             // ====================================================
 
@@ -1347,18 +1335,6 @@ app.post(
             // FINAL COUNTS
             // ====================================================
 
-            const totalHistoryRecords =
-                allRecords.length;
-
-
-            const totalModuleRegisterRecords =
-                moduleRegisterRecords.length;
-
-
-            // ====================================================
-            // FINAL RESPONSE
-            // ====================================================
-
             console.log("");
 
             console.log(
@@ -1371,18 +1347,25 @@ app.post(
 
             console.log(
                 "Pack History Records:",
-                totalHistoryRecords
+                allRecords.length
             );
 
             console.log(
                 "Module Register Records:",
-                totalModuleRegisterRecords
+                moduleRegisterRecords.length
             );
 
             console.log(
                 "============================================"
             );
 
+
+            // ====================================================
+            // FINAL RESPONSE
+            //
+            // IMPORTANT:
+            // Pack History is returned as packHistoryRecords.
+            // ====================================================
 
             res.json({
 
@@ -1404,9 +1387,11 @@ app.post(
 
                 historyTables,
 
-                records:
+                // PACK HISTORY
+                packHistoryRecords:
                     allRecords,
 
+                // MODULE REGISTER
                 moduleRegisterTable,
 
                 moduleRegisterRecords
