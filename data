@@ -1,1586 +1,1864 @@
-const express = require("express");
-const sql = require("mssql");
-const path = require("path");
+<!DOCTYPE html>
 
-const app = express();
+<html lang="en">
 
-const PORT = 3200;
+<head>
 
+    <meta charset="UTF-8">
 
-// ============================================================
-// MIDDLEWARE
-// ============================================================
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-app.use(express.json());
-
-app.use(express.urlencoded({
-    extended: true
-}));
+    <title>
+        Pack Module Barcode Checker
+    </title>
 
 
-// ============================================================
-// SERVE FRONTEND
-// ============================================================
+    <style>
 
-app.use(express.static(__dirname));
-
-
-// ============================================================
-// SQL CONFIGURATION
-// ============================================================
-
-const baseSqlConfig = {
-
-    user: "user_mis",
-
-    password: "admin@123",
-
-    server: "10.9.4.29",
-
-    port: 1433,
-
-    options: {
-
-        instanceName: "PROD_SQL_2026",
-
-        encrypt: false,
-
-        trustServerCertificate: true
-
-    },
-
-    pool: {
-
-        max: 10,
-
-        min: 0,
-
-        idleTimeoutMillis: 30000
-
-    }
-
-};
+        * {
+            box-sizing: border-box;
+        }
 
 
-// ============================================================
-// DATABASE NAMES
-// ============================================================
+        body {
 
-const DATABASES = {
+            margin: 0;
 
-    MASTER:
-        "taco_treceability_master",
+            padding: 20px;
 
-    CELL_SCANNING:
-        "cell_scanning_master",
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
 
-    COMPLETED_HISTORY:
-        "completed_packs_history",
+            background: #f4f6f8;
 
-    MODULE_REGISTER:
-        "taco_treceability_master_module_register"
-
-};
-
-
-// ============================================================
-// CONNECTION POOLS
-// ============================================================
-
-let masterPool = null;
-
-let cellScanningPool = null;
-
-let completedHistoryPool = null;
-
-let moduleRegisterPool = null;
-
-
-// ============================================================
-// CREATE DATABASE CONFIG
-// ============================================================
-
-function getDbConfig(databaseName) {
-
-    return {
-
-        ...baseSqlConfig,
-
-        database: databaseName
-
-    };
-
-}
-
-
-// ============================================================
-// GET MASTER DATABASE CONNECTION
-// ============================================================
-
-async function getMasterPool() {
-
-    if (
-        masterPool &&
-        masterPool.connected
-    ) {
-
-        return masterPool;
-
-    }
-
-
-    masterPool =
-        await new sql.ConnectionPool(
-            getDbConfig(
-                DATABASES.MASTER
-            )
-        ).connect();
-
-
-    masterPool.on(
-        "error",
-        err => {
-
-            console.error(
-                "Master DB Pool Error:",
-                err.message
-            );
+            color: #222;
 
         }
-    );
 
 
-    console.log(
-        "Connected to:",
-        DATABASES.MASTER
-    );
+        .container {
 
+            max-width: 1200px;
 
-    return masterPool;
+            margin: auto;
 
-}
+            background: white;
 
+            padding: 20px;
 
-// ============================================================
-// GET CELL SCANNING DATABASE CONNECTION
-// ============================================================
+            border-radius: 8px;
 
-async function getCellScanningPool() {
-
-    if (
-        cellScanningPool &&
-        cellScanningPool.connected
-    ) {
-
-        return cellScanningPool;
-
-    }
-
-
-    cellScanningPool =
-        await new sql.ConnectionPool(
-            getDbConfig(
-                DATABASES.CELL_SCANNING
-            )
-        ).connect();
-
-
-    cellScanningPool.on(
-        "error",
-        err => {
-
-            console.error(
-                "Cell Scanning DB Pool Error:",
-                err.message
-            );
+            box-shadow:
+                0 2px 10px
+                rgba(0, 0, 0, 0.08);
 
         }
-    );
 
 
-    console.log(
-        "Connected to:",
-        DATABASES.CELL_SCANNING
-    );
+        h1 {
 
+            margin-top: 0;
 
-    return cellScanningPool;
+            color: #1f4e78;
 
-}
-
-
-// ============================================================
-// GET COMPLETED HISTORY DATABASE CONNECTION
-// ============================================================
-
-async function getCompletedHistoryPool() {
-
-    if (
-        completedHistoryPool &&
-        completedHistoryPool.connected
-    ) {
-
-        return completedHistoryPool;
-
-    }
-
-
-    completedHistoryPool =
-        await new sql.ConnectionPool(
-            getDbConfig(
-                DATABASES.COMPLETED_HISTORY
-            )
-        ).connect();
-
-
-    completedHistoryPool.on(
-        "error",
-        err => {
-
-            console.error(
-                "Completed History DB Pool Error:",
-                err.message
-            );
+            font-size: 25px;
 
         }
-    );
 
 
-    console.log(
-        "Connected to:",
-        DATABASES.COMPLETED_HISTORY
-    );
+        /* ========================================================
+           FORM
+           ======================================================== */
 
+        .form-row {
 
-    return completedHistoryPool;
+            display: flex;
 
-}
+            gap: 15px;
 
-
-// ============================================================
-// GET MODULE REGISTER DATABASE CONNECTION
-// ============================================================
-
-async function getModuleRegisterPool() {
-
-    if (
-        moduleRegisterPool &&
-        moduleRegisterPool.connected
-    ) {
-
-        return moduleRegisterPool;
-
-    }
-
-
-    moduleRegisterPool =
-        await new sql.ConnectionPool(
-            getDbConfig(
-                DATABASES.MODULE_REGISTER
-            )
-        ).connect();
-
-
-    moduleRegisterPool.on(
-        "error",
-        err => {
-
-            console.error(
-                "Module Register DB Pool Error:",
-                err.message
-            );
+            align-items: flex-end;
 
         }
-    );
 
 
-    console.log(
-        "Connected to:",
-        DATABASES.MODULE_REGISTER
-    );
+        .form-group {
+
+            flex: 1;
+
+            position: relative;
+
+        }
 
 
-    return moduleRegisterPool;
+        .form-group label {
 
-}
+            display: block;
+
+            margin-bottom: 6px;
+
+            font-weight: bold;
+
+            font-size: 14px;
+
+        }
 
 
-// ============================================================
-// GET PACK NAMES
-// ============================================================
+        .form-group input {
 
-app.get(
-    "/api/pack-names",
-    async (req, res) => {
+            width: 100%;
+
+            height: 40px;
+
+            padding: 8px 10px;
+
+            border:
+                1px solid #bbb;
+
+            border-radius: 4px;
+
+            font-size: 14px;
+
+        }
+
+
+        .form-group input:focus {
+
+            outline: none;
+
+            border-color: #1f4e78;
+
+        }
+
+
+        .button-container {
+
+            width: 90px;
+
+        }
+
+
+        button {
+
+            width: 90px;
+
+            height: 40px;
+
+            border: none;
+
+            border-radius: 4px;
+
+            background: #1f4e78;
+
+            color: white;
+
+            font-weight: bold;
+
+            cursor: pointer;
+
+        }
+
+
+        button:hover {
+
+            background: #163a5c;
+
+        }
+
+
+        button:disabled {
+
+            background: #999;
+
+            cursor: not-allowed;
+
+        }
+
+
+        /* ========================================================
+           PACK SEARCH DROPDOWN
+           ======================================================== */
+
+        .pack-search-container {
+
+            position: relative;
+
+        }
+
+
+        .pack-dropdown {
+
+            position: absolute;
+
+            top: 42px;
+
+            left: 0;
+
+            right: 0;
+
+            max-height: 250px;
+
+            overflow-y: auto;
+
+            background: white;
+
+            border:
+                1px solid #ccc;
+
+            border-radius: 4px;
+
+            display: none;
+
+            z-index: 1000;
+
+            box-shadow:
+                0 3px 8px
+                rgba(0, 0, 0, 0.15);
+
+        }
+
+
+        .pack-dropdown-item {
+
+            padding: 10px 12px;
+
+            cursor: pointer;
+
+            font-size: 14px;
+
+        }
+
+
+        .pack-dropdown-item:hover {
+
+            background: #eaf2f8;
+
+        }
+
+
+        .pack-dropdown-no-data {
+
+            padding: 10px 12px;
+
+            color: #777;
+
+            font-size: 14px;
+
+        }
+
+
+        /* ========================================================
+           ERROR
+           ======================================================== */
+
+        .error {
+
+            color: #a00000;
+
+            font-size: 12px;
+
+            margin-top: 4px;
+
+        }
+
+
+        /* ========================================================
+           MESSAGE
+           ======================================================== */
+
+        .message {
+
+            margin-top: 20px;
+
+            padding: 12px;
+
+            border-radius: 5px;
+
+            display: none;
+
+        }
+
+
+        .success {
+
+            background: #dff5e1;
+
+            color: #146c2e;
+
+            border:
+                1px solid #9ad5a5;
+
+        }
+
+
+        .failure {
+
+            background: #ffe0e0;
+
+            color: #a00000;
+
+            border:
+                1px solid #e0a0a0;
+
+        }
+
+
+        /* ========================================================
+           LOADING
+           ======================================================== */
+
+        .loading {
+
+            display: none;
+
+            text-align: center;
+
+            margin-top: 15px;
+
+            font-weight: bold;
+
+            color: #1f4e78;
+
+        }
+
+
+        /* ========================================================
+           PACK INFO
+           ======================================================== */
+
+        .pack-info {
+
+            display: flex;
+
+            gap: 20px;
+
+            margin-top: 20px;
+
+            padding: 15px;
+
+            background: #f1f5f9;
+
+            border-radius: 6px;
+
+        }
+
+
+        .pack-info div {
+
+            flex: 1;
+
+        }
+
+
+        .pack-info span {
+
+            font-weight: bold;
+
+            color: #1f4e78;
+
+        }
+
+
+        /* ========================================================
+           RESULTS
+           ======================================================== */
+
+        .results {
+
+            margin-top: 30px;
+
+        }
+
+
+        .results-header {
+
+            display: flex;
+
+            justify-content: space-between;
+
+            align-items: center;
+
+            margin-bottom: 10px;
+
+        }
+
+
+        .results-header h2 {
+
+            margin: 0;
+
+            color: #1f4e78;
+
+            font-size: 20px;
+
+        }
+
+
+        .table-container {
+
+            overflow-x: auto;
+
+            border:
+                1px solid #ddd;
+
+        }
+
+
+        table {
+
+            width: 100%;
+
+            border-collapse: collapse;
+
+            min-width: 800px;
+
+        }
+
+
+        th,
+        td {
+
+            padding: 10px;
+
+            border:
+                1px solid #ddd;
+
+            text-align: left;
+
+            font-size: 13px;
+
+        }
+
+
+        th {
+
+            background: #1f4e78;
+
+            color: white;
+
+        }
+
+
+        tr:nth-child(even) {
+
+            background: #f7f7f7;
+
+        }
+
+
+        .changed {
+
+            color: #008000;
+
+            font-weight: bold;
+
+        }
+
+
+        .no-data {
+
+            text-align: center;
+
+            padding: 20px;
+
+            color: #777;
+
+        }
+
+
+        /* ========================================================
+           MOBILE
+           ======================================================== */
+
+        @media (max-width: 700px) {
+
+            .form-row {
+
+                flex-direction: column;
+
+                align-items: stretch;
+
+            }
+
+
+            .button-container {
+
+                width: 100%;
+
+            }
+
+
+            button {
+
+                width: 100%;
+
+            }
+
+
+            .pack-info {
+
+                flex-direction: column;
+
+                gap: 8px;
+
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+<div class="container">
+
+
+    <!-- ========================================================
+         INPUT
+         ======================================================== -->
+
+    <div class="form-row">
+
+
+        <!-- PACK NO -->
+
+        <div class="form-group">
+
+            <label for="packNo">
+
+                Pack No
+                <span style="color:red">*</span>
+
+            </label>
+
+
+            <input
+                type="text"
+                id="packNo"
+                maxlength="6"
+                inputmode="numeric"
+                placeholder="Enter 6 digit Pack No"
+                autocomplete="off"
+            >
+
+
+            <div
+                id="packNoError"
+                class="error"
+            ></div>
+
+        </div>
+
+
+        <!-- PACK NAME -->
+
+        <div class="form-group">
+
+            <label for="packName">
+
+                Pack Name
+                <span style="color:red">*</span>
+
+            </label>
+
+
+            <div class="pack-search-container">
+
+
+                <input
+                    type="text"
+                    id="packName"
+                    placeholder="Type to search Pack Name"
+                    autocomplete="off"
+                >
+
+
+                <div
+                    id="packDropdown"
+                    class="pack-dropdown"
+                ></div>
+
+
+            </div>
+
+
+            <div
+                id="packNameError"
+                class="error"
+            ></div>
+
+        </div>
+
+
+        <!-- OK BUTTON -->
+
+        <div class="button-container">
+
+            <button
+                id="okButton"
+                onclick="processPack()"
+            >
+
+                OK
+
+            </button>
+
+        </div>
+
+
+    </div>
+
+
+    <!-- ========================================================
+         LOADING
+         ======================================================== -->
+
+    <div
+        id="loading"
+        class="loading"
+    >
+
+        Processing... Please wait.
+
+    </div>
+
+
+    <!-- ========================================================
+         MESSAGE
+         ======================================================== -->
+
+    <div
+        id="message"
+        class="message"
+    ></div>
+
+
+    <!-- ========================================================
+         PACK INFO
+         ======================================================== -->
+
+    <div
+        id="packInfo"
+        class="pack-info"
+        style="display:none;"
+    >
+
+
+        <div>
+
+            Pack ID:
+            <span id="displayPackId"></span>
+
+        </div>
+
+
+        <div>
+
+            Line ID:
+            <span id="displayLineId"></span>
+
+        </div>
+
+
+        <div>
+
+            Line No:
+            <span id="displayLineNo"></span>
+
+        </div>
+
+
+        <div>
+
+            Pack Creation Date:
+            <span id="displayCreationDate"></span>
+
+        </div>
+
+
+    </div>
+
+
+    <!-- ========================================================
+         PACK HISTORY RESULTS
+         ======================================================== -->
+
+    <div class="results">
+
+
+        <div class="results-header">
+
+            <h2>
+                Pack History Results
+            </h2>
+
+        </div>
+
+
+        <div class="table-container">
+
+
+            <table>
+
+
+                <thead>
+
+                    <tr>
+
+                        <th>#</th>
+
+                        <th>
+                            History Table
+                        </th>
+
+                        <th>
+                            Pack Name
+                        </th>
+
+                        <th>
+                            Pack ID
+                        </th>
+
+                        <th>
+                            Line ID
+                        </th>
+
+                        <th>
+                            Pack No
+                        </th>
+
+                        <th>
+                            Module Barcode
+                        </th>
+
+                        <th>
+                            Status
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody
+                    id="resultsBody"
+                >
+
+                    <tr>
+
+                        <td
+                            colspan="8"
+                            class="no-data"
+                        >
+
+                            No Pack History module barcode records found.
+
+                        </td>
+
+                    </tr>
+
+                </tbody>
+
+
+            </table>
+
+
+        </div>
+
+
+    </div>
+
+
+    <!-- ========================================================
+         MODULE REGISTER RESULTS
+         ======================================================== -->
+
+    <div class="results">
+
+
+        <div class="results-header">
+
+            <h2>
+                Module Register Results
+            </h2>
+
+        </div>
+
+
+        <div class="table-container">
+
+
+            <table>
+
+
+                <thead>
+
+                    <tr>
+
+                        <th>#</th>
+
+                        <th>
+                            Module Register Table
+                        </th>
+
+                        <th>
+                            Pack Name
+                        </th>
+
+                        <th>
+                            Pack ID
+                        </th>
+
+                        <th>
+                            Line ID
+                        </th>
+
+                        <th>
+                            Pack No
+                        </th>
+
+                        <th>
+                            Module Barcode
+                        </th>
+
+                        <th>
+                            Status
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody
+                    id="moduleRegisterResultsBody"
+                >
+
+                    <tr>
+
+                        <td
+                            colspan="8"
+                            class="no-data"
+                        >
+
+                            No Module Register records found.
+
+                        </td>
+
+                    </tr>
+
+                </tbody>
+
+
+            </table>
+
+
+        </div>
+
+
+    </div>
+
+
+</div>
+
+
+<script>
+
+    const API_BASE = "";
+
+
+    // ============================================================
+    // GLOBAL VARIABLES
+    // ============================================================
+
+    let packData = [];
+
+    let selectedPack = null;
+
+
+    // ============================================================
+    // LOAD PACK NAMES
+    // ============================================================
+
+    async function loadPackNames() {
 
         try {
 
-            const pool =
-                await getMasterPool();
+            const response =
+                await fetch(
+                    `${API_BASE}/api/pack-names`
+                );
 
 
             const result =
-                await pool
-                    .request()
-                    .query(`
-
-                        SELECT
-                            Pack_ID,
-                            Pack_Name,
-                            Total_Module_Count
-
-                        FROM taco_treceability.master_pack
-
-                        ORDER BY Pack_Name
-
-                    `);
+                await response.json();
 
 
-            res.json({
+            if (!response.ok) {
 
-                success: true,
+                throw new Error(
+                    result.message ||
+                    "Failed to load Pack Names."
+                );
 
-                data:
-                    result.recordset
+            }
 
-            });
+
+            packData =
+                result.data || [];
 
 
         } catch (error) {
 
             console.error(
-                "Pack Name Error:",
+                "Pack Name Loading Error:",
                 error
             );
 
 
-            res.status(500).json({
-
-                success: false,
-
-                message:
-                    "Failed to fetch Pack Names.",
-
-                error:
-                    error.message
-
-            });
+            showMessage(
+                "Failed to load Pack Names. Please check backend/database connection.",
+                "failure"
+            );
 
         }
 
     }
-);
 
 
-// ============================================================
-// PROCESS PACK
-// ============================================================
+    // ============================================================
+    // PACK NAME ELEMENTS
+    // ============================================================
 
-app.post(
-    "/api/process-pack",
-    async (req, res) => {
-
-        try {
-
-            const {
-                packNo,
-                packId
-            } = req.body;
+    const packNameInput =
+        document.getElementById(
+            "packName"
+        );
 
 
-            // ====================================================
-            // VALIDATE PACK NO
-            // ====================================================
-
-            if (!packNo) {
-
-                return res.status(400).json({
-
-                    success: false,
-
-                    message:
-                        "Pack No is required."
-
-                });
-
-            }
+    const packDropdown =
+        document.getElementById(
+            "packDropdown"
+        );
 
 
-            if (
-                !/^\d{6}$/.test(
-                    String(packNo)
-                )
-            ) {
+    // ============================================================
+    // PACK NAME SEARCH
+    // ============================================================
 
-                return res.status(400).json({
+    packNameInput.addEventListener(
+        "input",
+        function () {
 
-                    success: false,
+            selectedPack = null;
 
-                    message:
-                        "Pack No must contain exactly 6 digits."
 
-                });
+            const searchText =
+                this.value
+                    .trim()
+                    .toLowerCase();
+
+
+            if (!searchText) {
+
+                packDropdown.style.display =
+                    "none";
+
+                packDropdown.innerHTML =
+                    "";
+
+                return;
 
             }
 
 
-            // ====================================================
-            // VALIDATE PACK ID
-            // ====================================================
-
-            if (!packId) {
-
-                return res.status(400).json({
-
-                    success: false,
-
-                    message:
-                        "Pack ID is required."
-
-                });
-
-            }
-
-
-            console.log("");
-
-            console.log(
-                "============================================"
-            );
-
-            console.log(
-                "PROCESSING PACK"
-            );
-
-            console.log(
-                "Pack No :",
-                packNo
-            );
-
-            console.log(
-                "Pack ID :",
-                packId
-            );
-
-            console.log(
-                "============================================"
-            );
-
-
-            // ====================================================
-            // STEP 1
-            // GET LINE ID + PACK CREATION DATE
-            // ====================================================
-
-            const cellPool =
-                await getCellScanningPool();
-
-
-            const duplicateResult =
-                await cellPool
-                    .request()
-
-                    .input(
-                        "PackNo",
-                        sql.VarChar,
-                        String(packNo)
-                    )
-
-                    .input(
-                        "PackID",
-                        sql.VarChar,
-                        String(packId)
-                    )
-
-                    .query(`
-
-                        SELECT
-                            Line_Id,
-                            pack_creation_Date
-
-                        FROM Pack_duplicate_checker
-
-                        WHERE Pack_No = @PackNo
-
-                        AND Pack_ID = @PackID
-
-                    `);
-
-
-            if (
-                duplicateResult.recordset.length === 0
-            ) {
-
-                return res.status(404).json({
-
-                    success: false,
-
-                    message:
-                        "No record found in Pack_duplicate_checker for the given Pack No and Pack ID."
-
-                });
-
-            }
-
-
-            // ====================================================
-            // TAKE FIRST MATCHING RECORD
-            // ====================================================
-
-            const duplicateRecord =
-                duplicateResult.recordset[0];
-
-
-            const lineId =
-                duplicateRecord.Line_Id;
-
-
-            // ====================================================
-            // STEP 2
-            // EXTRACT PACK CREATION DATE
-            // ====================================================
-
-            const rawCreationDate =
-                duplicateRecord.pack_creation_Date;
-
-
-            let packCreationDate;
-
-
-            if (
-                rawCreationDate instanceof Date
-            ) {
-
-                const year =
-                    rawCreationDate
-                        .getFullYear();
-
-
-                const month =
-                    String(
-                        rawCreationDate.getMonth() + 1
-                    ).padStart(
-                        2,
-                        "0"
-                    );
-
-
-                const day =
-                    String(
-                        rawCreationDate.getDate()
-                    ).padStart(
-                        2,
-                        "0"
-                    );
-
-
-                packCreationDate =
-                    `${year}_${month}_${day}`;
-
-            } else {
-
-                const dateString =
-                    String(
-                        rawCreationDate
-                    );
-
-
-                const match =
-                    dateString.match(
-                        /(\d{4})[-_](\d{2})[-_](\d{2})/
-                    );
-
-
-                if (!match) {
-
-                    throw new Error(
-                        "Unable to extract pack_creation_Date."
-                    );
-
-                }
-
-
-                packCreationDate =
-                    `${match[1]}_${match[2]}_${match[3]}`;
-
-            }
-
-
-            console.log(
-                "Line ID:",
-                lineId
-            );
-
-
-            console.log(
-                "Pack Creation Date:",
-                packCreationDate
-            );
-
-
-            // ====================================================
-            // STEP 3
-            // GET LINE NO FROM MASTER_LINE
-            // ====================================================
-
-            const masterPool =
-                await getMasterPool();
-
-
-            const lineResult =
-                await masterPool
-                    .request()
-
-                    .input(
-                        "LineId",
-                        sql.VarChar,
-                        String(lineId)
-                    )
-
-                    .query(`
-
-                        SELECT
-                            line_no
-
-                        FROM taco_treceability.master_line
-
-                        WHERE Srno = @LineId
-
-                    `);
-
-
-            if (
-                lineResult.recordset.length === 0
-            ) {
-
-                return res.status(404).json({
-
-                    success: false,
-
-                    message:
-                        `No line found for Line_Id ${lineId}.`
-
-                });
-
-            }
-
-
-            const lineNo =
-                lineResult.recordset[0].line_no;
-
-
-            const finalLineNo =
-                lineNo == null
-                    ? ""
-                    : String(
-                        lineNo
-                    ).trim();
-
-
-            if (!finalLineNo) {
-
-                return res.status(404).json({
-
-                    success: false,
-
-                    message:
-                        `Line No is empty for Line_Id ${lineId}.`
-
-                });
-
-            }
-
-
-            console.log(
-                "Line No:",
-                finalLineNo
-            );
-
-
-            // ====================================================
-            // STEP 4
-            // FIND PACK HISTORY TABLES
-            // ====================================================
-
-            const historyPool =
-                await getCompletedHistoryPool();
-
-
-            const tableResult =
-                await historyPool
-                    .request()
-
-                    .input(
-                        "CreationDate",
-                        sql.VarChar,
-                        packCreationDate
-                    )
-
-                    .query(`
-
-                        SELECT
-                            TABLE_NAME
-
-                        FROM INFORMATION_SCHEMA.TABLES
-
-                        WHERE TABLE_TYPE = 'BASE TABLE'
-
-                        AND TABLE_NAME LIKE
-                            'pack_history_' +
-                            @CreationDate +
-                            '_%'
-
-                    `);
-
-
-            let historyTables =
-                tableResult.recordset
-                    .map(
-                        row =>
-                            row.TABLE_NAME
-                    );
-
-
-            // ====================================================
-            // VALIDATE HISTORY TABLE NAMES
-            // ====================================================
-
-            historyTables =
-                historyTables.filter(
-                    tableName => {
-
-                        const parts =
-                            tableName.split("_");
-
-
-                        if (
-                            parts.length < 8
-                        ) {
-
-                            return false;
-
-                        }
-
-
-                        const dateAtPosition2 =
-                            `${parts[2]}_${parts[3]}_${parts[4]}`;
-
-
-                        return (
-                            dateAtPosition2 ===
-                            packCreationDate
-                        );
+            const filtered =
+                packData.filter(
+                    pack => {
+
+                        return String(
+                            pack.Pack_Name || ""
+                        )
+                            .toLowerCase()
+                            .includes(
+                                searchText
+                            );
 
                     }
                 );
 
 
-            console.log(
-                "History Tables:"
-            );
-
-
-            historyTables.forEach(
-                tableName => {
-
-                    console.log(
-                        "  ",
-                        tableName
-                    );
-
-                }
-            );
+            packDropdown.innerHTML =
+                "";
 
 
             if (
-                historyTables.length === 0
+                filtered.length === 0
             ) {
 
-                return res.status(404).json({
+                packDropdown.innerHTML = `
 
-                    success: false,
+                    <div
+                        class="pack-dropdown-no-data"
+                    >
 
-                    message:
-                        `No pack history table found for ${packCreationDate}.`
+                        No Pack Name found.
 
-                });
-
-            }
-
-
-            // ====================================================
-            // STEP 5
-            // PROCESS ALL PACK HISTORY TABLES
-            // ====================================================
-
-            const allRecords = [];
-
-
-            for (
-                const tableName of historyTables
-            ) {
-
-                // ------------------------------------------------
-                // SAFETY CHECK TABLE NAME
-                // ------------------------------------------------
-
-                if (
-                    !/^pack_history_\d{4}_\d{2}_\d{2}_\d{4}_\d{2}_\d{2}$/
-                        .test(tableName)
-                ) {
-
-                    console.log(
-                        "Skipping invalid table:",
-                        tableName
-                    );
-
-                    continue;
-
-                }
-
-
-                console.log("");
-
-                console.log(
-                    "============================================"
-                );
-
-                console.log(
-                    "PROCESSING PACK HISTORY TABLE:",
-                    tableName
-                );
-
-                console.log(
-                    "Line ID:",
-                    lineId
-                );
-
-                console.log(
-                    "Line No:",
-                    finalLineNo
-                );
-
-                console.log(
-                    "Pack No:",
-                    packNo
-                );
-
-                console.log(
-                    "============================================"
-                );
-
-
-                // =================================================
-                // UPDATE PACK HISTORY
-                // =================================================
-
-                const updateQuery = `
-
-                    UPDATE [${tableName}]
-
-                    SET module_barcode =
-                        REPLACE(
-                            module_barcode,
-                            'None',
-                            @LineNo
-                        )
-
-                    WHERE pack_no = @PackNo
-
-                    AND module_barcode LIKE '%None%'
+                    </div>
 
                 `;
 
 
-                const updateResult =
-                    await historyPool
-                        .request()
+                packDropdown.style.display =
+                    "block";
 
-                        .input(
-                            "LineNo",
-                            sql.VarChar,
-                            finalLineNo
-                        )
+                return;
 
-                        .input(
-                            "PackNo",
-                            sql.VarChar,
-                            String(packNo)
-                        )
+            }
 
-                        .query(
-                            updateQuery
+
+            filtered.forEach(
+                pack => {
+
+                    const item =
+                        document.createElement(
+                            "div"
                         );
 
 
-                console.log(
-                    "Pack History Database Rows Updated:",
-                    updateResult.rowsAffected
-                );
+                    item.className =
+                        "pack-dropdown-item";
 
 
-                // =================================================
-                // SELECT PACK HISTORY RECORDS
-                // =================================================
-
-                const query = `
-
-                    SELECT
-                        pack_name,
-                        pack_id,
-                        line_id,
-                        pack_no,
-                        module_barcode
-
-                    FROM [${tableName}]
-
-                    WHERE pack_no = @PackNo
-
-                    ORDER BY sr_no
-
-                `;
+                    item.textContent =
+                        pack.Pack_Name;
 
 
-                const result =
-                    await historyPool
-                        .request()
+                    item.addEventListener(
+                        "click",
+                        function () {
 
-                        .input(
-                            "PackNo",
-                            sql.VarChar,
-                            String(packNo)
-                        )
-
-                        .query(
-                            query
-                        );
+                            selectedPack =
+                                pack;
 
 
-                console.log(
-                    "Pack History Records Found After Update:",
-                    result.recordset.length
-                );
+                            packNameInput.value =
+                                pack.Pack_Name;
 
 
-                // =================================================
-                // ADD PACK HISTORY RECORDS
-                // =================================================
-
-                for (
-                    const row of result.recordset
-                ) {
-
-                    const moduleBarcode =
-                        row.module_barcode == null
-                            ? ""
-                            : String(
-                                row.module_barcode
-                            ).trim();
+                            packDropdown.style.display =
+                                "none";
 
 
-                    console.log(
-                        "Pack History Module Barcode:",
-                        moduleBarcode
+                            document.getElementById(
+                                "packNameError"
+                            ).textContent =
+                                "";
+
+                        }
                     );
 
 
-                    allRecords.push({
-
-                        tableName,
-
-                        packName:
-                            row.pack_name,
-
-                        packId:
-                            row.pack_id,
-
-                        lineId:
-                            row.line_id,
-
-                        packNo:
-                            row.pack_no,
-
-                        moduleBarcode
-
-                    });
+                    packDropdown.appendChild(
+                        item
+                    );
 
                 }
+            );
 
-            }
+
+            packDropdown.style.display =
+                "block";
+
+        }
+    );
 
 
-            // ====================================================
-            // STEP 6
-            // MODULE REGISTER TABLE NAME
-            //
-            // 2026_03_10
-            //
-            // becomes
-            //
-            // module_register_10_03_26
-            // ====================================================
+    // ============================================================
+    // CLOSE PACK DROPDOWN
+    // ============================================================
 
-            const dateParts =
-                packCreationDate.split("_");
-
+    document.addEventListener(
+        "click",
+        function (event) {
 
             if (
-                dateParts.length !== 3
+                !event.target.closest(
+                    ".pack-search-container"
+                )
             ) {
 
-                throw new Error(
-                    `Invalid pack creation date format: ${packCreationDate}`
-                );
+                packDropdown.style.display =
+                    "none";
 
             }
 
-
-            const year =
-                dateParts[0];
-
-            const month =
-                dateParts[1];
-
-            const day =
-                dateParts[2];
+        }
+    );
 
 
-            const shortYear =
-                year.slice(-2);
+    // ============================================================
+    // PACK NO INPUT
+    // ============================================================
 
+    document
+        .getElementById("packNo")
+        .addEventListener(
+            "input",
+            function () {
 
-            const moduleRegisterTable =
-                `module_register_${day}_${month}_${shortYear}`;
-
-
-            // ====================================================
-            // SAFETY CHECK
-            // ====================================================
-
-            if (
-                !/^module_register_\d{2}_\d{2}_\d{2}$/
-                    .test(
-                        moduleRegisterTable
-                    )
-            ) {
-
-                throw new Error(
-                    `Invalid Module Register table name: ${moduleRegisterTable}`
-                );
+                this.value =
+                    this.value
+                        .replace(
+                            /\D/g,
+                            ""
+                        )
+                        .slice(
+                            0,
+                            6
+                        );
 
             }
+        );
 
 
-            console.log("");
+    // ============================================================
+    // PROCESS PACK
+    // ============================================================
 
-            console.log(
-                "============================================"
+    async function processPack() {
+
+        const packNo =
+            document
+                .getElementById(
+                    "packNo"
+                )
+                .value
+                .trim();
+
+
+        const packName =
+            document
+                .getElementById(
+                    "packName"
+                )
+                .value
+                .trim();
+
+
+        const packNoError =
+            document.getElementById(
+                "packNoError"
             );
 
-            console.log(
-                "PROCESSING MODULE REGISTER"
+
+        const packNameError =
+            document.getElementById(
+                "packNameError"
             );
 
-            console.log(
-                "Database:",
-                DATABASES.MODULE_REGISTER
-            );
 
-            console.log(
-                "Schema:",
-                "taco_treceability"
-            );
+        packNoError.textContent =
+            "";
 
-            console.log(
-                "Table:",
-                moduleRegisterTable
-            );
+        packNameError.textContent =
+            "";
 
-            console.log(
-                "Line ID:",
-                lineId
-            );
 
-            console.log(
-                "Line No:",
-                finalLineNo
-            );
+        let valid = true;
 
-            console.log(
-                "Pack No:",
+
+        // ========================================================
+        // VALIDATE PACK NO
+        // ========================================================
+
+        if (!packNo) {
+
+            packNoError.textContent =
+                "Pack No is required.";
+
+            valid = false;
+
+        }
+
+        else if (
+            !/^\d{6}$/.test(
                 packNo
+            )
+        ) {
+
+            packNoError.textContent =
+                "Pack No must contain exactly 6 digits.";
+
+            valid = false;
+
+        }
+
+
+        // ========================================================
+        // VALIDATE PACK NAME
+        // ========================================================
+
+        if (!packName) {
+
+            packNameError.textContent =
+                "Pack Name is required.";
+
+            valid = false;
+
+        }
+
+        else if (!selectedPack) {
+
+            packNameError.textContent =
+                "Please select a valid Pack Name from the list.";
+
+            valid = false;
+
+        }
+
+
+        if (!valid) {
+
+            return;
+
+        }
+
+
+        // ========================================================
+        // UI ELEMENTS
+        // ========================================================
+
+        const button =
+            document.getElementById(
+                "okButton"
             );
 
-            console.log(
-                "============================================"
+
+        const loading =
+            document.getElementById(
+                "loading"
             );
 
 
+        button.disabled =
+            true;
+
+
+        loading.style.display =
+            "block";
+
+
+        hideMessage();
+
+
+        document.getElementById(
+            "packInfo"
+        ).style.display =
+            "none";
+
+
+        // ========================================================
+        // CLEAR PACK HISTORY
+        // ========================================================
+
+        document.getElementById(
+            "resultsBody"
+        ).innerHTML = `
+
+            <tr>
+
+                <td
+                    colspan="8"
+                    class="no-data"
+                >
+
+                    Processing...
+
+                </td>
+
+            </tr>
+
+        `;
+
+
+        // ========================================================
+        // CLEAR MODULE REGISTER
+        // ========================================================
+
+        document.getElementById(
+            "moduleRegisterResultsBody"
+        ).innerHTML = `
+
+            <tr>
+
+                <td
+                    colspan="8"
+                    class="no-data"
+                >
+
+                    Processing...
+
+                </td>
+
+            </tr>
+
+        `;
+
+
+        try {
+
             // ====================================================
-            // GET MODULE REGISTER CONNECTION
+            // SEND REQUEST
             // ====================================================
 
-            const modulePool =
-                await getModuleRegisterPool();
+            const response =
+                await fetch(
+                    `${API_BASE}/api/process-pack`,
+                    {
+
+                        method:
+                            "POST",
+
+                        headers: {
+
+                            "Content-Type":
+                                "application/json"
+
+                        },
+
+                        body:
+                            JSON.stringify({
+
+                                packNo:
+                                    packNo,
+
+                                packId:
+                                    selectedPack.Pack_ID,
+
+                                packName:
+                                    selectedPack.Pack_Name
+
+                            })
+
+                    }
+                );
 
 
-            // ====================================================
-            // CHECK MODULE REGISTER TABLE
-            // ====================================================
-
-            const moduleTableCheck =
-                await modulePool
-                    .request()
-
-                    .input(
-                        "TableName",
-                        sql.VarChar,
-                        moduleRegisterTable
-                    )
-
-                    .query(`
-
-                        SELECT
-                            TABLE_SCHEMA,
-                            TABLE_NAME
-
-                        FROM INFORMATION_SCHEMA.TABLES
-
-                        WHERE TABLE_SCHEMA =
-                            'taco_treceability'
-
-                        AND TABLE_TYPE =
-                            'BASE TABLE'
-
-                        AND TABLE_NAME =
-                            @TableName
-
-                    `);
+            const result =
+                await response.json();
 
 
-            if (
-                moduleTableCheck.recordset.length === 0
-            ) {
+            if (!response.ok) {
 
                 throw new Error(
-                    `Module Register table taco_treceability.${moduleRegisterTable} does not exist in database ${DATABASES.MODULE_REGISTER}.`
+                    result.message ||
+                    "Processing failed."
                 );
 
             }
 
 
+            // ====================================================
+            // DEBUG
+            // ====================================================
+
             console.log(
-                "Module Register table verified:",
-                `taco_treceability.${moduleRegisterTable}`
+                "Complete backend response:",
+                result
+            );
+
+
+            console.log(
+                "Pack History records received:",
+                result.packHistoryRecords
+            );
+
+
+            console.log(
+                "Module Register records received:",
+                result.moduleRegisterRecords
             );
 
 
             // ====================================================
-            // UPDATE MODULE REGISTER
+            // PACK INFORMATION
+            // ====================================================
+
+            document.getElementById(
+                "displayPackId"
+            ).textContent =
+                result.packId || "";
+
+
+            document.getElementById(
+                "displayLineId"
+            ).textContent =
+                result.lineId || "";
+
+
+            document.getElementById(
+                "displayLineNo"
+            ).textContent =
+                result.lineNo || "";
+
+
+            document.getElementById(
+                "displayCreationDate"
+            ).textContent =
+                result.packCreationDate || "";
+
+
+            document.getElementById(
+                "packInfo"
+            ).style.display =
+                "flex";
+
+
+            // ====================================================
+            // PACK HISTORY RESULTS
             //
             // IMPORTANT:
-            // Module Register uses Module_QR.
+            // Read packHistoryRecords.
             // ====================================================
 
-            const moduleRegisterUpdateQuery = `
-
-                UPDATE [taco_treceability].[${moduleRegisterTable}]
-
-                SET Module_QR =
-                    REPLACE(
-                        Module_QR,
-                        'None',
-                        @LineNo
-                    )
-
-                WHERE Pack_No = @PackNo
-
-                AND Module_QR LIKE '%None%'
-
-            `;
-
-
-            const moduleRegisterUpdateResult =
-                await modulePool
-                    .request()
-
-                    .input(
-                        "LineNo",
-                        sql.VarChar,
-                        finalLineNo
-                    )
-
-                    .input(
-                        "PackNo",
-                        sql.VarChar,
-                        String(packNo)
-                    )
-
-                    .query(
-                        moduleRegisterUpdateQuery
-                    );
-
-
-            console.log(
-                "Module Register Database Rows Updated:",
-                moduleRegisterUpdateResult.rowsAffected
+            displayResults(
+                result.packHistoryRecords || []
             );
 
 
             // ====================================================
-            // SELECT MODULE REGISTER RECORDS
+            // MODULE REGISTER RESULTS
             // ====================================================
 
-            const moduleRegisterSelectQuery = `
-
-                SELECT
-                    srno,
-                    Pack_ID,
-                    Module_ID,
-                    Module_QR,
-                    Line_ID,
-                    Pack_creation_Date,
-                    Pack_No,
-                    Cur_Date
-
-                FROM [taco_treceability].[${moduleRegisterTable}]
-
-                WHERE Pack_No = @PackNo
-
-                ORDER BY srno
-
-            `;
-
-
-            const moduleRegisterResult =
-                await modulePool
-                    .request()
-
-                    .input(
-                        "PackNo",
-                        sql.VarChar,
-                        String(packNo)
-                    )
-
-                    .query(
-                        moduleRegisterSelectQuery
-                    );
-
-
-            console.log(
-                "Module Register Records Found After Update:",
-                moduleRegisterResult.recordset.length
+            displayModuleRegisterResults(
+                result.moduleRegisterRecords || []
             );
 
 
             // ====================================================
-            // PREPARE MODULE REGISTER RESPONSE
+            // SUCCESS MESSAGE
             // ====================================================
 
-            const moduleRegisterRecords = [];
-
-
-            for (
-                const row of moduleRegisterResult.recordset
-            ) {
-
-                const moduleBarcode =
-                    row.Module_QR == null
-                        ? ""
-                        : String(
-                            row.Module_QR
-                        ).trim();
-
-
-                console.log(
-                    "Module Register Module QR:",
-                    moduleBarcode
-                );
-
-
-                moduleRegisterRecords.push({
-
-                    tableName:
-                        moduleRegisterTable,
-
-                    srNo:
-                        row.srno,
-
-                    packId:
-                        row.Pack_ID,
-
-                    moduleId:
-                        row.Module_ID,
-
-                    lineId:
-                        row.Line_ID,
-
-                    packNo:
-                        row.Pack_No,
-
-                    moduleBarcode,
-
-                    packCreationDate:
-                        row.Pack_creation_Date,
-
-                    curDate:
-                        row.Cur_Date
-
-                });
-
-            }
-
-
-            // ====================================================
-            // FINAL COUNTS
-            // ====================================================
-
-            console.log("");
-
-            console.log(
-                "============================================"
+            showMessage(
+                result.message ||
+                "Processing completed successfully.",
+                "success"
             );
-
-            console.log(
-                "PROCESS COMPLETED"
-            );
-
-            console.log(
-                "Pack History Records:",
-                allRecords.length
-            );
-
-            console.log(
-                "Module Register Records:",
-                moduleRegisterRecords.length
-            );
-
-            console.log(
-                "============================================"
-            );
-
-
-            // ====================================================
-            // FINAL RESPONSE
-            //
-            // IMPORTANT:
-            // Pack History is returned as packHistoryRecords.
-            // ====================================================
-
-            res.json({
-
-                success: true,
-
-                message:
-                    "Pack History and Module Register processing completed successfully.",
-
-                packNo,
-
-                packId,
-
-                lineId,
-
-                lineNo:
-                    finalLineNo,
-
-                packCreationDate,
-
-                historyTables,
-
-                // PACK HISTORY
-                packHistoryRecords:
-                    allRecords,
-
-                // MODULE REGISTER
-                moduleRegisterTable,
-
-                moduleRegisterRecords
-
-            });
 
 
         } catch (error) {
 
-            console.error("");
-
             console.error(
-                "============================================"
-            );
-
-            console.error(
-                "PROCESS PACK ERROR"
-            );
-
-            console.error(
+                "Process Pack Error:",
                 error
             );
 
-            console.error(
-                "============================================"
+
+            document.getElementById(
+                "resultsBody"
+            ).innerHTML = `
+
+                <tr>
+
+                    <td
+                        colspan="8"
+                        class="no-data"
+                    >
+
+                        No Pack History data available.
+
+                    </td>
+
+                </tr>
+
+            `;
+
+
+            document.getElementById(
+                "moduleRegisterResultsBody"
+            ).innerHTML = `
+
+                <tr>
+
+                    <td
+                        colspan="8"
+                        class="no-data"
+                    >
+
+                        No Module Register data available.
+
+                    </td>
+
+                </tr>
+
+            `;
+
+
+            showMessage(
+                error.message ||
+                "Something went wrong.",
+                "failure"
             );
 
 
-            res.status(500).json({
+        } finally {
 
-                success: false,
+            button.disabled =
+                false;
 
-                message:
-                    "Error while processing pack.",
 
-                error:
-                    error.message
-
-            });
+            loading.style.display =
+                "none";
 
         }
 
     }
-);
 
 
-// ============================================================
-// DEFAULT ROUTE
-// ============================================================
+    // ============================================================
+    // DISPLAY PACK HISTORY RESULTS
+    // ============================================================
 
-app.get(
-    "/",
-    (req, res) => {
-
-        res.sendFile(
-            path.join(
-                __dirname,
-                "none_in_barcode.html"
-            )
-        );
-
-    }
-);
-
-
-// ============================================================
-// START SERVER
-// ============================================================
-
-async function startServer() {
-
-    try {
-
-        await getMasterPool();
-
+    function displayResults(
+        records
+    ) {
 
         console.log(
-            "Master database connection successful."
+            "displayResults() received:",
+            records
         );
 
 
-        app.listen(
-            PORT,
-            "0.0.0.0",
-            () => {
+        const tbody =
+            document.getElementById(
+                "resultsBody"
+            );
 
-                console.log("");
 
-                console.log(
-                    "============================================"
-                );
+        if (
+            !records ||
+            records.length === 0
+        ) {
 
-                console.log(
-                    `Server running on http://localhost:${PORT}`
-                );
+            tbody.innerHTML = `
 
-                console.log(
-                    "============================================"
+                <tr>
+
+                    <td
+                        colspan="8"
+                        class="no-data"
+                    >
+
+                        No Pack History module barcode records found.
+
+                    </td>
+
+                </tr>
+
+            `;
+
+            return;
+
+        }
+
+
+        tbody.innerHTML =
+            "";
+
+
+        records.forEach(
+            (
+                record,
+                index
+            ) => {
+
+                const row =
+                    document.createElement(
+                        "tr"
+                    );
+
+
+                row.innerHTML = `
+
+                    <td>
+                        ${index + 1}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.tableName || ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.packName || ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.packId ?? ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.lineId ?? ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.packNo ?? ""
+                        )}
+                    </td>
+
+                    <td class="changed">
+                        ${escapeHtml(
+                            record.moduleBarcode || ""
+                        )}
+                    </td>
+
+                    <td>
+                        Updated
+                    </td>
+
+                `;
+
+
+                tbody.appendChild(
+                    row
                 );
 
             }
         );
 
-
-    } catch (error) {
-
-        console.error(
-            "Unable to start application:",
-            error
-        );
-
-
-        process.exit(1);
-
-    }
-
-}
-
-
-startServer();
-
-
-// ============================================================
-// GRACEFUL SHUTDOWN
-// ============================================================
-
-async function shutdown() {
-
-    console.log(
-        "Closing database connections..."
-    );
-
-
-    try {
-
-        if (masterPool) {
-
-            await masterPool.close();
-
-        }
-
-
-        if (cellScanningPool) {
-
-            await cellScanningPool.close();
-
-        }
-
-
-        if (completedHistoryPool) {
-
-            await completedHistoryPool.close();
-
-        }
-
-
-        if (moduleRegisterPool) {
-
-            await moduleRegisterPool.close();
-
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            "Error while closing DB connections:",
-            error
-        );
-
     }
 
 
-    process.exit(0);
+    // ============================================================
+    // DISPLAY MODULE REGISTER RESULTS
+    // ============================================================
 
-}
+    function displayModuleRegisterResults(
+        records
+    ) {
+
+        console.log(
+            "displayModuleRegisterResults() received:",
+            records
+        );
 
 
-// ============================================================
-// PROCESS SIGNALS
-// ============================================================
-
-process.on(
-    "SIGINT",
-    shutdown
-);
+        const tbody =
+            document.getElementById(
+                "moduleRegisterResultsBody"
+            );
 
 
-process.on(
-    "SIGTERM",
-    shutdown
-);
+        if (
+            !records ||
+            records.length === 0
+        ) {
+
+            tbody.innerHTML = `
+
+                <tr>
+
+                    <td
+                        colspan="8"
+                        class="no-data"
+                    >
+
+                        No Module Register records found.
+
+                    </td>
+
+                </tr>
+
+            `;
+
+            return;
+
+        }
+
+
+        tbody.innerHTML =
+            "";
+
+
+        records.forEach(
+            (
+                record,
+                index
+            ) => {
+
+                const row =
+                    document.createElement(
+                        "tr"
+                    );
+
+
+                row.innerHTML = `
+
+                    <td>
+                        ${index + 1}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.tableName || ""
+                        )}
+                    </td>
+
+                    <td>
+                        -
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.packId ?? ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.lineId ?? ""
+                        )}
+                    </td>
+
+                    <td>
+                        ${escapeHtml(
+                            record.packNo ?? ""
+                        )}
+                    </td>
+
+                    <td class="changed">
+                        ${escapeHtml(
+                            record.moduleBarcode || ""
+                        )}
+                    </td>
+
+                    <td>
+                        Updated
+                    </td>
+
+                `;
+
+
+                tbody.appendChild(
+                    row
+                );
+
+            }
+        );
+
+    }
+
+
+    // ============================================================
+    // SHOW MESSAGE
+    // ============================================================
+
+    function showMessage(
+        message,
+        type
+    ) {
+
+        const element =
+            document.getElementById(
+                "message"
+            );
+
+
+        element.textContent =
+            message;
+
+
+        element.className =
+            `message ${type}`;
+
+
+        element.style.display =
+            "block";
+
+    }
+
+
+    // ============================================================
+    // HIDE MESSAGE
+    // ============================================================
+
+    function hideMessage() {
+
+        const element =
+            document.getElementById(
+                "message"
+            );
+
+
+        element.style.display =
+            "none";
+
+    }
+
+
+    // ============================================================
+    // ESCAPE HTML
+    // ============================================================
+
+    function escapeHtml(
+        value
+    ) {
+
+        return String(value)
+
+            .replace(
+                /&/g,
+                "&amp;"
+            )
+
+            .replace(
+                /</g,
+                "&lt;"
+            )
+
+            .replace(
+                />/g,
+                "&gt;"
+            )
+
+            .replace(
+                /"/g,
+                "&quot;"
+            )
+
+            .replace(
+                /'/g,
+                "&#039;"
+            );
+
+    }
+
+
+    // ============================================================
+    // INITIAL LOAD
+    // ============================================================
+
+    loadPackNames();
+
+</script>
+
+
+</body>
+
+</html>
