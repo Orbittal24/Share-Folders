@@ -680,98 +680,73 @@
 
 
     <!-- ========================================================
-         RESULTS
+         PACK HISTORY RESULTS
          ======================================================== -->
 
     <div class="results">
 
-
         <div class="results-header">
-
-            <h2>
-                Module Barcode Results
-            </h2>
-
+            <h2>Pack History Results</h2>
         </div>
-
 
         <div class="table-container">
-
-
             <table>
-
-
                 <thead>
-
                     <tr>
-
-                        <th>
-                            #
-                        </th>
-
-                        <th>
-                            History Table
-                        </th>
-
-                        <th>
-                            Pack Name
-                        </th>
-
-                        <th>
-                            Pack ID
-                        </th>
-
-                        <th>
-                            Line ID
-                        </th>
-
-                        <th>
-                            Pack No
-                        </th>
-
-                        <th>
-                            Module Barcode
-                        </th>
-
-                        <th>
-                            Status
-                        </th>
-
+                        <th>#</th>
+                        <th>History Table</th>
+                        <th>Pack Name</th>
+                        <th>Pack ID</th>
+                        <th>Line ID</th>
+                        <th>Pack No</th>
+                        <th>Module Barcode</th>
+                        <th>Status</th>
                     </tr>
-
                 </thead>
-
-
-                <tbody id="resultsBody">
-
-
+                <tbody id="historyResultsBody">
                     <tr>
-
-                        <td
-                            colspan="8"
-                            class="no-data"
-                        >
-
-                            No data available
-
-                        </td>
-
+                        <td colspan="8" class="no-data">No data available</td>
                     </tr>
-
-
                 </tbody>
-
-
             </table>
-
-
         </div>
-
 
     </div>
 
 
-</div>
+    <!-- ========================================================
+         MODULE REGISTER RESULTS
+         ======================================================== -->
+
+    <div class="results">
+
+        <div class="results-header">
+            <h2>Module Register Results</h2>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Module Register Table</th>
+                        <th>Pack Name</th>
+                        <th>Pack ID</th>
+                        <th>Line ID</th>
+                        <th>Pack No</th>
+                        <th>Module Barcode</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="moduleRegisterResultsBody">
+                    <tr>
+                        <td colspan="8" class="no-data">No data available</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
 
 
 
@@ -1444,7 +1419,7 @@
 
 
         document.getElementById(
-            "resultsBody"
+            "historyResultsBody"
         ).innerHTML = `
 
             <tr>
@@ -1460,6 +1435,14 @@
 
             </tr>
 
+        `;
+
+        document.getElementById(
+            "moduleRegisterResultsBody"
+        ).innerHTML = `
+            <tr>
+                <td colspan="8" class="no-data">Processing...</td>
+            </tr>
         `;
 
 
@@ -1555,8 +1538,12 @@
             // SHOW RESULTS
             // ====================================================
 
-            displayResults(
-                result.records || []
+            displayHistoryResults(
+                result.historyRecords || []
+            );
+
+            displayModuleRegisterResults(
+                result.moduleRegisterRecords || []
             );
 
 
@@ -1578,7 +1565,7 @@
 
 
             document.getElementById(
-                "resultsBody"
+                "historyResultsBody"
             ).innerHTML = `
 
                 <tr>
@@ -1594,6 +1581,15 @@
 
                 </tr>
 
+            `;
+
+
+            document.getElementById(
+                "moduleRegisterResultsBody"
+            ).innerHTML = `
+                <tr>
+                    <td colspan="8" class="no-data">No data available</td>
+                </tr>
             `;
 
 
@@ -1623,124 +1619,81 @@
 
 
     // ============================================================
-    // DISPLAY RESULTS
+    // DISPLAY PACK HISTORY RESULTS
     // ============================================================
 
-    function displayResults(
-        records
+    function displayHistoryResults(records) {
+
+        displayResultsInTable(
+            "historyResultsBody",
+            records,
+            "No Pack History module barcode records found."
+        );
+
+    }
+
+
+    // ============================================================
+    // DISPLAY MODULE REGISTER RESULTS
+    // ============================================================
+
+    function displayModuleRegisterResults(records) {
+
+        displayResultsInTable(
+            "moduleRegisterResultsBody",
+            records,
+            "No Module Register module barcode records found."
+        );
+
+    }
+
+
+    // ============================================================
+    // COMMON RESULT TABLE RENDERER
+    // ============================================================
+
+    function displayResultsInTable(
+        elementId,
+        records,
+        noDataMessage
     ) {
 
-
         const tbody =
-            document.getElementById(
-                "resultsBody"
-            );
+            document.getElementById(elementId);
 
-
-        if (
-            !records ||
-            records.length === 0
-        ) {
+        if (!records || records.length === 0) {
 
             tbody.innerHTML = `
-
                 <tr>
-
-                    <td
-                        colspan="8"
-                        class="no-data"
-                    >
-
-                        No module barcode records found.
-
+                    <td colspan="8" class="no-data">
+                        ${escapeHtml(noDataMessage)}
                     </td>
-
                 </tr>
-
             `;
 
-
             return;
-
         }
 
+        tbody.innerHTML = "";
 
-        tbody.innerHTML =
-            "";
+        records.forEach((record, index) => {
 
+            const row = document.createElement("tr");
 
-        records.forEach(
-            (
-                record,
-                index
-            ) => {
+            row.innerHTML = `
+                <td>${index + 1}</td>
+                <td>${escapeHtml(record.tableName || "")}</td>
+                <td>${escapeHtml(record.packName || "")}</td>
+                <td>${escapeHtml(record.packId || "")}</td>
+                <td>${escapeHtml(record.lineId || "")}</td>
+                <td>${escapeHtml(record.packNo || "")}</td>
+                <td class="changed">${escapeHtml(record.moduleBarcode || "")}</td>
+                <td>${escapeHtml(record.status || "Updated")}</td>
+            `;
 
+            tbody.appendChild(row);
 
-                const row =
-                    document.createElement(
-                        "tr"
-                    );
-
-
-                // Since backend now updates the actual
-                // database value, moduleBarcode is already
-                // the updated value.
-
-                row.innerHTML = `
-
-                    <td>
-                        ${index + 1}
-                    </td>
-
-                    <td>
-                        ${escapeHtml(
-                            record.tableName || ""
-                        )}
-                    </td>
-
-                    <td>
-                        ${escapeHtml(
-                            record.packName || ""
-                        )}
-                    </td>
-
-                    <td>
-                        ${escapeHtml(
-                            record.packId || ""
-                        )}
-                    </td>
-
-                    <td>
-                        ${escapeHtml(
-                            record.lineId || ""
-                        )}
-                    </td>
-
-                    <td>
-                        ${escapeHtml(
-                            record.packNo || ""
-                        )}
-                    </td>
-
-                    <td class="changed">
-                        ${escapeHtml(
-                            record.moduleBarcode || ""
-                        )}
-                    </td>
-
-                    <td>
-                        Updated
-                    </td>
-
-                `;
-
-
-                tbody.appendChild(
-                    row
-                );
-
-            }
-        );
+        });
 
     }
 
