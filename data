@@ -131,18 +131,23 @@ async function getMasterPool() {
 
     masterPool =
         await new sql.ConnectionPool(
-            getDbConfig(DATABASES.MASTER)
+            getDbConfig(
+                DATABASES.MASTER
+            )
         ).connect();
 
 
-    masterPool.on("error", err => {
+    masterPool.on(
+        "error",
+        err => {
 
-        console.error(
-            "Master DB Pool Error:",
-            err.message
-        );
+            console.error(
+                "Master DB Pool Error:",
+                err.message
+            );
 
-    });
+        }
+    );
 
 
     console.log(
@@ -174,18 +179,23 @@ async function getCellScanningPool() {
 
     cellScanningPool =
         await new sql.ConnectionPool(
-            getDbConfig(DATABASES.CELL_SCANNING)
+            getDbConfig(
+                DATABASES.CELL_SCANNING
+            )
         ).connect();
 
 
-    cellScanningPool.on("error", err => {
+    cellScanningPool.on(
+        "error",
+        err => {
 
-        console.error(
-            "Cell Scanning DB Pool Error:",
-            err.message
-        );
+            console.error(
+                "Cell Scanning DB Pool Error:",
+                err.message
+            );
 
-    });
+        }
+    );
 
 
     console.log(
@@ -217,18 +227,23 @@ async function getCompletedHistoryPool() {
 
     completedHistoryPool =
         await new sql.ConnectionPool(
-            getDbConfig(DATABASES.COMPLETED_HISTORY)
+            getDbConfig(
+                DATABASES.COMPLETED_HISTORY
+            )
         ).connect();
 
 
-    completedHistoryPool.on("error", err => {
+    completedHistoryPool.on(
+        "error",
+        err => {
 
-        console.error(
-            "Completed History DB Pool Error:",
-            err.message
-        );
+            console.error(
+                "Completed History DB Pool Error:",
+                err.message
+            );
 
-    });
+        }
+    );
 
 
     console.log(
@@ -260,18 +275,23 @@ async function getModuleRegisterPool() {
 
     moduleRegisterPool =
         await new sql.ConnectionPool(
-            getDbConfig(DATABASES.MODULE_REGISTER)
+            getDbConfig(
+                DATABASES.MODULE_REGISTER
+            )
         ).connect();
 
 
-    moduleRegisterPool.on("error", err => {
+    moduleRegisterPool.on(
+        "error",
+        err => {
 
-        console.error(
-            "Module Register DB Pool Error:",
-            err.message
-        );
+            console.error(
+                "Module Register DB Pool Error:",
+                err.message
+            );
 
-    });
+        }
+    );
 
 
     console.log(
@@ -320,7 +340,8 @@ app.get(
 
                 success: true,
 
-                data: result.recordset
+                data:
+                    result.recordset
 
             });
 
@@ -448,8 +469,7 @@ app.post(
 
             // ====================================================
             // STEP 1
-            // GET LINE_ID + PACK CREATION DATE
-            // FROM Pack_duplicate_checker
+            // GET LINE ID + PACK CREATION DATE
             // ====================================================
 
             const cellPool =
@@ -539,13 +559,19 @@ app.post(
                 const month =
                     String(
                         rawCreationDate.getMonth() + 1
-                    ).padStart(2, "0");
+                    ).padStart(
+                        2,
+                        "0"
+                    );
 
 
                 const day =
                     String(
                         rawCreationDate.getDate()
-                    ).padStart(2, "0");
+                    ).padStart(
+                        2,
+                        "0"
+                    );
 
 
                 packCreationDate =
@@ -646,7 +672,9 @@ app.post(
             const finalLineNo =
                 lineNo == null
                     ? ""
-                    : String(lineNo).trim();
+                    : String(
+                        lineNo
+                    ).trim();
 
 
             if (!finalLineNo) {
@@ -708,7 +736,8 @@ app.post(
             let historyTables =
                 tableResult.recordset
                     .map(
-                        row => row.TABLE_NAME
+                        row =>
+                            row.TABLE_NAME
                     );
 
 
@@ -792,7 +821,7 @@ app.post(
             ) {
 
                 // ------------------------------------------------
-                // SAFETY CHECK TABLE NAME
+                // SAFETY CHECK
                 // ------------------------------------------------
 
                 if (
@@ -842,7 +871,7 @@ app.post(
 
 
                 // =================================================
-                // UPDATE PACK HISTORY DATABASE
+                // UPDATE PACK HISTORY
                 // =================================================
 
                 const updateQuery = `
@@ -887,7 +916,9 @@ app.post(
                             String(packNo)
                         )
 
-                        .query(updateQuery);
+                        .query(
+                            updateQuery
+                        );
 
 
                 console.log(
@@ -897,7 +928,7 @@ app.post(
 
 
                 // =================================================
-                // SELECT UPDATED PACK HISTORY RECORDS
+                // SELECT PACK HISTORY RECORDS
                 // =================================================
 
                 const query = `
@@ -936,7 +967,9 @@ app.post(
                             String(packNo)
                         )
 
-                        .query(query);
+                        .query(
+                            query
+                        );
 
 
                 console.log(
@@ -946,7 +979,7 @@ app.post(
 
 
                 // =================================================
-                // ADD PACK HISTORY RECORDS TO RESPONSE
+                // ADD PACK HISTORY RECORDS
                 // =================================================
 
                 for (
@@ -994,19 +1027,17 @@ app.post(
 
             // ====================================================
             // STEP 6
-            // MODULE REGISTER TABLE
+            // MODULE REGISTER DATE CONVERSION
             //
-            // PACK HISTORY DATE:
+            // 2026_08_03
             //
-            // 2026_03_10
+            // becomes
             //
-            // MODULE REGISTER DATE:
+            // 03_08_26
             //
-            // 10_03_26
+            // Table:
             //
-            // RESULT:
-            //
-            // module_register_10_03_26
+            // module_register_03_08_26
             // ====================================================
 
             const dateParts =
@@ -1043,12 +1074,14 @@ app.post(
 
 
             // ====================================================
-            // SAFETY CHECK MODULE REGISTER TABLE NAME
+            // SAFETY CHECK MODULE REGISTER TABLE
             // ====================================================
 
             if (
                 !/^module_register_\d{2}_\d{2}_\d{2}$/
-                    .test(moduleRegisterTable)
+                    .test(
+                        moduleRegisterTable
+                    )
             ) {
 
                 throw new Error(
@@ -1071,6 +1104,11 @@ app.post(
             console.log(
                 "Database:",
                 DATABASES.MODULE_REGISTER
+            );
+
+            console.log(
+                "Schema:",
+                "taco_treceability"
             );
 
             console.log(
@@ -1100,7 +1138,7 @@ app.post(
 
             // ====================================================
             // STEP 6A
-            // GET MODULE REGISTER DATABASE CONNECTION
+            // GET MODULE REGISTER CONNECTION
             // ====================================================
 
             const modulePool =
@@ -1109,7 +1147,7 @@ app.post(
 
             // ====================================================
             // STEP 6B
-            // CHECK MODULE REGISTER TABLE EXISTS
+            // CHECK MODULE REGISTER TABLE
             // ====================================================
 
             const moduleTableCheck =
@@ -1125,13 +1163,19 @@ app.post(
                     .query(`
 
                         SELECT
+                            TABLE_SCHEMA,
                             TABLE_NAME
 
                         FROM INFORMATION_SCHEMA.TABLES
 
-                        WHERE TABLE_TYPE = 'BASE TABLE'
+                        WHERE TABLE_SCHEMA =
+                            'taco_treceability'
 
-                        AND TABLE_NAME = @TableName
+                        AND TABLE_TYPE =
+                            'BASE TABLE'
+
+                        AND TABLE_NAME =
+                            @TableName
 
                     `);
 
@@ -1141,33 +1185,43 @@ app.post(
             ) {
 
                 throw new Error(
-                    `Module Register table ${moduleRegisterTable} does not exist in database ${DATABASES.MODULE_REGISTER}.`
+                    `Module Register table taco_treceability.${moduleRegisterTable} does not exist in database ${DATABASES.MODULE_REGISTER}.`
                 );
 
             }
 
 
+            console.log(
+                "Module Register table verified:",
+                `taco_treceability.${moduleRegisterTable}`
+            );
+
+
             // ====================================================
             // STEP 6C
-            // UPDATE MODULE REGISTER MODULE BARCODE
+            // UPDATE MODULE_QR
+            //
+            // IMPORTANT:
+            // Module Register table uses Module_QR
+            // NOT module_barcode
             // ====================================================
 
             const moduleRegisterUpdateQuery = `
 
-                UPDATE [${moduleRegisterTable}]
+                UPDATE [taco_treceability].[${moduleRegisterTable}]
 
-                SET module_barcode =
+                SET Module_QR =
                     REPLACE(
-                        module_barcode,
+                        Module_QR,
                         'None',
                         @LineNo
                     )
 
-                WHERE line_id = @LineID
+                WHERE Line_ID = @LineID
 
-                AND pack_no = @PackNo
+                AND Pack_No = @PackNo
 
-                AND module_barcode LIKE '%None%'
+                AND Module_QR LIKE '%None%'
 
             `;
 
@@ -1207,19 +1261,28 @@ app.post(
 
             // ====================================================
             // STEP 6D
-            // SELECT UPDATED MODULE REGISTER RECORDS
+            // SELECT MODULE REGISTER RECORDS
             // ====================================================
 
             const moduleRegisterSelectQuery = `
 
                 SELECT
-                    module_barcode
+                    srno,
+                    Pack_ID,
+                    Module_ID,
+                    Module_QR,
+                    Line_ID,
+                    Pack_creation_Date,
+                    Pack_No,
+                    Cur_Date
 
-                FROM [${moduleRegisterTable}]
+                FROM [taco_treceability].[${moduleRegisterTable}]
 
-                WHERE line_id = @LineID
+                WHERE Line_ID = @LineID
 
-                AND pack_no = @PackNo
+                AND Pack_No = @PackNo
+
+                ORDER BY srno
 
             `;
 
@@ -1264,15 +1327,15 @@ app.post(
             ) {
 
                 const moduleBarcode =
-                    row.module_barcode == null
+                    row.Module_QR == null
                         ? ""
                         : String(
-                            row.module_barcode
+                            row.Module_QR
                         ).trim();
 
 
                 console.log(
-                    "Module Register Module Barcode:",
+                    "Module Register Module QR:",
                     moduleBarcode
                 );
 
@@ -1282,13 +1345,28 @@ app.post(
                     tableName:
                         moduleRegisterTable,
 
+                    srNo:
+                        row.srno,
+
+                    packId:
+                        row.Pack_ID,
+
+                    moduleId:
+                        row.Module_ID,
+
                     lineId:
-                        lineId,
+                        row.Line_ID,
 
                     packNo:
-                        packNo,
+                        row.Pack_No,
 
-                    moduleBarcode
+                    moduleBarcode,
+
+                    packCreationDate:
+                        row.Pack_creation_Date,
+
+                    curDate:
+                        row.Cur_Date
 
                 });
 
@@ -1433,7 +1511,7 @@ async function startServer() {
     try {
 
         // --------------------------------------------------------
-        // Test MASTER connection
+        // TEST MASTER CONNECTION
         // --------------------------------------------------------
 
         await getMasterPool();
