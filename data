@@ -1,1654 +1,854 @@
-import time
-import redis
-import pytz
-import pyodbc
-import json
-import re
-from datetime import datetime
-from cpppo.server.enip.get_attribute import proxy_simple
-from multiprocessing import Process, Event
-from get_ips_from_sql import fetch_ip_list
-from typing import Optional
+// ===========================================================================
+// MES CELL DATA SERVICE  (SQLite, two-table, one row per cell QR)
+//
+//   cells_history  ONE row per cell QR code. If the same QR arrives again:
+//                    - identical values  -> ignored (read_count++ only)
+//                    - different values  -> row UPDATED with latest values
+//                                           and re-queued for the MES
+//                  Kept for RETENTION_DAYS, then purged automatically.
+//
+//   cells_queue    working queue, one row per cell waiting to be sent.
+//                  Deleted once the MES acknowledges it.
+//
+// Cells with QR code "NG" or blank are NOT deduplicated -- those are failed
+// reads, not identities, and collapsing them would destroy the record.
+//
+// Requires Node.js 22.13+ (uses the built-in node:sqlite module).
+// Run with:  "C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" mesCellDataService.js
+//
+// Query mode (does not start the service):
+//   node mesCellDataService.js --find 03HCB00LG6T5BVG6T0992044
+//   node mesCellDataService.js --stats
+//   node mesCellDataService.js --pending
+//   node mesCellDataService.js --purge      (manual run of the same purge)
+//   node mesCellDataService.js --vacuum     (reclaim disk space, service OFF)
+// ===========================================================================
+"use strict";
 
+const fs = require("fs");
+const path = require("path");
+const { DatabaseSync } = require("node:sqlite");
+const W3CWebSocket = require("websocket").w3cwebsocket;
 
-# ------------------------------------------------------------------
-# CONSTANTS
-# ------------------------------------------------------------------
+const {
+    OPCUAClient,
+    AttributeIds,
+    TimestampsToReturn,
+} = require("node-opcua");
 
-REAL_INDICES = [1, 4, 7, 10, 13, 16]
-UINT_INDICES = [4, 10, 16, 22, 28, 34]
+// ===========================================================================
+// CONFIG  -- everything you might need to change lives here
+// ===========================================================================
+const LINE_NAME = "TACO Line";
+const ENDPOINT_URL = "opc.tcp://192.168.250.1:4840";
+const WS_URL = "ws://10.9.4.28:9814";
 
-REDIS_HASH = 'controller_data'
+const DB_FILE = "C:\\ProgramData\\Orbittal\\MESCellData\\cells.db";
+const STATUS_FILE = "C:\\Software_Tools\\new_OCV\\MESCellDataV2\\SERVICE_STATUS.txt";
 
+// Shadow-run switch. true  = record and clear the queue locally, nothing
+//                            reaches the MES.
+//                   false = normal production sending.
+const DRY_RUN = true;
 
-# ------------------------------------------------------------------
-# SQL CONNECTION STRING
-# ------------------------------------------------------------------
-# Added connection timeout and ODBC retry settings.
-# Existing database/server/user/password remain unchanged.
-# ------------------------------------------------------------------
+const NODES = [
+    "MES_CellData1",
+    "MES_CellData2",
+    "MES_CellData3",
+    "MES_CellData4",
+    "MES_CellData5",
+    "MES_CellData6",
+    "MES_CellData7",
+    "MES_CellData8",
+];
 
-SQL_CONN_STR = (
-    'DRIVER={ODBC Driver 17 for SQL Server};'
-    'SERVER=10.9.4.29\\PROD_SQL_2026;'
-    'DATABASE=taco_treceability_ir;'
-    'UID=user_mis;'
-    'PWD=admin@123;'
-    'Connection Timeout=5;'
-    'ConnectRetryCount=3;'
-    'ConnectRetryInterval=2;'
-)
+// QR codes that are NOT real cell identities. These are never deduplicated:
+// every occurrence is stored as its own row.
+const NON_IDENTITY_CODES = ["", "NG", "ng", "NoRead", "NOREAD"];
 
+const SEND_INTERVAL_MS = 250;    // how often we try to push a record upstream
+const SEND_TIMEOUT_MS = 5000;    // give up on a socket that never answers
+const HEARTBEAT_MS = 5000;       // how often the status file is rewritten
 
-# ------------------------------------------------------------------
-# PACK STATUS
-# ------------------------------------------------------------------
+const BACKLOG_WARN = 500;
+const BACKLOG_FAULT = 5000;
 
-def IR_Packstatus(
-    pack_id: int,
-    pack_no: str,
-    station_id: int,
-    process_id: int,
-    pack_creation_date,
-    module_id: Optional[int] = None
-):
+// ---------------------------------------------------------------------------
+// HISTORY RETENTION
+// ---------------------------------------------------------------------------
+const RETENTION_DAYS = 30;
+const PURGE_INTERVAL_HOURS = 24;
+const PURGE_START_DELAY_MS = 120000;
+const PURGE_BATCH_SIZE = 2000;
+const PURGE_BATCH_PAUSE_MS = 100;
 
-    conn = None
-    cursor = None
-    table_name = None
+// ===========================================================================
+// DATABASE
+// ===========================================================================
+fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 
-    try:
+const db = new DatabaseSync(DB_FILE);
 
-        # ----------------------------------------------------------
-        # CONNECTION
-        # ----------------------------------------------------------
+db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA synchronous = NORMAL;
 
-        conn = pyodbc.connect(
-            SQL_CONN_STR,
-            timeout=5
-        )
+    -- ---------------------------------------------------------------
+    -- TABLE 1: working queue. One row per cell waiting to be sent.
+    -- ---------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS cells_queue (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        history_id   INTEGER NOT NULL,
+        cell_qrcode  TEXT    NOT NULL,
+        voltage_val  REAL,
+        ir_val       REAL,
+        material     INTEGER,
+        src_node     TEXT,
+        queued_at    TEXT    NOT NULL,
+        attempts     INTEGER NOT NULL DEFAULT 0,
+        last_error   TEXT
+    );
 
-        cursor = conn.cursor()
+    -- One queue row per history row, so a re-read updates the pending send
+    -- instead of creating a second one.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_hist_unique ON cells_queue(history_id);
 
-        # ----------------------------------------------------------
-        # STEP 0: GET STATION_ID FROM PROCESS MASTER
-        # ----------------------------------------------------------
+    -- ---------------------------------------------------------------
+    -- TABLE 2: ONE row per cell QR code.
+    -- ---------------------------------------------------------------
+    CREATE TABLE IF NOT EXISTS cells_history (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        cell_qrcode   TEXT    NOT NULL,
+        voltage_val   REAL,
+        ir_val        REAL,
+        material      INTEGER,
+        src_node      TEXT,
+        first_read_at TEXT    NOT NULL,   -- when this cell was first seen
+        read_at       TEXT    NOT NULL,   -- most recent read
+        read_count    INTEGER NOT NULL DEFAULT 1,  -- times the PLC reported it
+        change_count  INTEGER NOT NULL DEFAULT 0,  -- times the VALUES changed
+        sent_at       TEXT
+    );
 
-        cursor.execute("""
-            SELECT TOP (1) Station_ID
-            FROM [master_taco_treceability_IR].[taco_treceability].[Process_Master]
-            WHERE Process_ID = ?
-        """, (process_id,))
+    -- Enforces one row per real QR code. Partial, so "NG" and blank codes are
+    -- exempt -- they are failed reads, not identities.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hist_qr_unique
+        ON cells_history(cell_qrcode)
+        WHERE cell_qrcode <> '' AND cell_qrcode <> 'NG'
+          AND cell_qrcode <> 'ng' AND cell_qrcode <> 'NoRead'
+          AND cell_qrcode <> 'NOREAD';
 
-        process_result = cursor.fetchone()
+    CREATE INDEX IF NOT EXISTS idx_hist_qr      ON cells_history(cell_qrcode);
+    CREATE INDEX IF NOT EXISTS idx_hist_read_at ON cells_history(read_at);
+    CREATE INDEX IF NOT EXISTS idx_hist_unsent  ON cells_history(id) WHERE sent_at IS NULL;
 
-        if not process_result:
-            return {
-                "success": False,
-                "message": "Process not found."
+    CREATE TABLE IF NOT EXISTS events (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts      TEXT NOT NULL,
+        kind    TEXT NOT NULL,
+        detail  TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+`);
+
+let dbWriteError = null;
+
+// --- statements -------------------------------------------------------------
+const stmtFindByQr = db.prepare(`
+    SELECT id, voltage_val, ir_val, material, sent_at
+    FROM cells_history WHERE cell_qrcode = ? LIMIT 1
+`);
+const stmtInsertHistory = db.prepare(`
+    INSERT INTO cells_history
+        (cell_qrcode, voltage_val, ir_val, material, src_node, first_read_at, read_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+// Same values seen again: note the repeat, change nothing else.
+const stmtTouchHistory = db.prepare(`
+    UPDATE cells_history
+    SET read_at = ?, read_count = read_count + 1
+    WHERE id = ?
+`);
+// Different values: overwrite with the latest and mark unsent so it is
+// delivered to the MES again.
+const stmtUpdateHistory = db.prepare(`
+    UPDATE cells_history
+    SET voltage_val = ?, ir_val = ?, material = ?, src_node = ?,
+        read_at = ?, read_count = read_count + 1, change_count = change_count + 1,
+        sent_at = NULL
+    WHERE id = ?
+`);
+
+const stmtQueueByHistory = db.prepare(`SELECT id FROM cells_queue WHERE history_id = ?`);
+const stmtInsertQueue = db.prepare(`
+    INSERT INTO cells_queue
+        (history_id, cell_qrcode, voltage_val, ir_val, material, src_node, queued_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+// A pending send for this cell already exists: refresh it with the new values
+// and reset the retry counter, rather than queueing the cell twice.
+const stmtUpdateQueue = db.prepare(`
+    UPDATE cells_queue
+    SET voltage_val = ?, ir_val = ?, material = ?, src_node = ?,
+        queued_at = ?, attempts = 0, last_error = NULL
+    WHERE history_id = ?
+`);
+
+const stmtNextQueued = db.prepare(`
+    SELECT id, history_id, cell_qrcode, voltage_val, ir_val, material
+    FROM cells_queue ORDER BY id LIMIT 1
+`);
+const stmtDeleteQueued = db.prepare(`DELETE FROM cells_queue WHERE id = ?`);
+const stmtMarkHistorySent = db.prepare(`UPDATE cells_history SET sent_at = ? WHERE id = ?`);
+const stmtBumpAttempt = db.prepare(`
+    UPDATE cells_queue SET attempts = attempts + 1, last_error = ? WHERE id = ?
+`);
+const stmtQueueCount = db.prepare(`SELECT COUNT(*) AS n FROM cells_queue`);
+const stmtHistoryCount = db.prepare(`SELECT COUNT(*) AS n FROM cells_history`);
+const stmtHistorySentCount = db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE sent_at IS NOT NULL`);
+const stmtEvent = db.prepare(`INSERT INTO events (ts, kind, detail) VALUES (?, ?, ?)`);
+
+const stmtPurgeBatch = db.prepare(`
+    DELETE FROM cells_history
+    WHERE id IN (
+        SELECT h.id FROM cells_history h
+        WHERE h.sent_at IS NOT NULL
+          AND h.read_at < ?
+          AND NOT EXISTS (SELECT 1 FROM cells_queue q WHERE q.history_id = h.id)
+        ORDER BY h.id
+        LIMIT ?
+    )
+`);
+
+function logEvent(kind, detail) {
+    try {
+        stmtEvent.run(new Date().toISOString(), kind, detail == null ? null : String(detail));
+    } catch (err) {
+        console.error("[db] event log failed:", err.message);
+    }
+}
+
+function queueDepth() {
+    try { return Number(stmtQueueCount.get().n); } catch (err) { return -1; }
+}
+
+function isIdentityCode(qr) {
+    return NON_IDENTITY_CODES.indexOf(qr) === -1;
+}
+
+/** Values are stored exactly as read, so plain comparison is reliable here. */
+function sameValues(existing, incoming) {
+    return existing.voltage_val === incoming.v
+        && existing.ir_val === incoming.ir
+        && existing.material === incoming.mat;
+}
+
+// Session counters, shown in the status file.
+const counts = { inserted: 0, updated: 0, repeats: 0 };
+
+/**
+ * Insert or update a batch of cells, all inside one transaction.
+ *
+ * For each cell:
+ *   - new QR              -> INSERT history + INSERT queue
+ *   - known QR, same data -> read_count++ only. Nothing is queued.
+ *   - known QR, new data  -> UPDATE history, clear sent_at, queue (or refresh
+ *                            the existing queue row)
+ *   - "NG"/blank QR       -> always INSERT, never matched against anything
+ */
+function upsertBatch(rows, srcNode) {
+    const now = new Date().toISOString();
+    db.exec("BEGIN");
+    try {
+        for (const r of rows) {
+            const qr = r.cell_qrcode == null ? "" : String(r.cell_qrcode);
+            const v = r.voltage_val == null ? null : Number(r.voltage_val);
+            const ir = r.ir_val == null ? null : Number(r.ir_val);
+            const mat = r.material == null ? null : Number(r.material);
+            const incoming = { v: v, ir: ir, mat: mat };
+
+            const existing = isIdentityCode(qr) ? stmtFindByQr.get(qr) : undefined;
+
+            if (!existing) {
+                const res = stmtInsertHistory.run(qr, v, ir, mat, srcNode, now, now);
+                const historyId = Number(res.lastInsertRowid);
+                stmtInsertQueue.run(historyId, qr, v, ir, mat, srcNode, now);
+                counts.inserted++;
+                continue;
             }
 
-        # Override station_id
-        station_id = process_result[0]
-
-        print(f"Fetched Station_ID: {station_id}")
-
-        # ----------------------------------------------------------
-        # STEP 1: GET STATION DETAILS
-        # ----------------------------------------------------------
-
-        cursor.execute("""
-            SELECT Station_ID, Station_Name, category
-            FROM taco_treceability_master.taco_treceability.master_station
-            WHERE Station_ID = ?
-        """, (station_id,))
-
-        station = cursor.fetchone()
-
-        if not station:
-            return {
-                "success": False,
-                "message": "Station not found."
+            if (sameValues(existing, incoming)) {
+                // The PLC is republishing an unchanged array. Record that we
+                // saw it again and move on -- nothing to send.
+                stmtTouchHistory.run(now, existing.id);
+                counts.repeats++;
+                continue;
             }
 
-        column_name = station[1]
-        station_name = column_name.replace(" ", "_")
+            // Values changed: overwrite and send the corrected reading.
+            stmtUpdateHistory.run(v, ir, mat, srcNode, now, existing.id);
 
-        print(f"Station Name: {station_name}")
-
-        # ----------------------------------------------------------
-        # STEP 2: CHECK PACK TYPE
-        # ----------------------------------------------------------
-
-        cursor.execute("""
-            SELECT module_group_id
-            FROM taco_treceability_master.taco_treceability.master_module
-            WHERE Pack_ID = ?
-        """, (pack_id,))
-
-        modules = cursor.fetchall()
-
-        if not modules:
-            return {
-                "success": False,
-                "message": "No modules found for this pack."
+            if (stmtQueueByHistory.get(existing.id)) {
+                stmtUpdateQueue.run(v, ir, mat, srcNode, now, existing.id);
+            } else {
+                stmtInsertQueue.run(existing.id, qr, v, ir, mat, srcNode, now);
             }
+            counts.updated++;
+        }
+        db.exec("COMMIT");
+        return true;
+    } catch (err) {
+        try { db.exec("ROLLBACK"); } catch (_) {}
+        console.error("[db] upsert failed:", err.message);
+        logEvent("DB_ERROR", "upsert failed: " + err.message);
+        dbWriteError = err.message;
+        return false;
+    }
+}
 
-        # If ANY module has module_group_id NOT NULL → NPD
-        is_npd_pack = any(
-            row[0] is not None
-            for row in modules
-        )
+function confirmSent(queueId, historyId) {
+    const now = new Date().toISOString();
+    db.exec("BEGIN");
+    try {
+        stmtMarkHistorySent.run(now, historyId);
+        stmtDeleteQueued.run(queueId);
+        db.exec("COMMIT");
+        return true;
+    } catch (err) {
+        try { db.exec("ROLLBACK"); } catch (_) {}
+        console.error("[db] confirm-sent failed:", err.message);
+        logEvent("DB_ERROR", "confirm failed: " + err.message);
+        dbWriteError = err.message;
+        return false;
+    }
+}
 
-        print("Is NPD Pack:", is_npd_pack)
+// ===========================================================================
+// AUTOMATIC HISTORY PURGE
+// ===========================================================================
+let purgeRunning = false;
+let lastPurgeAt = null;
+let lastPurgeCount = 0;
 
-        # ----------------------------------------------------------
-        # STEP 3: BUILD DYNAMIC TABLE NAME
-        # ----------------------------------------------------------
+function purgeOldHistory(onDone) {
+    if (RETENTION_DAYS <= 0 || purgeRunning) { if (onDone) onDone(0); return; }
 
-        try:
+    purgeRunning = true;
+    const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
+    const startedAt = Date.now();
+    let removed = 0;
 
-            if isinstance(pack_creation_date, datetime):
+    const step = () => {
+        let changes = 0;
+        try {
+            changes = Number(stmtPurgeBatch.run(cutoff, PURGE_BATCH_SIZE).changes);
+            removed += changes;
+        } catch (err) {
+            console.error("[purge] failed:", err.message);
+            logEvent("PURGE_ERROR", err.message);
+            purgeRunning = false;
+            if (onDone) onDone(removed);
+            return;
+        }
 
-                creation_date = pack_creation_date
+        if (changes === PURGE_BATCH_SIZE) {
+            setTimeout(step, PURGE_BATCH_PAUSE_MS);
+            return;
+        }
 
-            else:
+        purgeRunning = false;
+        lastPurgeAt = new Date();
+        lastPurgeCount = removed;
+        const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
+        if (removed > 0) {
+            console.log(`[purge] removed ${removed} history records older than ${cutoff} in ${secs}s`);
+            logEvent("PURGE", `removed ${removed} rows older than ${cutoff} in ${secs}s`);
+        }
+        if (onDone) onDone(removed);
+    };
 
-                creation_date = datetime.fromisoformat(
-                    str(pack_creation_date)
-                )
+    step();
+}
 
-        except Exception:
+// ===========================================================================
+// COMMAND-LINE QUERY MODES
+// ===========================================================================
+function runCli(argv) {
+    const cmd = argv[2];
 
-            return {
-                "success": False,
-                "message": "Invalid pack_creation_date format."
+    if (cmd === "--find") {
+        const qr = argv[3];
+        if (!qr) { console.log("usage: --find <cell_qrcode>"); return true; }
+        const rows = db.prepare(`
+            SELECT h.*, q.id AS queue_id, q.attempts, q.last_error
+            FROM cells_history h
+            LEFT JOIN cells_queue q ON q.history_id = h.id
+            WHERE h.cell_qrcode = ?
+            ORDER BY h.id
+        `).all(qr);
+
+        if (rows.length === 0) {
+            console.log(`\n  ${qr}`);
+            console.log(`  NOT FOUND in the last ${RETENTION_DAYS} days.`);
+            console.log(`  (Either never read from the PLC, or older than the retention period.)\n`);
+        } else {
+            console.log(`\n  ${qr} -- ${rows.length} record(s)\n`);
+            for (const r of rows) {
+                let state;
+                if (r.sent_at) state = "SENT at " + r.sent_at;
+                else if (r.queue_id) state = `WAITING TO SEND (attempts: ${r.attempts})`;
+                else state = "NOT SENT and NOT QUEUED -- investigate";
+
+                console.log(`  history id=${r.id}  node=${r.src_node}`);
+                console.log(`    first read : ${r.first_read_at}`);
+                console.log(`    last read  : ${r.read_at}`);
+                console.log(`    reported   : ${r.read_count} time(s), values changed ${r.change_count} time(s)`);
+                console.log(`    status     : ${state}`);
+                console.log(`    voltage    : ${r.voltage_val}   ir: ${r.ir_val}   material: ${r.material}`);
+                if (r.last_error) console.log(`    last err   : ${r.last_error}`);
+                console.log("");
             }
+        }
+        return true;
+    }
 
-        if is_npd_pack:
+    if (cmd === "--stats") {
+        const hist = Number(stmtHistoryCount.get().n);
+        const sent = Number(stmtHistorySentCount.get().n);
+        const queued = Number(stmtQueueCount.get().n);
+        const distinct = Number(db.prepare(`SELECT COUNT(DISTINCT cell_qrcode) AS n FROM cells_history`).get().n);
+        const reReads = Number(db.prepare(`SELECT COALESCE(SUM(read_count - 1), 0) AS n FROM cells_history`).get().n);
+        const changed = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE change_count > 0`).get().n);
+        const ng = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE cell_qrcode IN ('', 'NG')`).get().n);
+        const oldest = db.prepare(`SELECT MIN(first_read_at) AS t FROM cells_history`).get().t;
+        const newest = db.prepare(`SELECT MAX(read_at) AS t FROM cells_history`).get().t;
+        const stuck = db.prepare(`SELECT COUNT(*) AS n FROM cells_queue WHERE attempts > 3`).get().n;
+        const orphan = db.prepare(`
+            SELECT COUNT(*) AS n FROM cells_history h
+            WHERE h.sent_at IS NULL
+              AND NOT EXISTS (SELECT 1 FROM cells_queue q WHERE q.history_id = h.id)
+        `).get().n;
+        const lastPurge = db.prepare(
+            `SELECT ts, detail FROM events WHERE kind = 'PURGE' ORDER BY id DESC LIMIT 1`
+        ).get();
 
-            # NPD
-            table_suffix = creation_date.strftime("%d-%m-%Y")
+        let sizeMb = "-";
+        try { sizeMb = (fs.statSync(DB_FILE).size / 1048576).toFixed(1) + " MB"; } catch (_) {}
 
-            table_name = (
-                f"[taco_treceability_station_status].[dbo]."
-                f"[set_status_{table_suffix}]"
-            )
+        console.log(`
+  DATABASE  : ${DB_FILE}
+  File size : ${sizeMb}
 
-            condition = """
-                pack_id = ?
-                AND pack_no = ?
-                AND module_id = ?
-            """
+  HISTORY (one row per cell QR, kept ${RETENTION_DAYS} days)
+    Cells        : ${hist}
+    Distinct QR  : ${distinct}   (should equal Cells, apart from NG/blank)
+    Sent         : ${sent}
+    NG / blank   : ${ng}
+    Re-reads     : ${reReads}   (repeat reports ignored -- no duplicate rows)
+    Values changed: ${changed} cell(s) updated after first read
+    Oldest       : ${oldest || "-"}
+    Newest       : ${newest || "-"}
 
-            params = (
-                pack_id,
-                pack_no,
-                module_id
-            )
+  QUEUE (cleared on ack)
+    Waiting : ${queued}
+    Stuck   : ${stuck}   (more than 3 failed attempts)
 
-        else:
+  Orphaned  : ${orphan}   (unsent, not in queue -- should be 0)
 
-            # NORMAL
-            table_suffix = creation_date.strftime("%m-%Y")
+  Last purge: ${lastPurge ? lastPurge.ts + " -- " + lastPurge.detail : "never"}
+`);
+        return true;
+    }
 
-            table_name = (
-                f"[taco_treceability_station_status].[dbo]."
-                f"[pack_status_{table_suffix}]"
-            )
-
-            condition = """
-                pack_id = ?
-                AND pack_no = ?
-            """
-
-            params = (
-                pack_id,
-                pack_no
-            )
-
-        print("Dynamic Table:", table_name)
-
-        # ----------------------------------------------------------
-        # STEP 4: FETCH CURRENT STATUS
-        # ----------------------------------------------------------
-
-        select_query = f"""
-            SELECT [{station_name}]
-            FROM {table_name}
-            WHERE {condition}
-        """
-
-        cursor.execute(
-            select_query,
-            params
-        )
-
-        current_row = cursor.fetchone()
-
-        if not current_row:
-            return {
-                "success": False,
-                "message": "Pack record not found in status table."
+    if (cmd === "--pending") {
+        const rows = db.prepare(`
+            SELECT id, cell_qrcode, queued_at, attempts, last_error
+            FROM cells_queue ORDER BY id LIMIT 50
+        `).all();
+        if (rows.length === 0) {
+            console.log("\n  Queue is empty -- everything has been acknowledged.\n");
+        } else {
+            console.log(`\n  ${rows.length} oldest queued record(s):\n`);
+            for (const r of rows) {
+                console.log(`  id=${r.id}  ${r.cell_qrcode}  queued ${r.queued_at}` +
+                            (r.attempts ? `  attempts=${r.attempts} (${r.last_error})` : ""));
             }
+            console.log("");
+        }
+        return true;
+    }
 
-        current_status = current_row[0]
+    if (cmd === "--purge") {
+        if (RETENTION_DAYS <= 0) {
+            console.log("\n  RETENTION_DAYS is 0 -- history is kept forever, nothing purged.\n");
+            return true;
+        }
+        console.log(`\n  Purging history older than ${RETENTION_DAYS} days...`);
+        purgeOldHistory((removed) => {
+            console.log(`  Removed ${removed} record(s).`);
+            console.log(`  Run --vacuum (service stopped) to shrink the file itself.\n`);
+            db.close();
+            process.exit(0);
+        });
+        return "async";
+    }
 
-        if not current_status:
-            return {
-                "success": False,
-                "message": "Current status is empty."
-            }
+    if (cmd === "--vacuum") {
+        console.log("\n  VACUUM rewrites the whole database and holds an exclusive lock.");
+        console.log("  Make sure the service is STOPPED before running this.\n");
+        const before = fs.statSync(DB_FILE).size;
+        const t0 = Date.now();
+        db.exec("VACUUM");
+        const after = fs.statSync(DB_FILE).size;
+        console.log(`  Done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+        console.log(`  ${(before / 1048576).toFixed(1)} MB -> ${(after / 1048576).toFixed(1)} MB\n`);
+        logEvent("VACUUM", `${before} -> ${after} bytes`);
+        return true;
+    }
 
-        # Already completed
-        if current_status.startswith("OK|"):
+    return false;
+}
 
-            return {
-                "success": True,
-                "message": "Station already completed.",
-                "data": {
-                    "pack_id": pack_id,
-                    "pack_no": pack_no,
-                    "station_name": station_name,
-                    "status": current_status
+const cliResult = runCli(process.argv);
+if (cliResult === true) {
+    db.close();
+    process.exit(0);
+}
+if (cliResult !== "async") {
+
+// ===========================================================================
+// HEALTH / STATUS FILE
+// ===========================================================================
+const health = {
+    startedAt: new Date(),
+    opcuaConnected: false,
+    cellsSent: 0,
+    lastCellAt: null,
+    lastAckAt: null,
+    lastError: null,
+};
+
+function noteError(msg) { health.lastError = { at: Date.now(), msg: msg }; }
+
+function fmtTime(d) {
+    if (!d) return "-";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ` +
+           `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function fmtAgo(d) {
+    if (!d) return "never";
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s} seconds ago`;
+    if (s < 3600) return `${Math.floor(s / 60)} minutes ago`;
+    return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
+}
+
+function overallStatus(queued) {
+    if (!health.opcuaConnected) return ["FAULT", "Not connected to the machine"];
+    if (dbWriteError) return ["FAULT", "Cannot save data to database"];
+    if (queued < 0) return ["FAULT", "Cannot read the database"];
+    if (queued > BACKLOG_FAULT) return ["FAULT", "Data is not reaching MES, backlog is large"];
+    if (queued > BACKLOG_WARN) return ["WARNING", "Backlog is building up"];
+    if (health.lastError && Date.now() - health.lastError.at < 120000)
+        return ["WARNING", health.lastError.msg];
+    return ["OK", "Normal"];
+}
+
+function writeStatus() {
+    const queued = queueDepth();
+    const [state, detail] = overallStatus(queued);
+    const upSec = Math.floor((Date.now() - health.startedAt.getTime()) / 1000);
+    const uptime = `${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m`;
+
+    const text =
+`==================================================
+     MES CELL DATA SERVICE - ${LINE_NAME}
+==================================================
+
+  OVERALL           : ${state}
+  Detail            : ${detail}
+
+  Checked at        : ${fmtTime(new Date())}
+  Service running   : ${uptime}  (since ${fmtTime(health.startedAt)})
+
+  Machine (OPC UA)  : ${health.opcuaConnected ? "CONNECTED" : "NOT CONNECTED"}
+  Last cell read    : ${fmtAgo(health.lastCellAt)}
+  Last sent to MES  : ${fmtAgo(health.lastAckAt)}
+
+  New cells         : ${counts.inserted}      (this session)
+  Updated cells     : ${counts.updated}      (same cell, new values)
+  Repeat reads      : ${counts.repeats}      (unchanged - ignored)
+  Cells sent        : ${health.cellsSent}      (this session)
+  Waiting to send   : ${queued}
+
+  History kept      : ${RETENTION_DAYS > 0 ? RETENTION_DAYS + " days" : "forever"}
+  Last cleanup      : ${lastPurgeAt ? fmtAgo(lastPurgeAt) + " (" + lastPurgeCount + " removed)" : "not yet run"}
+${DRY_RUN ? "\n  *** TEST MODE - nothing is being sent to MES ***\n" : ""}
+  Last error        : ${health.lastError ? health.lastError.msg : "(none)"}
+
+--------------------------------------------------
+  CALL ORBITTAL SUPPORT IF:
+    - OVERALL is not OK, OR
+    - this file's "Date modified" in Windows
+      Explorer is more than 2 minutes old
+==================================================
+`;
+    try {
+        fs.mkdirSync(path.dirname(STATUS_FILE), { recursive: true });
+        const tmp = STATUS_FILE + ".tmp";
+        fs.writeFileSync(tmp, text, "utf8");
+        fs.renameSync(tmp, STATUS_FILE);
+    } catch (err) {
+        console.error("[status] write failed:", err.message);
+    }
+}
+
+setInterval(writeStatus, HEARTBEAT_MS);
+writeStatus();
+
+if (RETENTION_DAYS > 0) {
+    setTimeout(() => purgeOldHistory(), PURGE_START_DELAY_MS);
+    setInterval(() => purgeOldHistory(), PURGE_INTERVAL_HOURS * 3600000);
+}
+
+// ===========================================================================
+// UPLINK
+// ===========================================================================
+let sendInFlight = false;
+
+function sendOne(row) {
+    if (sendInFlight) return;
+    sendInFlight = true;
+
+    const payload = {
+        cell_qrcode: row.cell_qrcode,
+        voltage_val: row.voltage_val,
+        ir_val: row.ir_val,
+        material: row.material,
+    };
+
+    let settled = false;
+    const ws = new W3CWebSocket(WS_URL, "echo-protocol");
+
+    const done = (failReason) => {
+        if (settled) return;
+        settled = true;
+        sendInFlight = false;
+        if (failReason) {
+            try { stmtBumpAttempt.run(failReason, row.id); } catch (_) {}
+        }
+        try { ws.close(); } catch (e) {}
+    };
+
+    const timeout = setTimeout(() => {
+        console.error("send timeout, will retry");
+        noteError("MES did not respond");
+        done("timeout");
+    }, SEND_TIMEOUT_MS);
+
+    ws.onopen = () => {
+        try {
+            ws.send(JSON.stringify(payload));
+        } catch (err) {
+            console.error("send failed:", err.message);
+            noteError("MES connection problem");
+            clearTimeout(timeout);
+            done("send failed: " + err.message);
+        }
+    };
+
+    ws.onmessage = (e) => {
+        if (confirmSent(row.id, row.history_id)) {
+            dbWriteError = null;
+            health.cellsSent++;
+            health.lastAckAt = new Date();
+            console.log(`acked ${row.cell_qrcode} | queue: ${queueDepth()}`);
+        }
+        clearTimeout(timeout);
+        done(null);
+    };
+
+    ws.onerror = (err) => {
+        console.error("Socket error:", err && err.message);
+        noteError("MES connection problem");
+        clearTimeout(timeout);
+        done("socket error");
+    };
+
+    ws.onclose = () => { clearTimeout(timeout); done("closed before ack"); };
+}
+
+setInterval(() => {
+    let row;
+    try { row = stmtNextQueued.get(); }
+    catch (err) { dbWriteError = err.message; return; }
+    if (!row) return;
+
+    if (DRY_RUN) {
+        if (confirmSent(row.id, row.history_id)) {
+            health.cellsSent++;
+            health.lastAckAt = new Date();
+        }
+        return;
+    }
+    sendOne(row);
+}, SEND_INTERVAL_MS);
+
+// ===========================================================================
+// OPC UA INGEST
+// ===========================================================================
+async function main() {
+    logEvent("START", `${LINE_NAME} pid=${process.pid} dryRun=${DRY_RUN} queued=${queueDepth()} retentionDays=${RETENTION_DAYS}`);
+
+    try {
+        const client = OPCUAClient.create({
+            endpointMustExist: false,
+            connectionStrategy: {
+                maxRetry: Infinity,
+                initialDelay: 2000,
+                maxDelay: 30 * 1000,
+            },
+        });
+        client.on("backoff", () => console.log("retrying connection"));
+
+        await client.connect(ENDPOINT_URL);
+        health.opcuaConnected = true;
+        logEvent("OPCUA_CONNECTED", ENDPOINT_URL);
+
+        client.on("connection_lost", () => {
+            health.opcuaConnected = false;
+            noteError("Lost connection to machine");
+            logEvent("OPCUA_LOST", null);
+            console.error("OPC UA connection lost");
+        });
+        client.on("connection_reestablished", () => {
+            health.opcuaConnected = true;
+            logEvent("OPCUA_RECONNECTED", null);
+            console.log("OPC UA connection re-established");
+        });
+
+        const session = await client.createSession();
+
+        const browseResult = await session.browse("RootFolder");
+        console.log(browseResult.references.map((r) => r.browseName.toString()).join("\n"));
+
+        const subscription = await session.createSubscription2({
+            requestedPublishingInterval: 1000,
+            requestedLifetimeCount: 100,
+            requestedMaxKeepAliveCount: 10,
+            maxNotificationsPerPublish: 10,
+            publishingEnabled: true,
+            priority: 10,
+        });
+
+        subscription
+            .on("started", () => console.log("subscription started - subscriptionId=", subscription.subscriptionId))
+            .on("keepalive", () => console.log("keepalive"))
+            .on("terminated", () => {
+                noteError("Machine data subscription stopped");
+                logEvent("SUBSCRIPTION_TERMINATED", null);
+                console.error("subscription terminated");
+            });
+
+        const parameters = {
+            samplingInterval: 100,
+            discardOldest: true,
+            queueSize: 100,
+        };
+
+        const monitoredItems = [];
+        for (let i = 0; i < NODES.length; i++) {
+            const itemToMonitor = {
+                nodeId: `ns=4;s=${NODES[i]}`,
+                attributeId: AttributeIds.Value,
+            };
+            console.log("Node" + (i + 1), itemToMonitor);
+            monitoredItems.push(await subscription.monitor(itemToMonitor, parameters, TimestampsToReturn.Both));
+        }
+
+        monitoredItems.forEach((req, index) => {
+            req.on("changed", (dataValue) => {
+                const raw = dataValue.value.value;
+                if (!Array.isArray(raw)) {
+                    console.error(NODES[index], "unexpected payload:", typeof raw);
+                    return;
                 }
-            }
 
-        # ----------------------------------------------------------
-        # STEP 5: REMOVE PROCESS ID
-        # ----------------------------------------------------------
-
-        timestamp = datetime.now().strftime(
-            "%Y-%m-%d %H.%M.%S"
-        )
-
-        try:
-
-            status_main, process_part, last_part = (
-                current_status.split(":", 2)
-            )
-
-        except ValueError:
-
-            return {
-                "success": False,
-                "message": "Current status format is invalid."
-            }
-
-        if process_part and process_part != "NA":
-
-            process_list = [
-                p.strip()
-                for p in process_part.split(",")
-                if p.strip()
-            ]
-
-            # Remove current process ID
-            process_list = [
-                p
-                for p in process_list
-                if p != str(process_id)
-            ]
-
-            # All completed
-            if len(process_list) == 0:
-
-                updated_status = (
-                    f"OK|{timestamp}:NA:{last_part}"
-                )
-
-            else:
-
-                new_process_part = ",".join(
-                    process_list
-                )
-
-                updated_status = (
-                    f"NOT OK:{new_process_part}:{last_part}"
-                )
-
-        else:
-
-            updated_status = (
-                f"OK|{timestamp}:NA:{last_part}"
-            )
-
-        print("Updated Status:", updated_status)
-
-        # ----------------------------------------------------------
-        # STEP 7: UPDATE TABLE
-        # ----------------------------------------------------------
-
-        update_query = f"""
-            UPDATE {table_name}
-            SET [{station_name}] = ?
-            WHERE {condition}
-        """
-
-        update_params = (
-            updated_status,
-            *params
-        )
-
-        cursor.execute(
-            update_query,
-            update_params
-        )
-
-        conn.commit()
-
-        print(
-            "Pack status updated successfully"
-        )
-
-        # ----------------------------------------------------------
-        # SUCCESS RESPONSE
-        # ----------------------------------------------------------
-
-        return {
-            "success": True,
-            "message": "Pack status updated successfully.",
-            "data": {
-                "pack_id": pack_id,
-                "pack_no": pack_no,
-                "station_name": station_name,
-                "updated_status": updated_status,
-                "table": table_name
-            }
-        }
-
-    except Exception as e:
-
-        try:
-
-            if conn:
-                conn.rollback()
-
-        except Exception:
-
-            pass
-
-        if "Invalid object name" in str(e):
-
-            return {
-                "success": False,
-                "message": (
-                    f"Table {table_name} does not exist."
-                )
-            }
-
-        return {
-            "success": False,
-            "message": str(e)
-        }
-
-    finally:
-
-        try:
-
-            if cursor:
-                cursor.close()
-
-        except Exception:
-
-            pass
-
-        try:
-
-            if conn:
-                conn.close()
-
-        except Exception:
-
-            pass
-
-
-# ------------------------------------------------------------------
-# UTILS
-# ------------------------------------------------------------------
-
-def get_formatted_timestamp():
-
-    utc = datetime.utcnow()
-
-    ist = pytz.timezone(
-        'Asia/Kolkata'
-    )
-
-    return (
-        utc
-        .replace(tzinfo=pytz.utc)
-        .astimezone(ist)
-        .strftime('%Y-%m-%d %H:%M:%S')
-    )
-
-
-def extract_selected_values(data, indices):
-
-    return [
-        data[i]
-        for i in indices
-        if i < len(data)
-    ]
-
-
-# ------------------------------------------------------------------
-# FINAL, BULLETPROOF TABLE SELECTOR
-# ------------------------------------------------------------------
-
-def find_process_register_table_for_record(
-    cursor,
-    process_time,
-    pack_id,
-    process_id,
-    module_barcode
-):
-
-    process_date_str = (
-        process_time.date().strftime("%d-%m-%y")
-    )
-
-    prefix = (
-        f"Process_Register_{process_date_str}_"
-    )
-
-    cursor.execute("""
-        SELECT TABLE_NAME
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_SCHEMA = 'taco_treceability'
-          AND TABLE_NAME LIKE ?
-        ORDER BY TABLE_NAME DESC
-    """, (prefix + '%',))
-
-    tables = [
-        row[0]
-        for row in cursor.fetchall()
-    ]
-
-    for table_name in tables:
-
-        cursor.execute(
-            f"""
-            SELECT 1
-            FROM taco_treceability.[{table_name}]
-            WHERE Pack_ID = ?
-              AND Process_ID = ?
-              AND Module_barcode = ?
-            """,
-            (
-                pack_id,
-                process_id,
-                module_barcode
-            )
-        )
-
-        if cursor.fetchone():
-
-            return table_name
-
-    return None
-
-
-# ------------------------------------------------------------------
-# FIND PROCESS RECORD
-# ------------------------------------------------------------------
-
-def find_process_record(
-    cursor,
-    controller_ip,
-    gun
-):
-
-    # --------------------------------------------------------------
-    # 1️⃣ Try Process_Register_master FIRST
-    # --------------------------------------------------------------
-
-    cursor.execute("""
-        SELECT TOP 1
-            srno,
-            Process_ID,
-            Time,
-            Line,
-            Pack_temp_number,
-            Module_barcode,
-            Module_name,
-            Pack_ID,
-            Running_Count,
-            Process_Status,
-            Torque_Array,
-            Angle_Array,
-            Target_Count
-        FROM taco_treceability.Process_Register_master
-        WHERE Torque_Array = ?
-          AND CHARINDEX(',' + ?, ',' + Angle_Array + ',') > 0
-        ORDER BY srno DESC
-    """,
-    controller_ip,
-    str(gun))
-
-    row = cursor.fetchone()
-
-    if row:
-
-        columns = [
-            c[0]
-            for c in cursor.description
-        ]
-
-        result = dict(
-            zip(columns, row)
-        )
-
-        # Add source table info
-        result["source_table"] = (
-            "Process_Register_master"
-        )
-
-        return result
-
-    # --------------------------------------------------------------
-    # 2️⃣ Fallback → TrayAssemblyBoltingCount_master
-    # --------------------------------------------------------------
-
-    cursor.execute("""
-        SELECT TOP 1
-            srno,
-            Process_ID,
-            Time,
-            Line,
-            BOM_ID,
-            Running_Count,
-            Pack_Number,
-            Pack_ID,
-            Process_Status,
-            BOM_QR,
-            Torque_Array,
-            Angle_Array,
-            Target_Count
-        FROM taco_treceability.TrayAssemblyBoltingCount_master
-        WHERE Torque_Array = ?
-          AND Angle_Array = ?
-        ORDER BY Process_ID DESC
-    """,
-    controller_ip,
-    str(gun))
-
-    row = cursor.fetchone()
-
-    if row:
-
-        columns = [
-            c[0]
-            for c in cursor.description
-        ]
-
-        result = dict(
-            zip(columns, row)
-        )
-
-        # Add source table info
-        result["source_table"] = (
-            "TrayAssemblyBoltingCount_master"
-        )
-
-        return result
-
-    # --------------------------------------------------------------
-    # 3️⃣ Nothing found
-    # --------------------------------------------------------------
-
-    return None
-
-
-# ------------------------------------------------------------------
-# PROCESS REGISTER UPDATE
-# ------------------------------------------------------------------
-
-def trigger_nomenclature_fetch(
-    row,
-    received_data
-):
-
-    conn = None
-    cursor = None
-
-    try:
-
-        torque_str, angle_str = (
-            received_data.split(",")
-        )
-
-        torque = round(
-            float(torque_str),
-            2
-        )
-
-        angle = round(
-            float(angle_str),
-            2
-        )
-
-        def parse_range(val):
-
-            low, high = map(
-                float,
-                val
-                .replace("Nm", "")
-                .replace("°", "")
-                .split("-")
-            )
-
-            return low, high
-
-        torque_min, torque_max = parse_range(
-            row["Module_name"]
-        )
-
-        angle_min, angle_max = parse_range(
-            row["Process_Status"]
-        )
-
-        if not (
-            torque_min <= torque <= torque_max
-            and
-            angle_min <= angle <= angle_max
-        ):
-
-            return
-
-        conn = pyodbc.connect(
-            SQL_CONN_STR,
-            timeout=5
-        )
-
-        cursor = conn.cursor()
-
-        table_name = (
-            find_process_register_table_for_record(
-                cursor,
-                row["Time"],
-                row["Pack_ID"],
-                row["Process_ID"],
-                row["Module_barcode"]
-            )
-        )
-
-        print(
-            "TABLE SELECTED:",
-            table_name
-        )
-
-        if not table_name:
-
-            print(
-                "❌ No matching Process_Register "
-                "table found"
-            )
-
-            return
-
-        cursor.execute(
-            f"""
-            SELECT Running_Count,
-                   Target_Count,
-                   Process_Status,
-                   Torque_Array,
-                   Angle_Array
-            FROM taco_treceability.[{table_name}]
-            WHERE Pack_ID=?
-              AND Process_ID=?
-              AND Module_barcode=?
-            """,
-            row["Pack_ID"],
-            row["Process_ID"],
-            row["Module_barcode"]
-        )
-
-        rec = cursor.fetchone()
-
-        if not rec:
-            return
-
-        (
-            running,
-            target,
-            status,
-            t_arr,
-            a_arr
-        ) = rec
-
-        t_arr = json.loads(
-            t_arr or "[]"
-        )
-
-        a_arr = json.loads(
-            a_arr or "[]"
-        )
-
-        if status == "Completed":
-            return
-
-        t_arr.append(torque)
-        a_arr.append(angle)
-
-        running += 1
-
-        if running == target:
-
-            status = "Completed"
-
-        cursor.execute(
-            f"""
-            UPDATE taco_treceability.[{table_name}]
-            SET Running_Count=?,
-                Process_Status=?,
-                Torque_Array=?,
-                Angle_Array=?
-            WHERE Pack_ID=?
-              AND Process_ID=?
-              AND Module_barcode=?
-            """,
-            running,
-            status,
-            json.dumps(t_arr),
-            json.dumps(a_arr),
-            row["Pack_ID"],
-            row["Process_ID"],
-            row["Module_barcode"]
-        )
-
-        conn.commit()
-
-        if status == "Completed":
-
-            IR_Packstatus(
-                row["Pack_ID"],
-                row["Pack_temp_number"],
-                row["Running_Count"],
-                row["Process_ID"],
-                row["Time"],
-            )
-
-            cursor.execute("""
-                DELETE FROM taco_treceability.Process_Register_master
-                WHERE Pack_ID=?
-                  AND Process_ID=?
-                  AND Line=?
-                  AND Module_barcode=?
-                  AND Running_Count=?
-            """,
-            row["Pack_ID"],
-            row["Process_ID"],
-            row["Line"],
-            row["Module_barcode"],
-            row["Running_Count"])
-
-            conn.commit()
-
-    finally:
-
-        try:
-
-            if cursor:
-                cursor.close()
-
-        except Exception:
-
-            pass
-
-        try:
-
-            if conn:
-                conn.close()
-
-        except Exception:
-
-            pass
-
-
-# ------------------------------------------------------------------
-# TRAY ASSEMBLY BOLTING PROCESSING
-# ------------------------------------------------------------------
-
-def trigger_tray_bolting_fetch(
-    row,
-    received_data
-):
-
-    conn = None
-    cursor = None
-
-    try:
-
-        # ----------------------------------------------------------
-        # Extract & validate payload
-        # ----------------------------------------------------------
-
-        pack_id = row['Pack_ID']
-        process_id = row['Process_ID']
-        line_id = row['Line']
-        station_id = row['Running_Count']
-
-        received_data = received_data
-
-        if None in (
-            pack_id,
-            process_id,
-            line_id,
-            station_id,
-            received_data
-        ):
-
-            return "Missing required fields"
-
-        try:
-
-            torque_str, angle_str = (
-                received_data.split(",")
-            )
-
-            torque = round(
-                float(torque_str),
-                2
-            )
-
-            angle = round(
-                float(angle_str),
-                2
-            )
-
-        except Exception:
-
-            return (
-                "Invalid Received_Data format"
-            )
-
-        conn = pyodbc.connect(
-            SQL_CONN_STR,
-            timeout=5
-        )
-
-        cursor = conn.cursor()
-
-        def parse_range(val: str):
-
-            low, high = map(
-                float,
-                val
-                .replace("Nm", "")
-                .replace("°", "")
-                .split("-")
-            )
-
-            return low, high
-
-        torque_min, torque_max = parse_range(
-            row['Pack_Number']
-        )
-
-        angle_min, angle_max = parse_range(
-            row['Process_Status']
-        )
-
-        if not (
-            torque_min <= torque <= torque_max
-            and
-            angle_min <= angle <= angle_max
-        ):
-
-            return {
-                "message": (
-                    "Torque or angle out of range"
-                ),
-                "torque": torque,
-                "angle": angle,
-                "expected_torque_range":
-                    f"{torque_min}-{torque_max}",
-                "expected_angle_range":
-                    f"{angle_min}-{angle_max}",
-                "skipped": True
-            }
-
-        # ----------------------------------------------------------
-        # BOM RESULT CHECK
-        # ----------------------------------------------------------
-
-        bom_qr = row['BOM_QR']
-
-        # ==========================================================
-        # TRAY ASSEMBLY FLOW
-        # ==========================================================
-
-        cursor.execute("""
-            SELECT srno,
-                   Running_Count,
-                   Target_Count,
-                   Process_Status,
-                   Torque_Array,
-                   Angle_Array
-            FROM taco_treceability.TrayAssemblyBoltingCount
-            WHERE Pack_ID = ?
-              AND Process_ID = ?
-              AND Line = ?
-              AND BOM_QR = ?
-        """,
-        (
-            pack_id,
-            process_id,
-            line_id,
-            bom_qr
-        ))
-
-        tray = cursor.fetchone()
-
-        if not tray:
-
-            return (
-                "Tray bolting record not found"
-            )
-
-        (
-            srno,
-            running_count,
-            target_count,
-            process_status,
-            torque_arr_db,
-            angle_arr_db
-        ) = tray
-
-        torque_arr = json.loads(
-            torque_arr_db or "[]"
-        )
-
-        angle_arr = json.loads(
-            angle_arr_db or "[]"
-        )
-
-        if process_status == "Completed":
-
-            return {
-                "message":
-                    "Process already completed",
-                "Running_Count":
-                    running_count,
-                "Target_Count":
-                    target_count
-            }
-
-        torque_arr.append(torque)
-        angle_arr.append(angle)
-
-        running_count += 1
-
-        if running_count == target_count:
-
-            process_status = "Completed"
-
-        cursor.execute("""
-            UPDATE taco_treceability.TrayAssemblyBoltingCount
-            SET Running_Count = ?,
-                Process_Status = ?,
-                Torque_Array = ?,
-                Angle_Array = ?
-            WHERE srno = ?
-        """,
-        (
-            running_count,
-            process_status,
-            json.dumps(torque_arr),
-            json.dumps(angle_arr),
-            srno
-        ))
-
-        conn.commit()
-
-        # ----------------------------------------------------------
-        # Delete master entry after completion
-        # ----------------------------------------------------------
-
-        print(
-            "tray Status",
-            process_status
-        )
-
-        if process_status == "Completed":
-
-            cursor.execute("""
-                DELETE FROM taco_treceability.TrayAssemblyBoltingCount_master
-                WHERE Pack_ID = ?
-                  AND Process_ID = ?
-                  AND Line = ?
-                  AND BOM_QR = ?
-                  AND Running_Count = ?
-            """,
-            (
-                pack_id,
-                process_id,
-                line_id,
-                bom_qr,
-                station_id
-            ))
-
-            conn.commit()
-
-        conn.close()
-        conn = None
-
-        return {
-            "message":
-                "Tray bolting updated successfully",
-            "Torque_Array":
-                torque_arr,
-            "Angle_Array":
-                angle_arr,
-            "Running_Count":
-                running_count,
-            "Process_Status":
-                process_status
-        }
-
-    except Exception as e:
-
-        import traceback
-
-        print(
-            traceback.format_exc()
-        )
-
-        return str(e)
-
-    finally:
-
-        try:
-
-            if cursor:
-                cursor.close()
-
-        except Exception:
-
-            pass
-
-        try:
-
-            if conn:
-                conn.close()
-
-        except Exception:
-
-            pass
-
-
-# ------------------------------------------------------------------
-# SQL + REDIS UPDATE
-# ------------------------------------------------------------------
-
-def update_sql_redis_api(
-    conn,
-    redis_client,
-    ip,
-    gun,
-    torque,
-    angle,
-    timestamp,
-    last_sql_values
-):
-
-    key = f"{ip}_{gun}"
-
-    received_data = (
-        f"{torque},{angle}"
-    )
-
-    # --------------------------------------------------------------
-    # EXISTING DUPLICATE CHECK
-    # --------------------------------------------------------------
-
-    if (
-        last_sql_values.get(key)
-        == received_data
-    ):
-
-        return False
-
-    last_sql_values[key] = received_data
-
-    cursor = conn.cursor()
-
-    # --------------------------------------------------------------
-    # FIND PROCESS
-    # --------------------------------------------------------------
-
-    process = find_process_record(
-        cursor,
-        ip,
-        gun
-    )
-
-    print(
-        "PROCESS:",
-        process
-    )
-
-    if not process:
-
-        return False
-
-    # --------------------------------------------------------------
-    # PROCESS BASED ON SOURCE TABLE
-    # --------------------------------------------------------------
-
-    if (
-        process['source_table']
-        == 'TrayAssemblyBoltingCount_master'
-    ):
-
-        trigger_tray_bolting_fetch(
-            process,
-            received_data
-        )
-
-    else:
-
-        trigger_nomenclature_fetch(
-            process,
-            received_data
-        )
-
-    # --------------------------------------------------------------
-    # SQL UPDATE
-    # --------------------------------------------------------------
-
-    cursor.execute("""
-        UPDATE taco_treceability.ir_controller_configuration
-        SET Received_Data=?,
-            Date_Time=?
-        WHERE controller_ip=?
-          AND gun=?
-          AND Process_ID=?
-          AND station_id=?
-          AND Pack_ID=?
-          AND (
-                Received_Data<>?
-                OR Received_Data IS NULL
-              )
-    """,
-    received_data,
-    timestamp,
-    ip,
-    gun,
-    process["Process_ID"],
-    process["Running_Count"],
-    process["Pack_ID"],
-    received_data)
-
-    # --------------------------------------------------------------
-    # SQL SUCCESS
-    # --------------------------------------------------------------
-
-    if cursor.rowcount:
-
-        conn.commit()
-
-        # ----------------------------------------------------------
-        # REDIS UPDATE
-        # ----------------------------------------------------------
-
-        redis_client.hset(
-            REDIS_HASH,
-            ip,
-            json.dumps({
-                "ip": ip,
-                "guns": {
-                    f"gun_{gun}": {
-                        "torque": torque,
-                        "angle": angle,
-                        "timestamp": timestamp
+                const batch = raw.slice(0, 4)
+                    .filter((c) => c && typeof c === "object")
+                    .map((c) => ({
+                        cell_qrcode: c["QR_code"],
+                        voltage_val: c["pnVoltage"],
+                        ir_val: c["pnResistance"],
+                        material: c["haveINT"],
+                    }));
+
+                if (batch.length === 0) return;
+
+                const before = counts.inserted + counts.updated;
+                if (upsertBatch(batch, NODES[index])) {
+                    dbWriteError = null;
+                    health.lastCellAt = new Date();
+                    const changedNow = (counts.inserted + counts.updated) - before;
+                    // Only log when something actually changed, otherwise the
+                    // console fills with noise from unchanged republishes.
+                    if (changedNow > 0) {
+                        console.log(`${NODES[index]}  new/updated: ${changedNow}  queue: ${queueDepth()}`);
                     }
                 }
-            })
-        )
-
-    return True
-
-
-# ------------------------------------------------------------------
-# ENIP READER
-# ------------------------------------------------------------------
-
-def enip_reader(
-    ip,
-    stop_event
-):
-
-    print(
-        f"[START] {ip}"
-    )
-
-    # --------------------------------------------------------------
-    # SQL CONNECTION
-    # --------------------------------------------------------------
-
-    conn = None
-
-    # --------------------------------------------------------------
-    # REDIS CONNECTION
-    # --------------------------------------------------------------
-
-    redis_client = redis.Redis(
-        host='localhost',
-        port=6379,
-        db=0,
-        password='Gotion@123Strong!',
-        decode_responses=True
-    )
-
-    last_sql_values = {}
-
-    pending = {}
-
-    # --------------------------------------------------------------
-    # CONTINUOUS RECONNECT LOOP
-    # --------------------------------------------------------------
-
-    while not stop_event.is_set():
-
-        try:
-
-            # ======================================================
-            # ENSURE SQL CONNECTION
-            # ======================================================
-
-            if conn is None:
-
-                print(
-                    f"[SQL CONNECT] Connecting SQL for {ip}..."
-                )
-
-                conn = pyodbc.connect(
-                    SQL_CONN_STR,
-                    timeout=5
-                )
-
-                print(
-                    f"[SQL CONNECTED] {ip}"
-                )
-
-            # ======================================================
-            # ENIP CONNECTION
-            # ======================================================
-
-            with proxy_simple(
-                ip,
-                timeout=3
-            ) as via:
-
-                print(
-                    f"[CONNECTED] {ip}"
-                )
-
-                # --------------------------------------------------
-                # CONTINUOUS ENIP READING
-                # --------------------------------------------------
-
-                while not stop_event.is_set():
-
-                    real, uint = via.read([
-                        (
-                            '@4/100/3',
-                            'REAL'
-                        ),
-                        (
-                            '@4/100/3',
-                            'UINT'
-                        ),
-                    ])
-
-                    # ------------------------------------------------
-                    # EXTRACT VALUES
-                    # ------------------------------------------------
-
-                    real_vals = (
-                        extract_selected_values(
-                            real,
-                            REAL_INDICES
-                        )
-                    )
-
-                    uint_vals = (
-                        extract_selected_values(
-                            uint,
-                            UINT_INDICES
-                        )
-                    )
-
-                    timestamp = (
-                        get_formatted_timestamp()
-                    )
-
-                    # ------------------------------------------------
-                    # EXISTING PENDING LOGIC
-                    # ------------------------------------------------
-
-                    for i in range(
-                        min(
-                            len(real_vals),
-                            len(uint_vals)
-                        )
-                    ):
-
-                        pending[
-                            f"{ip}_{i + 1}"
-                        ] = (
-                            real_vals[i],
-                            uint_vals[i]
-                        )
-
-                    # ------------------------------------------------
-                    # EXISTING SQL + REDIS PROCESSING
-                    # ------------------------------------------------
-
-                    for key, (t, a) in list(
-                        pending.items()
-                    ):
-
-                        try:
-
-                            result = (
-                                update_sql_redis_api(
-                                    conn,
-                                    redis_client,
-                                    ip,
-                                    int(
-                                        key.split('_')[1]
-                                    ),
-                                    t,
-                                    a,
-                                    timestamp,
-                                    last_sql_values
-                                )
-                            )
-
-                            if result:
-
-                                del pending[key]
-
-                        except pyodbc.Error as sql_error:
-
-                            # ========================================
-                            # SQL CONNECTION BROKEN
-                            # ========================================
-
-                            print(
-                                f"[SQL BROKEN] "
-                                f"{ip}: "
-                                f"{sql_error}"
-                            )
-
-                            # ----------------------------------------
-                            # CLOSE BROKEN CONNECTION
-                            # ----------------------------------------
-
-                            try:
-
-                                if conn:
-
-                                    conn.close()
-
-                            except Exception:
-
-                                pass
-
-                            conn = None
-
-                            # ----------------------------------------
-                            # IMPORTANT:
-                            # DO NOT DELETE PENDING DATA
-                            # ----------------------------------------
-                            #
-                            # It remains in pending and will be
-                            # retried after SQL reconnect.
-                            # ----------------------------------------
-
-                            break
-
-                    # ------------------------------------------------
-                    # EXISTING READ INTERVAL
-                    # ------------------------------------------------
-
-                    time.sleep(0.5)
-
-        except Exception as e:
-
-            # ======================================================
-            # RECONNECT
-            # ======================================================
-
-            print(
-                f"[RECONNECT] {ip} {e}"
-            )
-
-            # ------------------------------------------------------
-            # CLOSE BROKEN SQL CONNECTION
-            # ------------------------------------------------------
-
-            try:
-
-                if conn:
-
-                    conn.close()
-
-            except Exception:
-
-                pass
-
-            conn = None
-
-            # ------------------------------------------------------
-            # EXISTING RECONNECT DELAY
-            # ------------------------------------------------------
-
-            time.sleep(3)
-
-    # ==============================================================
-    # FINAL SQL CONNECTION CLOSE
-    # ==============================================================
-
-    try:
-
-        if conn:
-
-            conn.close()
-
-    except Exception:
-
-        pass
-
-    print(
-        f"[STOPPED] {ip}"
-    )
-
-
-# ------------------------------------------------------------------
-# MAIN
-# ------------------------------------------------------------------
-
-def main():
-
-    processes = {}
-
-    stop_event = Event()
-
-    print(
-        "[INFO] Monitoring controllers..."
-    )
-
-    # --------------------------------------------------------------
-    # LAST SUCCESSFUL IP LIST
-    # --------------------------------------------------------------
-
-    last_ips = set()
-
-    try:
-
-        while True:
-
-            # ======================================================
-            # FETCH CONTROLLER IP LIST
-            # ======================================================
-
-            fetched_ips = fetch_ip_list()
-
-            # ======================================================
-            # SQL CONNECTION FAILED
-            # ======================================================
-
-            if fetched_ips is None:
-
-                print(
-                    "[SQL] Unable to fetch controller IPs. "
-                    "Keeping existing controller processes."
-                )
-
-                # IMPORTANT:
-                # Do NOT convert None to set().
-                #
-                # Keep the last successful IP list.
-                ips = last_ips
-
-            else:
-
-                # ==================================================
-                # SQL SUCCESS
-                # ==================================================
-
-                ips = set(
-                    fetched_ips
-                )
-
-                last_ips = ips
-
-            # ======================================================
-            # START NEW CONTROLLER PROCESSES
-            # ======================================================
-
-            for ip in (
-                ips - processes.keys()
-            ):
-
-                print(
-                    f"[PROCESS START] {ip}"
-                )
-
-                p = Process(
-                    target=enip_reader,
-                    args=(
-                        ip,
-                        stop_event
-                    )
-                )
-
-                p.start()
-
-                processes[ip] = p
-
-            # ======================================================
-            # CHECK EXISTING PROCESSES
-            # ======================================================
-
-            for ip in list(processes):
-
-                # --------------------------------------------------
-                # If:
-                #
-                # 1. IP was removed from SQL
-                #
-                # OR
-                #
-                # 2. Child process is no longer alive
-                #
-                # then terminate/remove it.
-                # --------------------------------------------------
-
-                if (
-                    ip not in ips
-                    or not processes[ip].is_alive()
-                ):
-
-                    print(
-                        f"[PROCESS STOP] {ip}"
-                    )
-
-                    try:
-
-                        if processes[ip].is_alive():
-
-                            processes[ip].terminate()
-
-                        processes[ip].join(
-                            timeout=2
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            f"[PROCESS STOP ERROR] "
-                            f"{ip}: {e}"
-                        )
-
-                    del processes[ip]
-
-            # ======================================================
-            # EXISTING MAIN LOOP INTERVAL
-            # ======================================================
-
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-
-        # ==========================================================
-        # SHUTDOWN
-        # ==========================================================
-
-        print(
-            "[INFO] Shutdown requested..."
-        )
-
-        stop_event.set()
-
-        # ----------------------------------------------------------
-        # STOP ALL CHILD PROCESSES
-        # ----------------------------------------------------------
-
-        for ip, p in list(
-            processes.items()
-        ):
-
-            try:
-
-                if p.is_alive():
-
-                    p.terminate()
-
-                p.join(
-                    timeout=3
-                )
-
-            except Exception as e:
-
-                print(
-                    f"[SHUTDOWN ERROR] "
-                    f"{ip}: {e}"
-                )
-
-        print(
-            "[INFO] All processes stopped."
-        )
-
-
-# ------------------------------------------------------------------
-# APPLICATION ENTRY POINT
-# ------------------------------------------------------------------
-
-if __name__ == "__main__":
-
-    main()
+            });
+        });
+
+        let running = true;
+        const shutdown = async (why) => {
+            if (!running) return;
+            running = false;
+            console.log("shutting down client");
+            logEvent("STOP", `${why} | new=${counts.inserted} updated=${counts.updated} repeats=${counts.repeats}`);
+            try {
+                await subscription.terminate();
+                await session.close();
+                await client.disconnect();
+            } catch (err) {
+                console.error("shutdown error:", err.message);
+            }
+            health.opcuaConnected = false;
+            noteError("Service was stopped");
+            writeStatus();
+            try { db.close(); } catch (_) {}
+            console.log("Done");
+            process.exit(0);
+        };
+
+        process.on("SIGINT", () => shutdown("SIGINT"));
+        process.on("SIGTERM", () => shutdown("SIGTERM"));
+    } catch (err) {
+        console.log("Error !!!", err);
+        health.opcuaConnected = false;
+        noteError("Service failed to start");
+        logEvent("START_FAILED", err.message);
+        writeStatus();
+        try { db.close(); } catch (_) {}
+        process.exit(1);
+    }
+}
+
+process.on("uncaughtException", (err) => {
+    console.error("FATAL:", err);
+    noteError("Service crashed: " + err.message);
+    try { logEvent("CRASH", err.stack || err.message); writeStatus(); db.close(); } catch (_) {}
+    process.exit(1);
+});
+process.on("unhandledRejection", (err) => {
+    console.error("FATAL (promise):", err);
+    noteError("Service crashed");
+    try { logEvent("CRASH", String(err)); writeStatus(); db.close(); } catch (_) {}
+    process.exit(1);
+});
+
+main();
+
+} // end of "no CLI command" block
