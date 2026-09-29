@@ -70,10 +70,57 @@ ORDER BY ConnectionCount DESC;
 
 
 //////////////
-USE taco_treceability_master;
+EXEC sp_configure 'user connections';
 
 SELECT
-    COUNT(*) AS ConnectionCount
+    name,
+    minimum,
+    maximum,
+    value AS configured_value,
+    value_in_use
+FROM sys.configurations
+WHERE name = 'user connections';
+
+SELECT
+    DB_NAME(database_id) AS DatabaseName,
+    COUNT(*) AS CurrentConnections
 FROM sys.dm_exec_sessions
 WHERE is_user_process = 1
-  AND database_id = DB_ID('taco_treceability_master');
+GROUP BY database_id
+ORDER BY CurrentConnections DESC;
+
+DECLARE @MaxConnections INT;
+
+SELECT @MaxConnections = value_in_use
+FROM sys.configurations
+WHERE name = 'user connections';
+
+SELECT
+    DB_NAME(s.database_id) AS DatabaseName,
+    COUNT(*) AS CurrentConnections,
+    @MaxConnections AS SQLServerMaxConnections
+FROM sys.dm_exec_sessions s
+WHERE s.is_user_process = 1
+GROUP BY
+    s.database_id
+ORDER BY
+    CurrentConnections DESC;
+
+SELECT
+    DB_NAME(database_id) AS DatabaseName,
+    COUNT(*) AS CurrentConnections
+FROM sys.dm_exec_sessions
+WHERE is_user_process = 1
+  AND login_name = 'user_mis'
+GROUP BY database_id
+ORDER BY CurrentConnections DESC;
+
+SELECT
+    COUNT(*) AS TotalUserConnections
+FROM sys.dm_exec_sessions
+WHERE is_user_process = 1;
+
+SELECT
+    value_in_use AS ConfiguredMaximum
+FROM sys.configurations
+WHERE name = 'user connections';
