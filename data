@@ -1,6 +1,158 @@
-cd /d C:\Software_Tools\new_OCV\MESCellDataV2
-"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" mesCellDataService.js
 
-"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" mesCellDataService.js --stats
 
-"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" dashboard.js
+import pyodbc
+import time
+
+
+# ============================================================
+# SQL CONNECTION
+# ============================================================
+
+SQL_CONN_STR = (
+    'DRIVER={ODBC Driver 17 for SQL Server};'
+    'SERVER=10.9.4.29\\PROD_SQL_2026;'
+    'DATABASE=taco_treceability_master;'
+    'UID=user_mis;'
+    'PWD=admin@123;'
+    'Connection Timeout=5;'
+    'ConnectRetryCount=3;'
+    'ConnectRetryInterval=2;'
+)
+
+
+# ============================================================
+# FETCH IR CONTROLLER IP LIST
+# ============================================================
+
+def fetch_ip_list():
+
+    conn = None
+    cursor = None
+
+    try:
+
+        conn = pyodbc.connect(SQL_CONN_STR)
+
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT ip
+            FROM taco_treceability.MIS_ip_master
+            WHERE name = 'IR_Controller'
+              AND status = '1'
+        """)
+
+        ips = [row[0] for row in cursor.fetchall()]
+
+        print(f"[SQL] IR Controller IPs fetched: {len(ips)}")
+
+        return ips
+
+    except pyodbc.Error as e:
+
+        print(
+            f"[SQL ERROR] Unable to fetch IR controller IPs: {e}"
+        )
+
+        # IMPORTANT:
+        # None means SQL is temporarily unavailable.
+        # The caller will retain the previous IP list.
+        return None
+
+    except Exception as e:
+
+        print(
+            f"[ERROR] fetch_ip_list(): {e}"
+        )
+
+        return None
+
+    finally:
+
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+# ============================================================
+# OPTIONAL STANDALONE MONITOR
+# ============================================================
+
+def monitor_ips(interval=10):
+
+    last_ip_set = set()
+
+    print(
+        "Monitoring for new IPs... Press Ctrl+C to stop."
+    )
+
+    try:
+
+        while True:
+
+            fetched_ips = fetch_ip_list()
+
+            # SQL failed
+            if fetched_ips is None:
+
+                print(
+                    "[SQL] Connection unavailable. "
+                    "Keeping previous IP list."
+                )
+
+                time.sleep(interval)
+                continue
+
+            current_ips = set(fetched_ips)
+
+            new_ips = current_ips - last_ip_set
+
+            removed_ips = last_ip_set - current_ips
+
+            if new_ips:
+
+                print(
+                    "New IPs added:",
+                    list(new_ips)
+                )
+
+            if removed_ips:
+
+                print(
+                    "IPs removed:",
+                    list(removed_ips)
+                )
+
+            if new_ips or removed_ips:
+
+                print(
+                    "Current IPs:",
+                    list(current_ips)
+                )
+
+            last_ip_set = current_ips
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nMonitoring stopped."
+        )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+if __name__ == "__main__":
+
+    monitor_ips()
