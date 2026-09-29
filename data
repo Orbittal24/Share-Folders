@@ -67,3 +67,23 @@ GROUP BY
     program_name,
     database_id
 ORDER BY ConnectionCount DESC;
+
+
+//////////////
+SELECT
+    s.session_id,
+    s.login_name,
+    s.host_name,
+    s.program_name,
+    DB_NAME(r.database_id) AS DatabaseName,
+    r.status AS RequestStatus,
+    r.start_time,
+    r.command,
+    t.text AS QueryText
+FROM sys.dm_exec_requests r
+INNER JOIN sys.dm_exec_sessions s
+    ON r.session_id = s.session_id
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.database_id = DB_ID('taco_treceability_master')
+  AND t.text LIKE '%MIS_ip_master%'
+ORDER BY r.start_time DESC;
