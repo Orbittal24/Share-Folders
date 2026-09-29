@@ -1,854 +1,269 @@
 // ===========================================================================
-// MES CELL DATA SERVICE  (SQLite, two-table, one row per cell QR)
+// MES CELL DATA - DASHBOARD SERVER
 //
-//   cells_history  ONE row per cell QR code. If the same QR arrives again:
-//                    - identical values  -> ignored (read_count++ only)
-//                    - different values  -> row UPDATED with latest values
-//                                           and re-queued for the MES
-//                  Kept for RETENTION_DAYS, then purged automatically.
+// Read-only web view of cells_history, so operators and AMC can check whether
+// a cell reached the system without touching the database.
 //
-//   cells_queue    working queue, one row per cell waiting to be sent.
-//                  Deleted once the MES acknowledges it.
+// Matches the one-row-per-QR schema: each cell appears once, with first_read_at
+// (when the machine first reported it), read_at (most recent report),
+// read_count and change_count.
 //
-// Cells with QR code "NG" or blank are NOT deduplicated -- those are failed
-// reads, not identities, and collapsing them would destroy the record.
+// Uses ONLY Node built-ins -- nothing to install on an offline line PC.
+// Runs as a SEPARATE process from mesCellDataService.js; WAL mode allows a
+// reader alongside the writer.
 //
-// Requires Node.js 22.13+ (uses the built-in node:sqlite module).
-// Run with:  "C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" mesCellDataService.js
+// Start:  "C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" dashboard.js
+// Open:   http://localhost:8090
 //
-// Query mode (does not start the service):
-//   node mesCellDataService.js --find 03HCB00LG6T5BVG6T0992044
-//   node mesCellDataService.js --stats
-//   node mesCellDataService.js --pending
-//   node mesCellDataService.js --purge      (manual run of the same purge)
-//   node mesCellDataService.js --vacuum     (reclaim disk space, service OFF)
+// dashboard.html must sit in the same folder as this file.
 // ===========================================================================
 "use strict";
 
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
-const W3CWebSocket = require("websocket").w3cwebsocket;
-
-const {
-    OPCUAClient,
-    AttributeIds,
-    TimestampsToReturn,
-} = require("node-opcua");
 
 // ===========================================================================
-// CONFIG  -- everything you might need to change lives here
+// CONFIG
 // ===========================================================================
-const LINE_NAME = "TACO Line";
-const ENDPOINT_URL = "opc.tcp://192.168.250.1:4840";
-const WS_URL = "ws://10.9.4.28:9814";
-
 const DB_FILE = "C:\\ProgramData\\Orbittal\\MESCellData\\cells.db";
-const STATUS_FILE = "C:\\Software_Tools\\new_OCV\\MESCellDataV2\\SERVICE_STATUS.txt";
+const PORT = 8090;
 
-// Shadow-run switch. true  = record and clear the queue locally, nothing
-//                            reaches the MES.
-//                   false = normal production sending.
-const DRY_RUN = true;
+// "127.0.0.1" = this PC only (most secure).
+// "0.0.0.0"   = reachable from other PCs on the plant network.
+const HOST = "0.0.0.0";
 
-const NODES = [
-    "MES_CellData1",
-    "MES_CellData2",
-    "MES_CellData3",
-    "MES_CellData4",
-    "MES_CellData5",
-    "MES_CellData6",
-    "MES_CellData7",
-    "MES_CellData8",
-];
-
-// QR codes that are NOT real cell identities. These are never deduplicated:
-// every occurrence is stored as its own row.
-const NON_IDENTITY_CODES = ["", "NG", "ng", "NoRead", "NOREAD"];
-
-const SEND_INTERVAL_MS = 250;    // how often we try to push a record upstream
-const SEND_TIMEOUT_MS = 5000;    // give up on a socket that never answers
-const HEARTBEAT_MS = 5000;       // how often the status file is rewritten
-
-const BACKLOG_WARN = 500;
-const BACKLOG_FAULT = 5000;
-
-// ---------------------------------------------------------------------------
-// HISTORY RETENTION
-// ---------------------------------------------------------------------------
-const RETENTION_DAYS = 30;
-const PURGE_INTERVAL_HOURS = 24;
-const PURGE_START_DELAY_MS = 120000;
-const PURGE_BATCH_SIZE = 2000;
-const PURGE_BATCH_PAUSE_MS = 100;
+const LINE_NAME = "TACO Line";
+const MAX_PAGE_SIZE = 500;
+const DEFAULT_PAGE_SIZE = 100;
 
 // ===========================================================================
-// DATABASE
+// DATABASE (read-only usage -- this server only ever runs SELECT)
+//
+// Opened read-write rather than readOnly, because a read-only handle cannot
+// recover a WAL file if the service was not shut down cleanly. This process
+// issues no INSERT, UPDATE or DELETE anywhere.
 // ===========================================================================
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+if (!fs.existsSync(DB_FILE)) {
+    console.error(`\n  Database not found:\n  ${DB_FILE}\n`);
+    console.error("  Start mesCellDataService.js first so the database is created.\n");
+    process.exit(1);
+}
 
 const db = new DatabaseSync(DB_FILE);
+const HTML_PATH = path.join(__dirname, "dashboard.html");
 
-db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = NORMAL;
-
-    -- ---------------------------------------------------------------
-    -- TABLE 1: working queue. One row per cell waiting to be sent.
-    -- ---------------------------------------------------------------
-    CREATE TABLE IF NOT EXISTS cells_queue (
-        id           INTEGER PRIMARY KEY AUTOINCREMENT,
-        history_id   INTEGER NOT NULL,
-        cell_qrcode  TEXT    NOT NULL,
-        voltage_val  REAL,
-        ir_val       REAL,
-        material     INTEGER,
-        src_node     TEXT,
-        queued_at    TEXT    NOT NULL,
-        attempts     INTEGER NOT NULL DEFAULT 0,
-        last_error   TEXT
-    );
-
-    -- One queue row per history row, so a re-read updates the pending send
-    -- instead of creating a second one.
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_hist_unique ON cells_queue(history_id);
-
-    -- ---------------------------------------------------------------
-    -- TABLE 2: ONE row per cell QR code.
-    -- ---------------------------------------------------------------
-    CREATE TABLE IF NOT EXISTS cells_history (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        cell_qrcode   TEXT    NOT NULL,
-        voltage_val   REAL,
-        ir_val        REAL,
-        material      INTEGER,
-        src_node      TEXT,
-        first_read_at TEXT    NOT NULL,   -- when this cell was first seen
-        read_at       TEXT    NOT NULL,   -- most recent read
-        read_count    INTEGER NOT NULL DEFAULT 1,  -- times the PLC reported it
-        change_count  INTEGER NOT NULL DEFAULT 0,  -- times the VALUES changed
-        sent_at       TEXT
-    );
-
-    -- Enforces one row per real QR code. Partial, so "NG" and blank codes are
-    -- exempt -- they are failed reads, not identities.
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_hist_qr_unique
-        ON cells_history(cell_qrcode)
-        WHERE cell_qrcode <> '' AND cell_qrcode <> 'NG'
-          AND cell_qrcode <> 'ng' AND cell_qrcode <> 'NoRead'
-          AND cell_qrcode <> 'NOREAD';
-
-    CREATE INDEX IF NOT EXISTS idx_hist_qr      ON cells_history(cell_qrcode);
-    CREATE INDEX IF NOT EXISTS idx_hist_read_at ON cells_history(read_at);
-    CREATE INDEX IF NOT EXISTS idx_hist_unsent  ON cells_history(id) WHERE sent_at IS NULL;
-
-    CREATE TABLE IF NOT EXISTS events (
-        id      INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts      TEXT NOT NULL,
-        kind    TEXT NOT NULL,
-        detail  TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
-`);
-
-let dbWriteError = null;
-
-// --- statements -------------------------------------------------------------
-const stmtFindByQr = db.prepare(`
-    SELECT id, voltage_val, ir_val, material, sent_at
-    FROM cells_history WHERE cell_qrcode = ? LIMIT 1
-`);
-const stmtInsertHistory = db.prepare(`
-    INSERT INTO cells_history
-        (cell_qrcode, voltage_val, ir_val, material, src_node, first_read_at, read_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-`);
-// Same values seen again: note the repeat, change nothing else.
-const stmtTouchHistory = db.prepare(`
-    UPDATE cells_history
-    SET read_at = ?, read_count = read_count + 1
-    WHERE id = ?
-`);
-// Different values: overwrite with the latest and mark unsent so it is
-// delivered to the MES again.
-const stmtUpdateHistory = db.prepare(`
-    UPDATE cells_history
-    SET voltage_val = ?, ir_val = ?, material = ?, src_node = ?,
-        read_at = ?, read_count = read_count + 1, change_count = change_count + 1,
-        sent_at = NULL
-    WHERE id = ?
-`);
-
-const stmtQueueByHistory = db.prepare(`SELECT id FROM cells_queue WHERE history_id = ?`);
-const stmtInsertQueue = db.prepare(`
-    INSERT INTO cells_queue
-        (history_id, cell_qrcode, voltage_val, ir_val, material, src_node, queued_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-`);
-// A pending send for this cell already exists: refresh it with the new values
-// and reset the retry counter, rather than queueing the cell twice.
-const stmtUpdateQueue = db.prepare(`
-    UPDATE cells_queue
-    SET voltage_val = ?, ir_val = ?, material = ?, src_node = ?,
-        queued_at = ?, attempts = 0, last_error = NULL
-    WHERE history_id = ?
-`);
-
-const stmtNextQueued = db.prepare(`
-    SELECT id, history_id, cell_qrcode, voltage_val, ir_val, material
-    FROM cells_queue ORDER BY id LIMIT 1
-`);
-const stmtDeleteQueued = db.prepare(`DELETE FROM cells_queue WHERE id = ?`);
-const stmtMarkHistorySent = db.prepare(`UPDATE cells_history SET sent_at = ? WHERE id = ?`);
-const stmtBumpAttempt = db.prepare(`
-    UPDATE cells_queue SET attempts = attempts + 1, last_error = ? WHERE id = ?
-`);
-const stmtQueueCount = db.prepare(`SELECT COUNT(*) AS n FROM cells_queue`);
-const stmtHistoryCount = db.prepare(`SELECT COUNT(*) AS n FROM cells_history`);
-const stmtHistorySentCount = db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE sent_at IS NOT NULL`);
-const stmtEvent = db.prepare(`INSERT INTO events (ts, kind, detail) VALUES (?, ?, ?)`);
-
-const stmtPurgeBatch = db.prepare(`
-    DELETE FROM cells_history
-    WHERE id IN (
-        SELECT h.id FROM cells_history h
-        WHERE h.sent_at IS NOT NULL
-          AND h.read_at < ?
-          AND NOT EXISTS (SELECT 1 FROM cells_queue q WHERE q.history_id = h.id)
-        ORDER BY h.id
-        LIMIT ?
-    )
-`);
-
-function logEvent(kind, detail) {
-    try {
-        stmtEvent.run(new Date().toISOString(), kind, detail == null ? null : String(detail));
-    } catch (err) {
-        console.error("[db] event log failed:", err.message);
-    }
-}
-
-function queueDepth() {
-    try { return Number(stmtQueueCount.get().n); } catch (err) { return -1; }
-}
-
-function isIdentityCode(qr) {
-    return NON_IDENTITY_CODES.indexOf(qr) === -1;
-}
-
-/** Values are stored exactly as read, so plain comparison is reliable here. */
-function sameValues(existing, incoming) {
-    return existing.voltage_val === incoming.v
-        && existing.ir_val === incoming.ir
-        && existing.material === incoming.mat;
-}
-
-// Session counters, shown in the status file.
-const counts = { inserted: 0, updated: 0, repeats: 0 };
+// ===========================================================================
+// HELPERS
+// ===========================================================================
 
 /**
- * Insert or update a batch of cells, all inside one transaction.
- *
- * For each cell:
- *   - new QR              -> INSERT history + INSERT queue
- *   - known QR, same data -> read_count++ only. Nothing is queued.
- *   - known QR, new data  -> UPDATE history, clear sent_at, queue (or refresh
- *                            the existing queue row)
- *   - "NG"/blank QR       -> always INSERT, never matched against anything
+ * Timestamps are stored as UTC ISO strings, but the operator types a LOCAL
+ * date. Parsing "2026-09-26T00:00:00" without a Z makes JavaScript treat it
+ * as local time, and toISOString() then gives the correct UTC boundary.
+ * Without this, an IST user would see results shifted by 5.5 hours.
  */
-function upsertBatch(rows, srcNode) {
-    const now = new Date().toISOString();
-    db.exec("BEGIN");
+function localDateToUtcStart(dateStr) {
+    const d = new Date(`${dateStr}T00:00:00`);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function localDateToUtcEnd(dateStr) {
+    const d = new Date(`${dateStr}T23:59:59.999`);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function sendJson(res, status, obj) {
+    const body = JSON.stringify(obj);
+    res.writeHead(status, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Content-Length": Buffer.byteLength(body),
+    });
+    res.end(body);
+}
+
+// ===========================================================================
+// QUERY
+// ===========================================================================
+function searchCells(params) {
+    const where = [];
+    const args = [];
+
+    // Filter on FIRST read, not last. read_at moves every time the PLC
+    // republishes the same array, so filtering on it would hide a cell from
+    // the day it was actually processed.
+    if (params.from) {
+        const t = localDateToUtcStart(params.from);
+        if (t) { where.push("h.first_read_at >= ?"); args.push(t); }
+    }
+    if (params.to) {
+        const t = localDateToUtcEnd(params.to);
+        if (t) { where.push("h.first_read_at <= ?"); args.push(t); }
+    }
+    if (params.qr) {
+        // Contains-match so a partial code works. The table is bounded by the
+        // retention period and holds one row per cell, so a scan stays cheap.
+        where.push("h.cell_qrcode LIKE ?");
+        args.push("%" + params.qr + "%");
+    }
+    if (params.status === "sent") {
+        where.push("h.sent_at IS NOT NULL");
+    } else if (params.status === "notsent") {
+        where.push("h.sent_at IS NULL");
+    }
+
+    const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+
+    const total = Number(
+        db.prepare(`SELECT COUNT(*) AS n FROM cells_history h ${whereSql}`).get(...args).n
+    );
+
+    const summary = db.prepare(`
+        SELECT
+            SUM(CASE WHEN h.sent_at IS NOT NULL THEN 1 ELSE 0 END) AS sent,
+            SUM(CASE WHEN h.sent_at IS NULL     THEN 1 ELSE 0 END) AS notsent
+        FROM cells_history h ${whereSql}
+    `).get(...args);
+
+    const pageSize = Math.min(Math.max(1, params.pageSize || DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
+    const page = Math.max(1, params.page || 1);
+    const offset = (page - 1) * pageSize;
+
+    const rows = db.prepare(`
+        SELECT h.id, h.cell_qrcode, h.voltage_val, h.ir_val, h.material,
+               h.src_node, h.first_read_at, h.read_at, h.read_count,
+               h.change_count, h.sent_at,
+               q.id AS queue_id, q.attempts, q.last_error
+        FROM cells_history h
+        LEFT JOIN cells_queue q ON q.history_id = h.id
+        ${whereSql}
+        ORDER BY h.id DESC
+        LIMIT ? OFFSET ?
+    `).all(...args, pageSize, offset);
+
+    return {
+        total: total,
+        page: page,
+        pageSize: pageSize,
+        pages: Math.max(1, Math.ceil(total / pageSize)),
+        sent: Number(summary.sent || 0),
+        notSent: Number(summary.notsent || 0),
+        rows: rows.map((r) => ({
+            id: r.id,
+            qr: r.cell_qrcode,
+            voltage: r.voltage_val,
+            ir: r.ir_val,
+            material: r.material,
+            node: r.src_node,
+            firstReadAt: r.first_read_at,
+            readAt: r.read_at,
+            readCount: r.read_count,
+            changeCount: r.change_count,
+            sentAt: r.sent_at,
+            inQueue: r.queue_id != null,
+            attempts: r.attempts || 0,
+            lastError: r.last_error || null,
+        })),
+    };
+}
+
+function overview() {
+    const hist = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history`).get().n);
+    const sent = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE sent_at IS NOT NULL`).get().n);
+    const queued = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_queue`).get().n);
+    const changed = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE change_count > 0`).get().n);
+    const ng = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE cell_qrcode IN ('', 'NG')`).get().n);
+    const oldest = db.prepare(`SELECT MIN(first_read_at) AS t FROM cells_history`).get().t;
+    const newest = db.prepare(`SELECT MAX(first_read_at) AS t FROM cells_history`).get().t;
+
+    let sizeMb = null;
+    try { sizeMb = +(fs.statSync(DB_FILE).size / 1048576).toFixed(1); } catch (_) {}
+
+    return {
+        line: LINE_NAME,
+        total: hist,
+        sent: sent,
+        notSent: hist - sent,
+        queued: queued,
+        changed: changed,
+        ng: ng,
+        oldest: oldest,
+        newest: newest,
+        sizeMb: sizeMb,
+    };
+}
+
+// ===========================================================================
+// SERVER
+// ===========================================================================
+const server = http.createServer((req, res) => {
+    let url;
     try {
-        for (const r of rows) {
-            const qr = r.cell_qrcode == null ? "" : String(r.cell_qrcode);
-            const v = r.voltage_val == null ? null : Number(r.voltage_val);
-            const ir = r.ir_val == null ? null : Number(r.ir_val);
-            const mat = r.material == null ? null : Number(r.material);
-            const incoming = { v: v, ir: ir, mat: mat };
-
-            const existing = isIdentityCode(qr) ? stmtFindByQr.get(qr) : undefined;
-
-            if (!existing) {
-                const res = stmtInsertHistory.run(qr, v, ir, mat, srcNode, now, now);
-                const historyId = Number(res.lastInsertRowid);
-                stmtInsertQueue.run(historyId, qr, v, ir, mat, srcNode, now);
-                counts.inserted++;
-                continue;
-            }
-
-            if (sameValues(existing, incoming)) {
-                // The PLC is republishing an unchanged array. Record that we
-                // saw it again and move on -- nothing to send.
-                stmtTouchHistory.run(now, existing.id);
-                counts.repeats++;
-                continue;
-            }
-
-            // Values changed: overwrite and send the corrected reading.
-            stmtUpdateHistory.run(v, ir, mat, srcNode, now, existing.id);
-
-            if (stmtQueueByHistory.get(existing.id)) {
-                stmtUpdateQueue.run(v, ir, mat, srcNode, now, existing.id);
-            } else {
-                stmtInsertQueue.run(existing.id, qr, v, ir, mat, srcNode, now);
-            }
-            counts.updated++;
-        }
-        db.exec("COMMIT");
-        return true;
+        url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     } catch (err) {
-        try { db.exec("ROLLBACK"); } catch (_) {}
-        console.error("[db] upsert failed:", err.message);
-        logEvent("DB_ERROR", "upsert failed: " + err.message);
-        dbWriteError = err.message;
-        return false;
-    }
-}
-
-function confirmSent(queueId, historyId) {
-    const now = new Date().toISOString();
-    db.exec("BEGIN");
-    try {
-        stmtMarkHistorySent.run(now, historyId);
-        stmtDeleteQueued.run(queueId);
-        db.exec("COMMIT");
-        return true;
-    } catch (err) {
-        try { db.exec("ROLLBACK"); } catch (_) {}
-        console.error("[db] confirm-sent failed:", err.message);
-        logEvent("DB_ERROR", "confirm failed: " + err.message);
-        dbWriteError = err.message;
-        return false;
-    }
-}
-
-// ===========================================================================
-// AUTOMATIC HISTORY PURGE
-// ===========================================================================
-let purgeRunning = false;
-let lastPurgeAt = null;
-let lastPurgeCount = 0;
-
-function purgeOldHistory(onDone) {
-    if (RETENTION_DAYS <= 0 || purgeRunning) { if (onDone) onDone(0); return; }
-
-    purgeRunning = true;
-    const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
-    const startedAt = Date.now();
-    let removed = 0;
-
-    const step = () => {
-        let changes = 0;
-        try {
-            changes = Number(stmtPurgeBatch.run(cutoff, PURGE_BATCH_SIZE).changes);
-            removed += changes;
-        } catch (err) {
-            console.error("[purge] failed:", err.message);
-            logEvent("PURGE_ERROR", err.message);
-            purgeRunning = false;
-            if (onDone) onDone(removed);
-            return;
-        }
-
-        if (changes === PURGE_BATCH_SIZE) {
-            setTimeout(step, PURGE_BATCH_PAUSE_MS);
-            return;
-        }
-
-        purgeRunning = false;
-        lastPurgeAt = new Date();
-        lastPurgeCount = removed;
-        const secs = ((Date.now() - startedAt) / 1000).toFixed(1);
-        if (removed > 0) {
-            console.log(`[purge] removed ${removed} history records older than ${cutoff} in ${secs}s`);
-            logEvent("PURGE", `removed ${removed} rows older than ${cutoff} in ${secs}s`);
-        }
-        if (onDone) onDone(removed);
-    };
-
-    step();
-}
-
-// ===========================================================================
-// COMMAND-LINE QUERY MODES
-// ===========================================================================
-function runCli(argv) {
-    const cmd = argv[2];
-
-    if (cmd === "--find") {
-        const qr = argv[3];
-        if (!qr) { console.log("usage: --find <cell_qrcode>"); return true; }
-        const rows = db.prepare(`
-            SELECT h.*, q.id AS queue_id, q.attempts, q.last_error
-            FROM cells_history h
-            LEFT JOIN cells_queue q ON q.history_id = h.id
-            WHERE h.cell_qrcode = ?
-            ORDER BY h.id
-        `).all(qr);
-
-        if (rows.length === 0) {
-            console.log(`\n  ${qr}`);
-            console.log(`  NOT FOUND in the last ${RETENTION_DAYS} days.`);
-            console.log(`  (Either never read from the PLC, or older than the retention period.)\n`);
-        } else {
-            console.log(`\n  ${qr} -- ${rows.length} record(s)\n`);
-            for (const r of rows) {
-                let state;
-                if (r.sent_at) state = "SENT at " + r.sent_at;
-                else if (r.queue_id) state = `WAITING TO SEND (attempts: ${r.attempts})`;
-                else state = "NOT SENT and NOT QUEUED -- investigate";
-
-                console.log(`  history id=${r.id}  node=${r.src_node}`);
-                console.log(`    first read : ${r.first_read_at}`);
-                console.log(`    last read  : ${r.read_at}`);
-                console.log(`    reported   : ${r.read_count} time(s), values changed ${r.change_count} time(s)`);
-                console.log(`    status     : ${state}`);
-                console.log(`    voltage    : ${r.voltage_val}   ir: ${r.ir_val}   material: ${r.material}`);
-                if (r.last_error) console.log(`    last err   : ${r.last_error}`);
-                console.log("");
-            }
-        }
-        return true;
-    }
-
-    if (cmd === "--stats") {
-        const hist = Number(stmtHistoryCount.get().n);
-        const sent = Number(stmtHistorySentCount.get().n);
-        const queued = Number(stmtQueueCount.get().n);
-        const distinct = Number(db.prepare(`SELECT COUNT(DISTINCT cell_qrcode) AS n FROM cells_history`).get().n);
-        const reReads = Number(db.prepare(`SELECT COALESCE(SUM(read_count - 1), 0) AS n FROM cells_history`).get().n);
-        const changed = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE change_count > 0`).get().n);
-        const ng = Number(db.prepare(`SELECT COUNT(*) AS n FROM cells_history WHERE cell_qrcode IN ('', 'NG')`).get().n);
-        const oldest = db.prepare(`SELECT MIN(first_read_at) AS t FROM cells_history`).get().t;
-        const newest = db.prepare(`SELECT MAX(read_at) AS t FROM cells_history`).get().t;
-        const stuck = db.prepare(`SELECT COUNT(*) AS n FROM cells_queue WHERE attempts > 3`).get().n;
-        const orphan = db.prepare(`
-            SELECT COUNT(*) AS n FROM cells_history h
-            WHERE h.sent_at IS NULL
-              AND NOT EXISTS (SELECT 1 FROM cells_queue q WHERE q.history_id = h.id)
-        `).get().n;
-        const lastPurge = db.prepare(
-            `SELECT ts, detail FROM events WHERE kind = 'PURGE' ORDER BY id DESC LIMIT 1`
-        ).get();
-
-        let sizeMb = "-";
-        try { sizeMb = (fs.statSync(DB_FILE).size / 1048576).toFixed(1) + " MB"; } catch (_) {}
-
-        console.log(`
-  DATABASE  : ${DB_FILE}
-  File size : ${sizeMb}
-
-  HISTORY (one row per cell QR, kept ${RETENTION_DAYS} days)
-    Cells        : ${hist}
-    Distinct QR  : ${distinct}   (should equal Cells, apart from NG/blank)
-    Sent         : ${sent}
-    NG / blank   : ${ng}
-    Re-reads     : ${reReads}   (repeat reports ignored -- no duplicate rows)
-    Values changed: ${changed} cell(s) updated after first read
-    Oldest       : ${oldest || "-"}
-    Newest       : ${newest || "-"}
-
-  QUEUE (cleared on ack)
-    Waiting : ${queued}
-    Stuck   : ${stuck}   (more than 3 failed attempts)
-
-  Orphaned  : ${orphan}   (unsent, not in queue -- should be 0)
-
-  Last purge: ${lastPurge ? lastPurge.ts + " -- " + lastPurge.detail : "never"}
-`);
-        return true;
-    }
-
-    if (cmd === "--pending") {
-        const rows = db.prepare(`
-            SELECT id, cell_qrcode, queued_at, attempts, last_error
-            FROM cells_queue ORDER BY id LIMIT 50
-        `).all();
-        if (rows.length === 0) {
-            console.log("\n  Queue is empty -- everything has been acknowledged.\n");
-        } else {
-            console.log(`\n  ${rows.length} oldest queued record(s):\n`);
-            for (const r of rows) {
-                console.log(`  id=${r.id}  ${r.cell_qrcode}  queued ${r.queued_at}` +
-                            (r.attempts ? `  attempts=${r.attempts} (${r.last_error})` : ""));
-            }
-            console.log("");
-        }
-        return true;
-    }
-
-    if (cmd === "--purge") {
-        if (RETENTION_DAYS <= 0) {
-            console.log("\n  RETENTION_DAYS is 0 -- history is kept forever, nothing purged.\n");
-            return true;
-        }
-        console.log(`\n  Purging history older than ${RETENTION_DAYS} days...`);
-        purgeOldHistory((removed) => {
-            console.log(`  Removed ${removed} record(s).`);
-            console.log(`  Run --vacuum (service stopped) to shrink the file itself.\n`);
-            db.close();
-            process.exit(0);
-        });
-        return "async";
-    }
-
-    if (cmd === "--vacuum") {
-        console.log("\n  VACUUM rewrites the whole database and holds an exclusive lock.");
-        console.log("  Make sure the service is STOPPED before running this.\n");
-        const before = fs.statSync(DB_FILE).size;
-        const t0 = Date.now();
-        db.exec("VACUUM");
-        const after = fs.statSync(DB_FILE).size;
-        console.log(`  Done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-        console.log(`  ${(before / 1048576).toFixed(1)} MB -> ${(after / 1048576).toFixed(1)} MB\n`);
-        logEvent("VACUUM", `${before} -> ${after} bytes`);
-        return true;
-    }
-
-    return false;
-}
-
-const cliResult = runCli(process.argv);
-if (cliResult === true) {
-    db.close();
-    process.exit(0);
-}
-if (cliResult !== "async") {
-
-// ===========================================================================
-// HEALTH / STATUS FILE
-// ===========================================================================
-const health = {
-    startedAt: new Date(),
-    opcuaConnected: false,
-    cellsSent: 0,
-    lastCellAt: null,
-    lastAckAt: null,
-    lastError: null,
-};
-
-function noteError(msg) { health.lastError = { at: Date.now(), msg: msg }; }
-
-function fmtTime(d) {
-    if (!d) return "-";
-    const p = (n) => String(n).padStart(2, "0");
-    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ` +
-           `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
-function fmtAgo(d) {
-    if (!d) return "never";
-    const s = Math.floor((Date.now() - d.getTime()) / 1000);
-    if (s < 60) return `${s} seconds ago`;
-    if (s < 3600) return `${Math.floor(s / 60)} minutes ago`;
-    return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ago`;
-}
-
-function overallStatus(queued) {
-    if (!health.opcuaConnected) return ["FAULT", "Not connected to the machine"];
-    if (dbWriteError) return ["FAULT", "Cannot save data to database"];
-    if (queued < 0) return ["FAULT", "Cannot read the database"];
-    if (queued > BACKLOG_FAULT) return ["FAULT", "Data is not reaching MES, backlog is large"];
-    if (queued > BACKLOG_WARN) return ["WARNING", "Backlog is building up"];
-    if (health.lastError && Date.now() - health.lastError.at < 120000)
-        return ["WARNING", health.lastError.msg];
-    return ["OK", "Normal"];
-}
-
-function writeStatus() {
-    const queued = queueDepth();
-    const [state, detail] = overallStatus(queued);
-    const upSec = Math.floor((Date.now() - health.startedAt.getTime()) / 1000);
-    const uptime = `${Math.floor(upSec / 3600)}h ${Math.floor((upSec % 3600) / 60)}m`;
-
-    const text =
-`==================================================
-     MES CELL DATA SERVICE - ${LINE_NAME}
-==================================================
-
-  OVERALL           : ${state}
-  Detail            : ${detail}
-
-  Checked at        : ${fmtTime(new Date())}
-  Service running   : ${uptime}  (since ${fmtTime(health.startedAt)})
-
-  Machine (OPC UA)  : ${health.opcuaConnected ? "CONNECTED" : "NOT CONNECTED"}
-  Last cell read    : ${fmtAgo(health.lastCellAt)}
-  Last sent to MES  : ${fmtAgo(health.lastAckAt)}
-
-  New cells         : ${counts.inserted}      (this session)
-  Updated cells     : ${counts.updated}      (same cell, new values)
-  Repeat reads      : ${counts.repeats}      (unchanged - ignored)
-  Cells sent        : ${health.cellsSent}      (this session)
-  Waiting to send   : ${queued}
-
-  History kept      : ${RETENTION_DAYS > 0 ? RETENTION_DAYS + " days" : "forever"}
-  Last cleanup      : ${lastPurgeAt ? fmtAgo(lastPurgeAt) + " (" + lastPurgeCount + " removed)" : "not yet run"}
-${DRY_RUN ? "\n  *** TEST MODE - nothing is being sent to MES ***\n" : ""}
-  Last error        : ${health.lastError ? health.lastError.msg : "(none)"}
-
---------------------------------------------------
-  CALL ORBITTAL SUPPORT IF:
-    - OVERALL is not OK, OR
-    - this file's "Date modified" in Windows
-      Explorer is more than 2 minutes old
-==================================================
-`;
-    try {
-        fs.mkdirSync(path.dirname(STATUS_FILE), { recursive: true });
-        const tmp = STATUS_FILE + ".tmp";
-        fs.writeFileSync(tmp, text, "utf8");
-        fs.renameSync(tmp, STATUS_FILE);
-    } catch (err) {
-        console.error("[status] write failed:", err.message);
-    }
-}
-
-setInterval(writeStatus, HEARTBEAT_MS);
-writeStatus();
-
-if (RETENTION_DAYS > 0) {
-    setTimeout(() => purgeOldHistory(), PURGE_START_DELAY_MS);
-    setInterval(() => purgeOldHistory(), PURGE_INTERVAL_HOURS * 3600000);
-}
-
-// ===========================================================================
-// UPLINK
-// ===========================================================================
-let sendInFlight = false;
-
-function sendOne(row) {
-    if (sendInFlight) return;
-    sendInFlight = true;
-
-    const payload = {
-        cell_qrcode: row.cell_qrcode,
-        voltage_val: row.voltage_val,
-        ir_val: row.ir_val,
-        material: row.material,
-    };
-
-    let settled = false;
-    const ws = new W3CWebSocket(WS_URL, "echo-protocol");
-
-    const done = (failReason) => {
-        if (settled) return;
-        settled = true;
-        sendInFlight = false;
-        if (failReason) {
-            try { stmtBumpAttempt.run(failReason, row.id); } catch (_) {}
-        }
-        try { ws.close(); } catch (e) {}
-    };
-
-    const timeout = setTimeout(() => {
-        console.error("send timeout, will retry");
-        noteError("MES did not respond");
-        done("timeout");
-    }, SEND_TIMEOUT_MS);
-
-    ws.onopen = () => {
-        try {
-            ws.send(JSON.stringify(payload));
-        } catch (err) {
-            console.error("send failed:", err.message);
-            noteError("MES connection problem");
-            clearTimeout(timeout);
-            done("send failed: " + err.message);
-        }
-    };
-
-    ws.onmessage = (e) => {
-        if (confirmSent(row.id, row.history_id)) {
-            dbWriteError = null;
-            health.cellsSent++;
-            health.lastAckAt = new Date();
-            console.log(`acked ${row.cell_qrcode} | queue: ${queueDepth()}`);
-        }
-        clearTimeout(timeout);
-        done(null);
-    };
-
-    ws.onerror = (err) => {
-        console.error("Socket error:", err && err.message);
-        noteError("MES connection problem");
-        clearTimeout(timeout);
-        done("socket error");
-    };
-
-    ws.onclose = () => { clearTimeout(timeout); done("closed before ack"); };
-}
-
-setInterval(() => {
-    let row;
-    try { row = stmtNextQueued.get(); }
-    catch (err) { dbWriteError = err.message; return; }
-    if (!row) return;
-
-    if (DRY_RUN) {
-        if (confirmSent(row.id, row.history_id)) {
-            health.cellsSent++;
-            health.lastAckAt = new Date();
-        }
+        sendJson(res, 400, { error: "bad request" });
         return;
     }
-    sendOne(row);
-}, SEND_INTERVAL_MS);
-
-// ===========================================================================
-// OPC UA INGEST
-// ===========================================================================
-async function main() {
-    logEvent("START", `${LINE_NAME} pid=${process.pid} dryRun=${DRY_RUN} queued=${queueDepth()} retentionDays=${RETENTION_DAYS}`);
 
     try {
-        const client = OPCUAClient.create({
-            endpointMustExist: false,
-            connectionStrategy: {
-                maxRetry: Infinity,
-                initialDelay: 2000,
-                maxDelay: 30 * 1000,
-            },
-        });
-        client.on("backoff", () => console.log("retrying connection"));
-
-        await client.connect(ENDPOINT_URL);
-        health.opcuaConnected = true;
-        logEvent("OPCUA_CONNECTED", ENDPOINT_URL);
-
-        client.on("connection_lost", () => {
-            health.opcuaConnected = false;
-            noteError("Lost connection to machine");
-            logEvent("OPCUA_LOST", null);
-            console.error("OPC UA connection lost");
-        });
-        client.on("connection_reestablished", () => {
-            health.opcuaConnected = true;
-            logEvent("OPCUA_RECONNECTED", null);
-            console.log("OPC UA connection re-established");
-        });
-
-        const session = await client.createSession();
-
-        const browseResult = await session.browse("RootFolder");
-        console.log(browseResult.references.map((r) => r.browseName.toString()).join("\n"));
-
-        const subscription = await session.createSubscription2({
-            requestedPublishingInterval: 1000,
-            requestedLifetimeCount: 100,
-            requestedMaxKeepAliveCount: 10,
-            maxNotificationsPerPublish: 10,
-            publishingEnabled: true,
-            priority: 10,
-        });
-
-        subscription
-            .on("started", () => console.log("subscription started - subscriptionId=", subscription.subscriptionId))
-            .on("keepalive", () => console.log("keepalive"))
-            .on("terminated", () => {
-                noteError("Machine data subscription stopped");
-                logEvent("SUBSCRIPTION_TERMINATED", null);
-                console.error("subscription terminated");
+        if (url.pathname === "/" || url.pathname === "/index.html") {
+            const html = fs.readFileSync(HTML_PATH, "utf8");
+            res.writeHead(200, {
+                "Content-Type": "text/html; charset=utf-8",
+                "Cache-Control": "no-store",
             });
-
-        const parameters = {
-            samplingInterval: 100,
-            discardOldest: true,
-            queueSize: 100,
-        };
-
-        const monitoredItems = [];
-        for (let i = 0; i < NODES.length; i++) {
-            const itemToMonitor = {
-                nodeId: `ns=4;s=${NODES[i]}`,
-                attributeId: AttributeIds.Value,
-            };
-            console.log("Node" + (i + 1), itemToMonitor);
-            monitoredItems.push(await subscription.monitor(itemToMonitor, parameters, TimestampsToReturn.Both));
+            res.end(html);
+            return;
         }
 
-        monitoredItems.forEach((req, index) => {
-            req.on("changed", (dataValue) => {
-                const raw = dataValue.value.value;
-                if (!Array.isArray(raw)) {
-                    console.error(NODES[index], "unexpected payload:", typeof raw);
-                    return;
-                }
+        if (url.pathname === "/api/overview") {
+            sendJson(res, 200, overview());
+            return;
+        }
 
-                const batch = raw.slice(0, 4)
-                    .filter((c) => c && typeof c === "object")
-                    .map((c) => ({
-                        cell_qrcode: c["QR_code"],
-                        voltage_val: c["pnVoltage"],
-                        ir_val: c["pnResistance"],
-                        material: c["haveINT"],
-                    }));
+        if (url.pathname === "/api/search") {
+            const q = url.searchParams;
+            sendJson(res, 200, searchCells({
+                from: q.get("from") || null,
+                to: q.get("to") || null,
+                qr: (q.get("qr") || "").trim() || null,
+                status: q.get("status") || null,
+                page: parseInt(q.get("page") || "1", 10),
+                pageSize: parseInt(q.get("pageSize") || String(DEFAULT_PAGE_SIZE), 10),
+            }));
+            return;
+        }
 
-                if (batch.length === 0) return;
-
-                const before = counts.inserted + counts.updated;
-                if (upsertBatch(batch, NODES[index])) {
-                    dbWriteError = null;
-                    health.lastCellAt = new Date();
-                    const changedNow = (counts.inserted + counts.updated) - before;
-                    // Only log when something actually changed, otherwise the
-                    // console fills with noise from unchanged republishes.
-                    if (changedNow > 0) {
-                        console.log(`${NODES[index]}  new/updated: ${changedNow}  queue: ${queueDepth()}`);
-                    }
-                }
-            });
-        });
-
-        let running = true;
-        const shutdown = async (why) => {
-            if (!running) return;
-            running = false;
-            console.log("shutting down client");
-            logEvent("STOP", `${why} | new=${counts.inserted} updated=${counts.updated} repeats=${counts.repeats}`);
-            try {
-                await subscription.terminate();
-                await session.close();
-                await client.disconnect();
-            } catch (err) {
-                console.error("shutdown error:", err.message);
-            }
-            health.opcuaConnected = false;
-            noteError("Service was stopped");
-            writeStatus();
-            try { db.close(); } catch (_) {}
-            console.log("Done");
-            process.exit(0);
-        };
-
-        process.on("SIGINT", () => shutdown("SIGINT"));
-        process.on("SIGTERM", () => shutdown("SIGTERM"));
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not found");
     } catch (err) {
-        console.log("Error !!!", err);
-        health.opcuaConnected = false;
-        noteError("Service failed to start");
-        logEvent("START_FAILED", err.message);
-        writeStatus();
-        try { db.close(); } catch (_) {}
-        process.exit(1);
+        console.error("[dashboard]", err);
+        sendJson(res, 500, { error: err.message });
     }
-}
+});
+
+server.listen(PORT, HOST, () => {
+    console.log(`\n  MES Cell Data dashboard - ${LINE_NAME}`);
+    console.log(`  Database : ${DB_FILE}`);
+    console.log(`  Open     : http://localhost:${PORT}`);
+    if (HOST === "0.0.0.0") {
+        console.log(`  Also reachable from other PCs on this network on port ${PORT}`);
+    }
+    console.log(`\n  Press Ctrl+C to stop.\n`);
+});
+
+const shutdown = () => {
+    console.log("\n  stopping dashboard");
+    server.close();
+    try { db.close(); } catch (_) {}
+    process.exit(0);
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 process.on("uncaughtException", (err) => {
     console.error("FATAL:", err);
-    noteError("Service crashed: " + err.message);
-    try { logEvent("CRASH", err.stack || err.message); writeStatus(); db.close(); } catch (_) {}
     process.exit(1);
 });
-process.on("unhandledRejection", (err) => {
-    console.error("FATAL (promise):", err);
-    noteError("Service crashed");
-    try { logEvent("CRASH", String(err)); writeStatus(); db.close(); } catch (_) {}
-    process.exit(1);
-});
-
-main();
-
-} // end of "no CLI command" block
