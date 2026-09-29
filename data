@@ -1,126 +1,184 @@
-1. Current total SQL connections
-Run this in SQL Server Management Studio:
-SELECT 
-    COUNT(*) AS TotalConnections
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1;
-
-This tells you the current number of user connections to the SQL Server instance.
-2. Connections grouped by database
-This is more useful for your application:
-SELECT
-    DB_NAME(database_id) AS DatabaseName,
-    COUNT(*) AS ConnectionCount
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1
-GROUP BY database_id
-ORDER BY ConnectionCount DESC;
-
-You may see something like:
-DatabaseName                    ConnectionCount
-------------------------------------------------
-taco_treceability_ir            25
-taco_treceability_master        8
-taco_treceability               15
-
-3. Find connections created by your Python application
-Since your application uses:
-UID=user_mis
-
-run:
-SELECT
-    s.session_id,
-    s.login_name,
-    s.host_name,
-    s.program_name,
-    DB_NAME(s.database_id) AS DatabaseName,
-    s.status,
-    s.login_time,
-    s.last_request_start_time,
-    s.last_request_end_time
-FROM sys.dm_exec_sessions s
-WHERE s.is_user_process = 1
-  AND s.login_name = 'user_mis'
-ORDER BY s.login_time DESC;
-
-This is particularly useful for your case.
-4. Count only user_mis connections
-SELECT
-    COUNT(*) AS UserMISConnections
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1
-  AND login_name = 'user_mis';
-
-5. See connections by application
-This can help determine whether reader_process.py is creating many connections:
-SELECT
-    login_name,
-    host_name,
-    program_name,
-    DB_NAME(database_id) AS DatabaseName,
-    COUNT(*) AS ConnectionCount
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1
-GROUP BY
-    login_name,
-    host_name,
-    program_name,
-    database_id
-ORDER BY ConnectionCount DESC;
+import pyodbc
+import time
 
 
-//////////////
-EXEC sp_configure 'user connections';
+# ================================================================
+# SQL CONNECTION CONFIGURATION
+# ================================================================
 
-SELECT
-    name,
-    minimum,
-    maximum,
-    value AS configured_value,
-    value_in_use
-FROM sys.configurations
-WHERE name = 'user connections';
+SQL_CONN_STR = (
+    'DRIVER={ODBC Driver 17 for SQL Server};'
+    'SERVER=10.9.4.29\\PROD_SQL_2026;'
+    'DATABASE=taco_treceability_master;'
+    'UID=user_mis;'
+    'PWD=admin@123;'
+    'Connection Timeout=10;'
+    'ConnectRetryCount=3;'
+    'ConnectRetryInterval=5;'
+)
 
-SELECT
-    DB_NAME(database_id) AS DatabaseName,
-    COUNT(*) AS CurrentConnections
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1
-GROUP BY database_id
-ORDER BY CurrentConnections DESC;
 
-DECLARE @MaxConnections INT;
+# ================================================================
+# FETCH IP LIST
+# ================================================================
 
-SELECT @MaxConnections = value_in_use
-FROM sys.configurations
-WHERE name = 'user connections';
+def fetch_ip_list():
 
-SELECT
-    DB_NAME(s.database_id) AS DatabaseName,
-    COUNT(*) AS CurrentConnections,
-    @MaxConnections AS SQLServerMaxConnections
-FROM sys.dm_exec_sessions s
-WHERE s.is_user_process = 1
-GROUP BY
-    s.database_id
-ORDER BY
-    CurrentConnections DESC;
+    conn = None
+    cursor = None
 
-SELECT
-    DB_NAME(database_id) AS DatabaseName,
-    COUNT(*) AS CurrentConnections
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1
-  AND login_name = 'user_mis'
-GROUP BY database_id
-ORDER BY CurrentConnections DESC;
+    max_retries = 3
 
-SELECT
-    COUNT(*) AS TotalUserConnections
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1;
+    for attempt in range(1, max_retries + 1):
 
-SELECT
-    value_in_use AS ConfiguredMaximum
-FROM sys.configurations
-WHERE name = 'user connections';
+        try:
+
+            print(
+                f"[SQL IP LIST] Connecting to SQL Server "
+                f"(attempt {attempt}/{max_retries})..."
+            )
+
+            conn = pyodbc.connect(SQL_CONN_STR)
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT ip
+                FROM taco_treceability.MIS_ip_master
+                WHERE name = 'IR_Controller'
+                  AND status = '1'
+            """)
+
+            ips = [row[0] for row in cursor.fetchall()]
+
+            print(
+                f"[SQL IP LIST] Successfully fetched "
+                f"{len(ips)} controller IP(s)."
+            )
+
+            return ips
+
+        except pyodbc.Error as e:
+
+            print(
+                f"[SQL IP LIST ERROR] "
+                f"Attempt {attempt}/{max_retries}: {e}"
+            )
+
+            if attempt < max_retries:
+
+                print(
+                    "[SQL IP LIST] SQL connection failed. "
+                    "Retrying in 3 seconds..."
+                )
+
+                time.sleep(3)
+
+            else:
+
+                print(
+                    "[SQL IP LIST] All SQL connection attempts failed."
+                )
+
+        except Exception as e:
+
+            print(
+                f"[SQL IP LIST ERROR] Unexpected error: {e}"
+            )
+
+            if attempt < max_retries:
+                time.sleep(3)
+
+        finally:
+
+            try:
+                if cursor:
+                    cursor.close()
+            except Exception:
+                pass
+
+            try:
+                if conn:
+                    conn.close()
+            except Exception:
+                pass
+
+            cursor = None
+            conn = None
+
+    # ------------------------------------------------------------
+    # IMPORTANT:
+    # Return None instead of terminating the complete application.
+    # reader_process.py will keep existing controller processes
+    # running and retry fetching the IP list later.
+    # ------------------------------------------------------------
+
+    return None
+
+
+# ================================================================
+# MONITOR IPS
+# ================================================================
+
+def monitor_ips(interval=10):
+
+    last_ip_set = set()
+
+    print("Monitoring for new IPs... Press Ctrl+C to stop.")
+
+    try:
+
+        while True:
+
+            current_ips = fetch_ip_list()
+
+            # ----------------------------------------------------
+            # SQL temporarily unavailable
+            # ----------------------------------------------------
+            if current_ips is None:
+
+                print(
+                    "[IP MONITOR] Unable to fetch IP list. "
+                    "Keeping previous IP list."
+                )
+
+                time.sleep(interval)
+                continue
+
+            current_ips = set(current_ips)
+
+            new_ips = current_ips - last_ip_set
+            removed_ips = last_ip_set - current_ips
+
+            if new_ips:
+                print(
+                    "[IP MONITOR] New IPs added:",
+                    list(new_ips)
+                )
+
+            if removed_ips:
+                print(
+                    "[IP MONITOR] IPs removed:",
+                    list(removed_ips)
+                )
+
+            if new_ips or removed_ips:
+                print(
+                    "[IP MONITOR] Current IPs:",
+                    list(current_ips)
+                )
+
+            last_ip_set = current_ips
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+
+        print("\nMonitoring stopped.")
+
+
+# ================================================================
+# MAIN
+# ================================================================
+
+if __name__ == "__main__":
+    monitor_ips()
