@@ -70,9 +70,10 @@ ORDER BY ConnectionCount DESC;
 
 
 //////////////
+USE taco_treceability_master;
+
 SELECT
-    COUNT(*) AS ActiveMISIPMasterQueries
-FROM sys.dm_exec_requests r
-CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-WHERE r.database_id = DB_ID('taco_treceability_master')
-  AND t.text LIKE '%MIS_ip_master%';
+    COUNT(*) AS ConnectionCount
+FROM sys.dm_exec_sessions
+WHERE is_user_process = 1
+  AND database_id = DB_ID('taco_treceability_master');
