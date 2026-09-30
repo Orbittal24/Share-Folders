@@ -1,2 +1,6 @@
-cd /d C:\Software_Tools\new_OCV\MESCellDataV2
-"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" mesCellDataService.js --events
+SELECT
+    @@SERVERNAME AS ServerName,
+    DB_NAME() AS CurrentDatabase,
+    SUSER_SNAME() AS LoginName,
+    HOST_NAME() AS HostName,
+    GETDATE() AS ConnectionTime;
