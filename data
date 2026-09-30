@@ -1,16 +1,38 @@
-Get-ScheduledTask -TaskName "Orbittal MES Cell Data Service" |
-    Select-Object -ExpandProperty Settings |
-    Select-Object ExecutionTimeLimit, RestartCount, RestartInterval, MultipleInstances
+@echo off
+setlocal
+set NSSM=C:\Software_Tools\new_OCV\nssm.exe
+set NODE=C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe
+set APPDIR=C:\Software_Tools\new_OCV\MESCellDataV2
 
-ExecutionTimeLimit should show PT0S. If it shows P3D, the setting didn't apply — rerun PowerShell elevated.
+if not exist "%APPDIR%\logs" mkdir "%APPDIR%\logs"
 
-3. Start them
-bat
-schtasks /Run /TN "Orbittal MES Cell Data Service"
-timeout /t 15
-schtasks /Run /TN "Orbittal MES Dashboard"
-4. Confirm
-bat
-schtasks /Query /TN "Orbittal MES Cell Data Service" /V /FO LIST | findstr /C:"Status" /C:"Last Result"
+"%NSSM%" install MESCellData "%NODE%" "mesCellDataService.js"
+"%NSSM%" set MESCellData AppDirectory "%APPDIR%"
+"%NSSM%" set MESCellData DisplayName "Orbittal MES Cell Data Service"
+"%NSSM%" set MESCellData Description "Reads cell data from OPC UA and forwards it to the MES"
+"%NSSM%" set MESCellData Start SERVICE_AUTO_START
+"%NSSM%" set MESCellData AppStdout "%APPDIR%\logs\service.log"
+"%NSSM%" set MESCellData AppStderr "%APPDIR%\logs\service-error.log"
+"%NSSM%" set MESCellData AppRotateFiles 1
+"%NSSM%" set MESCellData AppRotateBytes 10485760
+"%NSSM%" set MESCellData AppStopMethodConsole 15000
+"%NSSM%" set MESCellData AppExit Default Restart
+"%NSSM%" set MESCellData AppRestartDelay 5000
 
-Running and 267009 are both good — 267009 means "task is currently running", not an
+"%NSSM%" install MESDashboard "%NODE%" "dashboard.js"
+"%NSSM%" set MESDashboard AppDirectory "%APPDIR%"
+"%NSSM%" set MESDashboard DisplayName "Orbittal MES Cell Data Dashboard"
+"%NSSM%" set MESDashboard Start SERVICE_AUTO_START
+"%NSSM%" set MESDashboard DependOnService MESCellData
+"%NSSM%" set MESDashboard AppStdout "%APPDIR%\logs\dashboard.log"
+"%NSSM%" set MESDashboard AppStderr "%APPDIR%\logs\dashboard-error.log"
+"%NSSM%" set MESDashboard AppRotateFiles 1
+"%NSSM%" set MESDashboard AppExit Default Restart
+
+"%NSSM%" start MESCellData
+timeout /t 10
+"%NSSM%" start MESDashboard
+
+echo.
+echo Done. Open services.msc and look for "Orbittal MES Cell Data Service".
+pause
