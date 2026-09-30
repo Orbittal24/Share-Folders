@@ -1,15 +1,22 @@
 SELECT
-    @@SERVERNAME AS ServerName,
-    DB_NAME() AS CurrentDatabase,
-    SUSER_SNAME() AS LoginName,
-    HOST_NAME() AS HostName,
-    GETDATE() AS ConnectionTime;
-
+    DB_NAME(database_id) AS DatabaseName,
+    COUNT(*) AS ConnectionCount
+FROM sys.dm_exec_sessions
+WHERE is_user_process = 1
+GROUP BY database_id
+ORDER BY ConnectionCount DESC;
 
 SELECT
-    name AS DatabaseName,
-    state_desc AS Status,
-    user_access_desc AS UserAccess,
-    recovery_model_desc AS RecoveryModel
-FROM sys.databases
-ORDER BY name;
+    DB_NAME(database_id) AS DatabaseName,
+    host_name AS HostName,
+    program_name AS ApplicationName,
+    login_name AS LoginName,
+    COUNT(*) AS ConnectionCount
+FROM sys.dm_exec_sessions
+WHERE is_user_process = 1
+GROUP BY
+    database_id,
+    host_name,
+    program_name,
+    login_name
+ORDER BY ConnectionCount DESC;
