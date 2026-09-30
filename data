@@ -1,2 +1,25 @@
-"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" sql.js "DELETE FROM cells_queue"
-"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" sql.js "DELETE FROM cells_history"
+@echo off
+setlocal
+set NODE=C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe
+set APPDIR=C:\Software_Tools\new_OCV\MESCellDataV2
+
+echo Creating scheduled tasks...
+
+schtasks /Create /TN "Orbittal MES Cell Data Service" /F ^
+ /TR "\"%NODE%\" \"%APPDIR%\mesCellDataService.js\"" ^
+ /SC ONSTART /RU "SYSTEM" /RL HIGHEST
+
+schtasks /Create /TN "Orbittal MES Dashboard" /F ^
+ /TR "\"%NODE%\" \"%APPDIR%\dashboard.js\"" ^
+ /SC ONSTART /DELAY 0000:01 /RU "SYSTEM" /RL HIGHEST
+
+echo.
+echo Tasks created. Now apply the settings schtasks cannot set:
+echo   1. Open Task Scheduler
+echo   2. For BOTH tasks, Properties -^> Settings tab:
+echo        - UNTICK "Stop the task if it runs longer than"   ^<-- important
+echo        - TICK   "If the task fails, restart every" 1 minute, 999 times
+echo        - Set "If the task is already running" to "Do not start a new instance"
+echo   3. Properties -^> General: tick "Run whether user is logged on or not"
+echo.
+pause
