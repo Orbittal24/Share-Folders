@@ -20,3 +20,7 @@ GROUP BY
     program_name,
     login_name
 ORDER BY ConnectionCount DESC;
+
+SELECT COUNT(*) AS TotalSQLConnections
+FROM sys.dm_exec_sessions
+WHERE is_user_process = 1;
