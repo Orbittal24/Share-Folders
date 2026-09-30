@@ -1,26 +1,2 @@
-SELECT
-    DB_NAME(database_id) AS DatabaseName,
-    COUNT(*) AS ConnectionCount
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1
-GROUP BY database_id
-ORDER BY ConnectionCount DESC;
-
-SELECT
-    DB_NAME(database_id) AS DatabaseName,
-    host_name AS HostName,
-    program_name AS ApplicationName,
-    login_name AS LoginName,
-    COUNT(*) AS ConnectionCount
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1
-GROUP BY
-    database_id,
-    host_name,
-    program_name,
-    login_name
-ORDER BY ConnectionCount DESC;
-
-SELECT COUNT(*) AS TotalSQLConnections
-FROM sys.dm_exec_sessions
-WHERE is_user_process = 1;
+"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" sql.js "DELETE FROM cells_queue"
+"C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe" sql.js "DELETE FROM cells_history"
