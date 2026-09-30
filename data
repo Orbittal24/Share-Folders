@@ -4,3 +4,12 @@ SELECT
     SUSER_SNAME() AS LoginName,
     HOST_NAME() AS HostName,
     GETDATE() AS ConnectionTime;
+
+
+SELECT
+    name AS DatabaseName,
+    state_desc AS Status,
+    user_access_desc AS UserAccess,
+    recovery_model_desc AS RecoveryModel
+FROM sys.databases
+ORDER BY name;
