@@ -1,65 +1,32 @@
-UPDATE taco_treceability.station_status_ok_universal_test
-SET station_id =
-    CASE station_id
-        WHEN '2' THEN 'Pack Assembly'
-        WHEN '3' THEN 'IR Tray Assembly PC1'
-        WHEN '4' THEN 'ALT'
-        WHEN '5' THEN 'PDI'
-        WHEN '7' THEN 'IR Pack Assembly PC1'
-        WHEN '8' THEN 'IR Pack Assembly PC2'
-        WHEN '9' THEN 'IR Pack Assembly PC3'
-        WHEN '10' THEN 'IR Pack Assembly PC4'
-        WHEN '11' THEN 'IR Pack Assembly PC5'
-        WHEN '12' THEN 'IR Pack Assembly PC6'
-        WHEN '13' THEN 'IR Pack Assembly PC7'
-        WHEN '14' THEN 'IR Pack Assembly PC8'
-        WHEN '15' THEN 'IR Module Assembly PC1'
-        WHEN '16' THEN 'IR Module Assembly PC2'
-        WHEN '18' THEN 'IR Pack Assembly Rework PC1'
-        WHEN '19' THEN 'IR ALT PC1'
-        WHEN '20' THEN 'QA_gate2'
-        WHEN '21' THEN 'QA_gate3'
-        WHEN '22' THEN 'QA_gate4'
-        WHEN '28' THEN 'module_print_status'
-        WHEN '29' THEN 'compression_status'
-        WHEN '30' THEN 'ibb_status'
-        WHEN '31' THEN 'module_screwing_status'
-        WHEN '32' THEN 'welding_status'
-        WHEN '33' THEN 'voltage_ir_status'
-        WHEN '35' THEN 'bom_status'
-        WHEN '36' THEN 'IR_Screwing'
-        WHEN '39' THEN 'BMS_Link'
-        WHEN '40' THEN 'Current_Sensor_Link'
-        WHEN '41' THEN 'BMS_Flashing'
-        WHEN '3008' THEN 'QA_gate_Audit'
-        WHEN '3009' THEN 'QA_gate5'
-        WHEN '3010' THEN 'QA_gate1'
-        WHEN '3011' THEN 'can_PA'
-        WHEN '3012' THEN 'can_EOL'
-        WHEN '3013' THEN 'can_ALT'
-        WHEN '3014' THEN 'can_PDI'
-        WHEN '3015' THEN 'IR Pack Assembly PC9'
-        WHEN '3016' THEN 'IR Pack Assembly PC10'
-        WHEN '3021' THEN 'ALT2'
-        WHEN '3022' THEN 'ALT3'
-        WHEN '3023' THEN 'QA_gate4_2'
-        WHEN '3024' THEN 'compression_status2'
-        WHEN '3025' THEN 'EOL'
-        WHEN '3026' THEN 'EOL_Autograph'
-        WHEN '3035' THEN 'Pack_Vision'
-        WHEN '3036' THEN 'Welding_Inspection'
-        WHEN '3037' THEN 'Module_Vision'
-        WHEN '3038' THEN 'IR Pack Assembly Rework PC2'
-        WHEN '3039' THEN 'Rework_station'
-        WHEN '3040' THEN 'UTM File Upload'
-        WHEN '3041' THEN 'Cell Cycler'
-        WHEN '3042' THEN 'IR ALT PC2'
-        WHEN '3043' THEN 'ALT_BOM_Verification'
-        WHEN '3044' THEN 'Polarity_Template'
-        WHEN '3045' THEN 'Busbar_Template'
-        WHEN '3046' THEN 'ALT4'
-        WHEN '3050' THEN 'ALT8'
-        WHEN '3051' THEN 'ALT9'
-        WHEN '3052' THEN 'ALT10'
-        ELSE station_id
-    END;
+SELECT 
+    module_barcode,
+    final_qr_code,
+    battery_id,
+    battery_pack_name,
+    module_name,
+    module_id,
+    date_time_start,
+    date_time_end,
+    today_date
+FROM taco_treceability.production_count_archive_compress
+WHERE module_barcode IN (
+    SELECT module_barcode
+    FROM taco_treceability.production_count_archive_compress
+    WHERE module_barcode IS NOT NULL
+      AND module_barcode <> ''
+    GROUP BY module_barcode
+    HAVING COUNT(*) > 1
+)
+ORDER BY module_barcode, date_time_start;
+
+If you only want the duplicate module_barcode and their final_qr_code
+SELECT 
+    module_barcode,
+    STRING_AGG(final_qr_code, ', ') AS final_qr_codes,
+    COUNT(*) AS duplicate_count
+FROM taco_treceability.production_count_archive_compress
+WHERE module_barcode IS NOT NULL
+  AND module_barcode <> ''
+GROUP BY module_barcode
+HAVING COUNT(*) > 1
+ORDER BY duplicate_count DESC;
