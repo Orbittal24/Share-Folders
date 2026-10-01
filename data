@@ -1,19 +1,5 @@
-SET IDENTITY_INSERT taco_treceability.station_status_ok_universal_test ON;
-
-INSERT INTO taco_treceability.station_status_ok_universal_test
-(
-    sr_no,
-    station_id,
-    barcode_string,
-    username,
-    today_date
-)
-SELECT
-    sr_no,
-    station_id,
-    barcode_string,
-    username,
-    today_date
-FROM taco_treceability.station_status_ok_universal;
-
-SET IDENTITY_INSERT taco_treceability.station_status_ok_universal_test OFF;
+UPDATE T
+SET T.station_id = M.Station_Name
+FROM taco_treceability.station_status_ok_universal_test T
+INNER JOIN taco_treceability.master_station M
+    ON T.station_id = M.Station_ID;
