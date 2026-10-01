@@ -1,3 +1,5 @@
+SET IDENTITY_INSERT taco_treceability.station_status_ok_universal_test ON;
+
 INSERT INTO taco_treceability.station_status_ok_universal_test
 (
     sr_no,
@@ -13,3 +15,5 @@ SELECT
     username,
     today_date
 FROM taco_treceability.station_status_ok_universal;
+
+SET IDENTITY_INSERT taco_treceability.station_status_ok_universal_test OFF;
