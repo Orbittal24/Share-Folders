@@ -1,865 +1,976 @@
-<!DOCTYPE html>
-<html lang="en">
+/************************************************************
+ * MODULES
+ ************************************************************/
 
-<head>
+const path = require("path");
+const sql = require("mssql");
+const axios = require("axios");
+const fs = require("fs");
+const https = require("https");
+const socketio = require("socket.io");
+const express = require("express");
 
-    <meta charset="UTF-8">
-
-    <title>Station Status</title>
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1"
-    >
+const app = express();
 
 
-    <style>
+/************************************************************
+ * SSL CERTIFICATE
+ ************************************************************/
 
-        body {
-            background: #f4f6f9;
-            font-family: Arial;
+const sslOptions = {
+    key: fs.readFileSync("./certs/server.key"),
+    cert: fs.readFileSync("./certs/server.pem")
+};
+
+
+/************************************************************
+ * CREATE HTTPS SERVER
+ ************************************************************/
+
+const httpsServer = https.createServer(
+    sslOptions,
+    app
+);
+
+
+/************************************************************
+ * SOCKET.IO OVER HTTPS
+ ************************************************************/
+
+const io = socketio(httpsServer, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
+
+/************************************************************
+ * MIDDLEWARE
+ ************************************************************/
+
+app.use(express.static(__dirname));
+
+app.use(express.json());
+
+app.use(
+    express.urlencoded({
+        extended: true
+    })
+);
+
+
+/************************************************************
+ * DB CONFIG 1 - MASTER DB
+ *
+ * Database:
+ * taco_treceability_master
+ *
+ * Used for:
+ * master_station
+ ************************************************************/
+
+const sqlConfig = {
+
+    user: "user_mis",
+
+    password: "admin@123",
+
+    database: "taco_treceability_master",
+
+    server: "10.9.4.29",
+
+    port: 1433,
+
+    options: {
+
+        instanceName: "PROD_SQL_2026",
+
+        encrypt: false,
+
+        trustServerCertificate: true
+
+    },
+
+    pool: {
+
+        max: 10,
+
+        min: 0,
+
+        idleTimeoutMillis: 30000
+
+    }
+
+};
+
+
+/************************************************************
+ * DB CONFIG 2 - LOG DB
+ *
+ * Database:
+ * taco_treceability
+ *
+ * Used for:
+ *
+ * station_status_ok_universal_password
+ * station_status_ok_universal
+ ************************************************************/
+
+const sqlConfig2 = {
+
+    user: "user_mis",
+
+    password: "admin@123",
+
+    database: "taco_treceability",
+
+    server: "10.9.4.29",
+
+    port: 1433,
+
+    options: {
+
+        instanceName: "PROD_SQL_2026",
+
+        encrypt: false,
+
+        trustServerCertificate: true
+
+    },
+
+    pool: {
+
+        max: 10,
+
+        min: 0,
+
+        idleTimeoutMillis: 30000
+
+    }
+
+};
+
+
+/************************************************************
+ * DB CONNECTIONS
+ ************************************************************/
+
+const dbConn =
+    new sql.ConnectionPool(sqlConfig);
+
+const dbConn2 =
+    new sql.ConnectionPool(sqlConfig2);
+
+
+/************************************************************
+ * CONNECT TO MASTER DB
+ ************************************************************/
+
+dbConn.connect()
+
+    .then(() => {
+
+        console.log(
+            "Connected to taco_treceability_master"
+        );
+
+    })
+
+    .catch(err => {
+
+        console.error(
+            "Master DB Connection Error:",
+            err
+        );
+
+    });
+
+
+/************************************************************
+ * CONNECT TO LOG DB
+ ************************************************************/
+
+dbConn2.connect()
+
+    .then(() => {
+
+        console.log(
+            "Connected to taco_treceability"
+        );
+
+    })
+
+    .catch(err => {
+
+        console.error(
+            "Log DB Connection Error:",
+            err
+        );
+
+    });
+
+
+/************************************************************
+ * HTTPS SERVER LISTEN
+ ************************************************************/
+
+httpsServer.listen(
+    3276,
+    "0.0.0.0",
+    function () {
+
+        console.log(
+            "HTTPS Server Running on https://0.0.0.0:3276"
+        );
+
+    }
+);
+
+
+/************************************************************
+ * UI ROUTE
+ ************************************************************/
+
+app.get(
+    "/station_status",
+    (req, res) => {
+
+        res.sendFile(
+            path.join(
+                __dirname,
+                "app_station_status_ui.html"
+            )
+        );
+
+    }
+);
+
+
+/************************************************************
+ * API: LOAD STATIONS
+ *
+ * Uses:
+ * taco_treceability_master
+ *
+ * Table:
+ * taco_treceability.master_station
+ ************************************************************/
+
+app.get(
+    "/api/stations",
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await dbConn
+                    .request()
+                    .query(`
+                        SELECT
+                            Station_ID,
+                            Station_Name
+                        FROM
+                            taco_treceability.master_station
+                        ORDER BY
+                            Station_Name
+                    `);
+
+
+            res.json(
+                result.recordset
+            );
+
+
+        } catch (err) {
+
+            console.error(
+                "Station fetch error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                error:
+                    "Failed to load stations"
+
+            });
+
         }
 
+    }
+);
 
-        .card {
 
-            background: #fff;
+/************************************************************
+ * API: VERIFY PASSWORD
+ *
+ * Uses:
+ * taco_treceability
+ *
+ * Table:
+ * station_status_ok_universal_password
+ *
+ * Password and username are now dynamic.
+ ************************************************************/
 
-            max-width: 1000px;
+app.post(
+    "/api/verify-password",
+    async (req, res) => {
 
-            margin: 40px auto;
+        try {
 
-            padding: 30px;
+            const {
+                password
+            } = req.body;
 
-            border-radius: 10px;
 
-            box-shadow:
-                0 6px 18px rgba(0, 0, 0, .15);
+            /************************************************
+             * CHECK PASSWORD RECEIVED
+             ************************************************/
 
-        }
+            if (!password) {
 
+                return res.status(400).json({
 
-        h2 {
+                    success: false,
 
-            color: #2e7d32;
-
-            margin-bottom: 25px;
-
-        }
-
-
-        .row {
-
-            display: flex;
-
-            gap: 24px;
-
-            flex-wrap: wrap;
-
-        }
-
-
-        .group {
-
-            display: flex;
-
-            flex-direction: column;
-
-        }
-
-
-        .group.station {
-
-            flex: 3;
-
-            min-width: 250px;
-
-        }
-
-
-        .group.line {
-
-            flex: 1;
-
-            max-width: 120px;
-
-        }
-
-
-        .group.barcode {
-
-            flex: 2;
-
-            min-width: 220px;
-
-        }
-
-
-        label {
-
-            font-size: 14px;
-
-            margin-bottom: 6px;
-
-            font-weight: bold;
-
-        }
-
-
-        input,
-        select {
-
-            width: 95%;
-
-            height: 45px;
-
-            font-size: 16px;
-
-            padding: 6px 10px;
-
-            border-radius: 6px;
-
-            border: 1px solid #ccc;
-
-        }
-
-
-        #barcode {
-
-            font-size: 18px;
-
-            letter-spacing: 1px;
-
-        }
-
-
-        .button-row {
-
-            text-align: center;
-
-            margin-top: 30px;
-
-        }
-
-
-        button {
-
-            height: 45px;
-
-            width: 160px;
-
-            font-size: 16px;
-
-            font-weight: bold;
-
-            background: #28a745;
-
-            border: none;
-
-            color: white;
-
-            border-radius: 6px;
-
-            cursor: pointer;
-
-        }
-
-
-        button:hover {
-
-            background: #218838;
-
-        }
-
-
-        .popup-overlay {
-
-            display: none;
-
-            position: fixed;
-
-            inset: 0;
-
-            background: rgba(0, 0, 0, .4);
-
-            justify-content: center;
-
-            align-items: center;
-
-        }
-
-
-        .popup {
-
-            background: #fff;
-
-            padding: 25px 30px;
-
-            border-radius: 8px;
-
-            text-align: center;
-
-            min-width: 300px;
-
-        }
-
-    </style>
-
-</head>
-
-
-<body>
-
-
-    <!-- =====================================================
-         MAIN CARD
-         ===================================================== -->
-
-    <div class="card">
-
-        <h2>
-            New MIS Station Status OK
-        </h2>
-
-
-        <div class="row">
-
-
-            <!-- STATION -->
-
-            <div class="group station">
-
-                <label>
-                    Station Name :
-                </label>
-
-
-                <input
-                    list="stations"
-                    id="stationName"
-                    placeholder="Search Station"
-                >
-
-
-                <datalist id="stations"></datalist>
-
-            </div>
-
-
-            <!-- LINE -->
-
-            <div class="group line">
-
-                <label>
-                    Line :
-                </label>
-
-
-                <select id="line">
-
-                    <option value="1">
-                        1
-                    </option>
-
-                </select>
-
-            </div>
-
-
-            <!-- BARCODE -->
-
-            <div class="group barcode">
-
-                <label>
-                    Barcode :
-                </label>
-
-
-                <input
-                    type="text"
-                    id="barcode"
-                    placeholder="Scan Barcode"
-                    autocomplete="off"
-                    inputmode="none"
-                    autofocus
-                >
-
-            </div>
-
-
-        </div>
-
-
-        <!-- SUBMIT -->
-
-        <div class="button-row">
-
-            <button onclick="submitData()">
-                Submit
-            </button>
-
-        </div>
-
-    </div>
-
-
-
-    <!-- =====================================================
-         PASSWORD POPUP
-         ===================================================== -->
-
-    <div
-        class="popup-overlay"
-        id="passwordPopup"
-    >
-
-        <div class="popup">
-
-            <h3>
-                Enter Password
-            </h3>
-
-
-            <input
-                type="password"
-                id="passwordInput"
-                placeholder="Enter Password"
-                autocomplete="off"
-            >
-
-
-            <br>
-            <br>
-
-
-            <button onclick="verifyPassword()">
-                OK
-            </button>
-
-        </div>
-
-    </div>
-
-
-
-    <!-- =====================================================
-         RESULT POPUP
-         ===================================================== -->
-
-    <div
-        class="popup-overlay"
-        id="resultPopup"
-    >
-
-        <div class="popup">
-
-            <h3 id="popupMessage"></h3>
-
-
-            <button onclick="closePopup()">
-                OK
-            </button>
-
-        </div>
-
-    </div>
-
-
-
-    <script>
-
-
-        /********************************************************
-         * GLOBAL VARIABLES
-         ********************************************************/
-
-        let stationMap = {};
-
-        let tempData = {};
-
-
-        /********************************************************
-         * LOAD STATIONS
-         ********************************************************/
-
-        fetch('/api/stations')
-
-            .then(res => res.json())
-
-            .then(data => {
-
-                const list =
-                    document.getElementById(
-                        'stations'
-                    );
-
-
-                data.forEach(r => {
-
-                    stationMap[
-                        r.Station_Name
-                    ] =
-                        r.Station_ID;
-
-
-                    const opt =
-                        document.createElement(
-                            'option'
-                        );
-
-
-                    opt.value =
-                        r.Station_Name;
-
-
-                    list.appendChild(
-                        opt
-                    );
+                    message:
+                        "Password required"
 
                 });
 
-            })
+            }
 
-            .catch(err => {
+
+            /************************************************
+             * CHECK DB CONNECTION
+             ************************************************/
+
+            if (!dbConn2.connected) {
 
                 console.error(
-                    "Station loading error:",
-                    err
+                    "Password verification failed: " +
+                    "taco_treceability DB not connected"
                 );
+
+
+                return res.status(500).json({
+
+                    success: false,
+
+                    message:
+                        "Database connection unavailable"
+
+                });
+
+            }
+
+
+            /************************************************
+             * CHECK PASSWORD IN DATABASE
+             ************************************************/
+
+            const result =
+                await dbConn2
+                    .request()
+
+                    .input(
+                        "pass_key",
+                        sql.VarChar(sql.MAX),
+                        String(password)
+                    )
+
+                    .query(`
+                        SELECT TOP 1
+                            sr_no,
+                            username,
+                            pass_key,
+                            today_date
+                        FROM
+                            taco_treceability.station_status_ok_universal_password
+                        WHERE
+                            pass_key = @pass_key
+                        ORDER BY
+                            sr_no DESC
+                    `);
+
+
+            /************************************************
+             * INVALID PASSWORD
+             ************************************************/
+
+            if (
+                result.recordset.length === 0
+            ) {
+
+                console.log(
+                    "Invalid password entered"
+                );
+
+
+                return res.status(401).json({
+
+                    success: false,
+
+                    message:
+                        "Invalid Password"
+
+                });
+
+            }
+
+
+            /************************************************
+             * GET USERNAME FROM DATABASE
+             ************************************************/
+
+            const username =
+                result.recordset[0].username;
+
+
+            console.log(
+                "Password verified successfully"
+            );
+
+
+            console.log(
+                "Authenticated Username:",
+                username
+            );
+
+
+            /************************************************
+             * RETURN USERNAME
+             ************************************************/
+
+            return res.json({
+
+                success: true,
+
+                username: username
 
             });
 
 
+        } catch (err) {
 
-        /********************************************************
-         * SUBMIT DATA
-         *
-         * Existing flow remains the same.
-         ********************************************************/
-
-        function submitData() {
+            console.error(
+                "Password verification error:",
+                err
+            );
 
 
-            const stationName =
-                document
-                    .getElementById(
-                        'stationName'
-                    )
-                    .value
-                    .trim();
+            return res.status(500).json({
 
+                success: false,
 
-            const stationId =
-                stationMap[
-                    stationName
-                ];
+                message:
+                    "Password verification failed"
 
-
-            const line =
-                document
-                    .getElementById(
-                        'line'
-                    )
-                    .value;
-
-
-            const barcode =
-                document
-                    .getElementById(
-                        'barcode'
-                    )
-                    .value
-                    .trim();
-
-
-            /****************************************************
-             * VALIDATE STATION AND BARCODE
-             ****************************************************/
-
-            if (
-                !stationId ||
-                !barcode
-            ) {
-
-                showResultPopup(
-                    "Select valid station and scan barcode"
-                );
-
-                return;
-
-            }
-
-
-            /****************************************************
-             * STORE TEMP DATA
-             ****************************************************/
-
-            tempData = {
-
-                stationId,
-                line,
-                barcode
-
-            };
-
-
-            /****************************************************
-             * SHOW PASSWORD POPUP
-             ****************************************************/
-
-            document
-                .getElementById(
-                    'passwordPopup'
-                )
-                .style.display =
-                "flex";
-
-
-            /****************************************************
-             * FOCUS PASSWORD INPUT
-             ****************************************************/
-
-            setTimeout(() => {
-
-                document
-                    .getElementById(
-                        'passwordInput'
-                    )
-                    .focus();
-
-            }, 100);
+            });
 
         }
 
+    }
+);
 
 
-        /********************************************************
-         * VERIFY PASSWORD
-         *
-         * Password is checked dynamically from:
-         *
-         * station_status_ok_universal_password
-         ********************************************************/
+/************************************************************
+ * API: BARCODE SCAN
+ ************************************************************/
 
-        function verifyPassword() {
+app.post(
+    "/api/scan",
+    async (req, res) => {
 
+        try {
 
-            const pwd =
-                document
-                    .getElementById(
-                        'passwordInput'
-                    )
-                    .value
-                    .trim();
+            const {
+                stationId,
+                line,
+                barcode,
+                username
+            } = req.body;
 
 
-            /****************************************************
-             * CHECK EMPTY PASSWORD
-             ****************************************************/
+            /************************************************
+             * VALIDATE REQUEST
+             ************************************************/
 
-            if (!pwd) {
+            if (
+                !stationId ||
+                !barcode ||
+                !username
+            ) {
 
-                alert(
-                    "Please enter password"
-                );
+                return res.status(400).json({
 
-                return;
+                    message:
+                        "Station, barcode & username required"
+
+                });
 
             }
 
 
-            /****************************************************
-             * SEND PASSWORD TO SERVER
-             ****************************************************/
+            /************************************************
+             * LOG SCAN RECEIVED
+             ************************************************/
 
-            fetch(
-                '/api/verify-password',
-                {
-
-                    method: 'POST',
-
-                    headers: {
-
-                        'Content-Type':
-                            'application/json'
-
-                    },
-
-                    body: JSON.stringify({
-
-                        password:
-                            pwd
-
-                    })
-
-                }
-            )
+            console.log(
+                "\n=========== SCAN RECEIVED ==========="
+            );
 
 
-            /****************************************************
-             * READ RESPONSE
-             ****************************************************/
-
-            .then(async res => {
-
-                const data =
-                    await res.json();
+            console.log(
+                "Station ID:",
+                stationId
+            );
 
 
-                if (!res.ok) {
+            console.log(
+                "Line:",
+                line
+            );
 
-                    throw new Error(
-                        data.message ||
-                        "Invalid Password"
+
+            console.log(
+                "Barcode:",
+                barcode
+            );
+
+
+            console.log(
+                "Username:",
+                username
+            );
+
+
+            console.log(
+                "====================================="
+            );
+
+
+            /********************************************************
+             * GET STATION NAME
+             *
+             * IMPORTANT:
+             *
+             * master_station is in:
+             * taco_treceability_master
+             *
+             * Therefore dbConn is used.
+             ********************************************************/
+
+            let stationName;
+
+
+            try {
+
+                const stationResult =
+                    await dbConn
+                        .request()
+
+                        .input(
+                            "station_id",
+                            sql.Int,
+                            parseInt(stationId)
+                        )
+
+                        .query(`
+                            SELECT TOP 1
+                                Station_ID,
+                                Station_Name,
+                                category
+                            FROM
+                                taco_treceability.master_station
+                            WHERE
+                                Station_ID = @station_id
+                        `);
+
+
+                /************************************************
+                 * CHECK STATION EXISTS
+                 ************************************************/
+
+                if (
+                    stationResult.recordset.length === 0
+                ) {
+
+                    console.error(
+                        "Station not found in master_station"
                     );
 
+
+                    console.error(
+                        "Station ID:",
+                        stationId
+                    );
+
+
+                    return res.status(400).json({
+
+                        message:
+                            "Station not found in master_station"
+
+                    });
+
                 }
 
 
-                return data;
+                /************************************************
+                 * GET STATION NAME
+                 ************************************************/
 
-            })
-
-
-            /****************************************************
-             * PASSWORD VERIFIED
-             ****************************************************/
-
-            .then(authData => {
-
-
-                /********************************************
-                 * USERNAME COMES FROM DATABASE
-                 ********************************************/
-
-                const username =
-                    authData.username;
+                stationName =
+                    stationResult
+                        .recordset[0]
+                        .Station_Name;
 
 
                 console.log(
-                    "Authenticated Username:",
+                    "Station Name:",
+                    stationName
+                );
+
+
+            } catch (stationErr) {
+
+                console.error(
+                    "Station lookup error:",
+                    stationErr
+                );
+
+
+                return res.status(500).json({
+
+                    message:
+                        "Failed to fetch Station Name"
+
+                });
+
+            }
+
+
+            /********************************************************
+             * INSERT INTO station_status_ok_universal
+             *
+             * Database:
+             * taco_treceability
+             *
+             * IMPORTANT:
+             *
+             * The column name remains:
+             *
+             * station_id
+             *
+             * But the VALUE inserted is:
+             *
+             * Station_Name
+             ********************************************************/
+
+            try {
+
+                await dbConn2
+                    .request()
+
+                    .input(
+                        "station_name",
+                        sql.VarChar(sql.MAX),
+                        String(stationName)
+                    )
+
+                    .input(
+                        "barcode_string",
+                        sql.VarChar(sql.MAX),
+                        String(barcode)
+                    )
+
+                    .input(
+                        "username",
+                        sql.VarChar(sql.MAX),
+                        String(username)
+                    )
+
+                    .query(`
+                        INSERT INTO
+                            taco_treceability.station_status_ok_universal
+                        (
+                            station_id,
+                            barcode_string,
+                            username
+                        )
+                        VALUES
+                        (
+                            @station_name,
+                            @barcode_string,
+                            @username
+                        )
+                    `);
+
+
+                console.log(
+                    "Log inserted successfully into taco_treceability"
+                );
+
+
+                console.log(
+                    "Inserted Station Name:",
+                    stationName
+                );
+
+
+                console.log(
+                    "Inserted Barcode:",
+                    barcode
+                );
+
+
+                console.log(
+                    "Inserted Username:",
                     username
                 );
 
 
-                /********************************************
-                 * CLOSE PASSWORD POPUP
-                 ********************************************/
+            } catch (logErr) {
 
-                document
-                    .getElementById(
-                        'passwordPopup'
-                    )
-                    .style.display =
-                    "none";
+                console.error(
+                    "Log Insert Error:",
+                    logErr
+                );
 
 
-                /********************************************
-                 * EXISTING SCAN API
-                 ********************************************/
+                return res.status(500).json({
 
-                fetch(
-                    '/api/scan',
-                    {
-
-                        method: 'POST',
-
-                        headers: {
-
-                            'Content-Type':
-                                'application/json'
-
-                        },
-
-                        body: JSON.stringify({
-
-                            ...tempData,
-
-                            username:
-                                username
-
-                        })
-
-                    }
-                )
-
-
-                /********************************************
-                 * PROCESS SCAN RESPONSE
-                 ********************************************/
-
-                .then(async res => {
-
-                    const resp =
-                        await res.json();
-
-
-                    if (!res.ok) {
-
-                        throw new Error(
-                            resp.message ||
-                            "Scan failed"
-                        );
-
-                    }
-
-
-                    return resp;
-
-                })
-
-
-                .then(resp => {
-
-
-                    /****************************************
-                     * EXISTING RESPONSE LOGIC
-                     ****************************************/
-
-                    const apiMsg =
-
-                        resp
-                            .externalApiResponse
-                            ?.message ||
-
-                        resp
-                            .externalApiResponse
-                            ?.msg ||
-
-                        resp.message;
-
-
-                    if (
-                        apiMsg ===
-                        "Station created/updated successfully."
-                    ) {
-
-                        showResultPopup(
-                            "Station status updated"
-                        );
-
-                    } else {
-
-                        showResultPopup(
-                            apiMsg ||
-                            "Unknown response"
-                        );
-
-                    }
-
-                })
-
-
-                /********************************************
-                 * SCAN ERROR
-                 ********************************************/
-
-                .catch(err => {
-
-                    console.error(
-                        "Scan error:",
-                        err
-                    );
-
-
-                    showResultPopup(
-                        err.message ||
-                        "Scan failed"
-                    );
+                    message:
+                        "Log insert failed"
 
                 });
 
-            })
+            }
 
 
-            /****************************************************
-             * PASSWORD ERROR
-             ****************************************************/
+            /********************************************************
+             * CALL EXTERNAL API
+             *
+             * EXISTING LOGIC REMAINS SAME
+             *
+             * IMPORTANT:
+             *
+             * External API still receives stationId,
+             * NOT stationName.
+             ********************************************************/
 
-            .catch(err => {
+            const apiPayload = {
 
-                console.error(
-                    "Password verification error:",
-                    err
+                station_id:
+                    stationId,
+
+                line_id:
+                    line,
+
+                customer_qrcode:
+                    barcode,
+
+                station_status:
+                    "OK",
+
+                checklist_name:
+                    "NA",
+
+                substation_id:
+                    "NA"
+
+            };
+
+
+            try {
+
+                console.log(
+                    "\nSending Payload To External API:"
                 );
 
 
-                alert(
-                    err.message ||
-                    "Invalid Password"
+                console.log(
+                    apiPayload
                 );
 
 
-                /************************************************
-                 * CLEAR PASSWORD
-                 ************************************************/
+                const apiResponse =
+                    await axios.post(
 
-                document
-                    .getElementById(
-                        'passwordInput'
-                    )
-                    .value = "";
+                        "https://mismainapp.tataautocomp.com:3241/station_status/filter",
+
+                        apiPayload,
+
+                        {
+
+                            httpsAgent:
+                                new https.Agent({
+
+                                    rejectUnauthorized:
+                                        false
+
+                                }),
+
+                            timeout:
+                                10000
+
+                        }
+
+                    );
 
 
-                document
-                    .getElementById(
-                        'passwordInput'
-                    )
-                    .focus();
+                console.log(
+                    "\n=========== EXTERNAL API RESPONSE ==========="
+                );
+
+
+                console.log(
+                    "Status Code:",
+                    apiResponse.status
+                );
+
+
+                console.log(
+                    "Status Text:",
+                    apiResponse.statusText
+                );
+
+
+                console.log(
+                    "Headers:",
+                    apiResponse.headers
+                );
+
+
+                console.log(
+                    "Response Data:",
+                    apiResponse.data
+                );
+
+
+                console.log(
+                    "=============================================\n"
+                );
+
+
+                return res.json({
+
+                    message:
+                        "Barcode processed successfully",
+
+                    externalApiStatus:
+                        apiResponse.status,
+
+                    externalApiResponse:
+                        apiResponse.data
+
+                });
+
+
+            } catch (apiErr) {
+
+                console.log(
+                    "\n=========== EXTERNAL API ERROR ==========="
+                );
+
+
+                if (apiErr.response) {
+
+                    console.log(
+                        "Error Status:",
+                        apiErr.response.status
+                    );
+
+
+                    console.log(
+                        "Error Headers:",
+                        apiErr.response.headers
+                    );
+
+
+                    console.log(
+                        "Error Data:",
+                        apiErr.response.data
+                    );
+
+
+                } else {
+
+                    console.log(
+                        "Error Message:",
+                        apiErr.message
+                    );
+
+                }
+
+
+                console.log(
+                    "==========================================\n"
+                );
+
+
+                return res.status(500).json({
+
+                    message:
+                        "External API failed",
+
+                    error:
+                        apiErr.response?.data ||
+                        apiErr.message
+
+                });
+
+            }
+
+
+        } catch (err) {
+
+            console.error(
+                "Scan error:",
+                err
+            );
+
+
+            res.status(500).json({
+
+                message:
+                    "Scan failed"
 
             });
 
         }
 
+    }
+);
 
 
-        /********************************************************
-         * SHOW RESULT POPUP
-         ********************************************************/
+/************************************************************
+ * SOCKET.IO
+ ************************************************************/
 
-        function showResultPopup(msg) {
+io.on(
+    "connection",
+    (socket) => {
 
-            document
-                .getElementById(
-                    'popupMessage'
-                )
-                .innerText =
-                msg;
-
-
-            document
-                .getElementById(
-                    'resultPopup'
-                )
-                .style.display =
-                "flex";
-
-        }
+        console.log(
+            "Client connected"
+        );
 
 
+        socket.on(
+            "disconnect",
+            () => {
 
-        /********************************************************
-         * CLOSE RESULT POPUP
-         ********************************************************/
+                console.log(
+                    "Client disconnected"
+                );
 
-        function closePopup() {
+            }
+        );
 
-            document
-                .getElementById(
-                    'resultPopup'
-                )
-                .style.display =
-                "none";
-
-
-            location.reload();
-
-        }
-
-
-    </script>
-
-
-</body>
-
-</html>
+    }
+);
