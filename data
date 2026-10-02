@@ -1,7 +1,2 @@
-SELECT
-    station_id,
-    COUNT(*) AS occurrence_count
-FROM taco_treceability.station_status_ok_universal_test
-WHERE today_date LIKE '2026-07%'
-GROUP BY station_id
-ORDER BY station_id;
+21	NULL	03HCB00LG6T2BVG6T0532521
+57	NULL	03HCB00LG6T6BVG6T0029711
