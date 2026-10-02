@@ -5,7 +5,7 @@
 
     <meta charset="UTF-8">
 
-    <title>Station Status</title>
+    <title>Update Password</title>
 
     <meta
         name="viewport"
@@ -15,46 +15,51 @@
 
     <style>
 
+        * {
+            box-sizing: border-box;
+        }
+
+
         body {
+
+            margin: 0;
+
             background: #f4f6f9;
-            font-family: Arial;
+
+            font-family: Arial, sans-serif;
+
         }
 
 
         .card {
 
-            background: #fff;
+            background: #ffffff;
 
-            max-width: 1000px;
+            width: 500px;
 
-            margin: 40px auto;
+            max-width: 90%;
 
-            padding: 30px;
+            margin: 80px auto;
 
-            border-radius: 10px;
+            padding: 35px;
+
+            border-radius: 12px;
 
             box-shadow:
-                0 6px 18px rgba(0,0,0,.15);
+                0 6px 20px rgba(0, 0, 0, 0.15);
 
         }
 
 
         h2 {
 
+            text-align: center;
+
             color: #2e7d32;
 
-            margin-bottom: 25px;
+            margin-top: 0;
 
-        }
-
-
-        .row {
-
-            display: flex;
-
-            gap: 24px;
-
-            flex-wrap: wrap;
+            margin-bottom: 30px;
 
         }
 
@@ -65,70 +70,46 @@
 
             flex-direction: column;
 
-        }
-
-
-        .group.station {
-
-            flex: 3;
-
-            min-width: 250px;
-
-        }
-
-
-        .group.line {
-
-            flex: 1;
-
-            max-width: 120px;
-
-        }
-
-
-        .group.barcode {
-
-            flex: 2;
-
-            min-width: 220px;
+            margin-bottom: 22px;
 
         }
 
 
         label {
 
-            font-size: 14px;
-
-            margin-bottom: 6px;
+            font-size: 15px;
 
             font-weight: bold;
 
+            margin-bottom: 8px;
+
         }
 
 
-        input,
-        select {
+        select,
+        input {
 
-            width: 95%;
+            width: 100%;
 
             height: 45px;
 
+            padding: 8px 12px;
+
             font-size: 16px;
 
-            padding: 6px 10px;
+            border: 1px solid #ccc;
 
             border-radius: 6px;
 
-            border: 1px solid #ccc;
+            outline: none;
 
         }
 
 
-        #barcode {
+        select:focus,
+        input:focus {
 
-            font-size: 18px;
-
-            letter-spacing: 1px;
+            border-color: #28a745;
 
         }
 
@@ -144,21 +125,21 @@
 
         button {
 
+            width: 180px;
+
             height: 45px;
 
-            width: 160px;
+            border: none;
+
+            border-radius: 6px;
+
+            background: #28a745;
+
+            color: #ffffff;
 
             font-size: 16px;
 
             font-weight: bold;
-
-            background: #28a745;
-
-            border: none;
-
-            color: white;
-
-            border-radius: 6px;
 
             cursor: pointer;
 
@@ -172,35 +153,57 @@
         }
 
 
-        .popup-overlay {
+        button:disabled {
 
-            display: none;
+            background: #999;
 
-            position: fixed;
-
-            inset: 0;
-
-            background:
-                rgba(0,0,0,.4);
-
-            justify-content: center;
-
-            align-items: center;
+            cursor: not-allowed;
 
         }
 
 
-        .popup {
+        .message {
 
-            background: #fff;
+            display: none;
 
-            padding: 25px 30px;
+            margin-top: 20px;
 
-            border-radius: 8px;
+            padding: 12px;
+
+            border-radius: 6px;
 
             text-align: center;
 
-            min-width: 300px;
+            font-weight: bold;
+
+        }
+
+
+        .success {
+
+            background: #d4edda;
+
+            color: #155724;
+
+        }
+
+
+        .error {
+
+            background: #f8d7da;
+
+            color: #721c24;
+
+        }
+
+
+        .loading {
+
+            text-align: center;
+
+            color: #666;
+
+            margin-top: 10px;
 
         }
 
@@ -218,168 +221,117 @@
 
     <div class="card">
 
+
         <h2>
-            New MIS Station Status OK
+            Update User Password
         </h2>
 
 
-        <div class="row">
+        <!-- =================================================
+             USERNAME
+             ================================================= -->
+
+        <div class="group">
+
+            <label for="username">
+
+                Select Name :
+
+            </label>
 
 
-            <!-- =================================================
-                 STATION
-                 ================================================= -->
+            <select id="username">
 
-            <div class="group station">
+                <option value="">
 
-                <label>
-                    Station Name :
-                </label>
+                    Loading users...
 
+                </option>
 
-                <input
-                    list="stations"
-                    id="stationName"
-                    placeholder="Search Station"
-                >
-
-
-                <datalist
-                    id="stations"
-                ></datalist>
-
-            </div>
-
-
-            <!-- =================================================
-                 LINE
-                 ================================================= -->
-
-            <div class="group line">
-
-                <label>
-                    Line :
-                </label>
-
-
-                <select id="line">
-
-                    <option value="1">
-                        1
-                    </option>
-
-                </select>
-
-            </div>
-
-
-            <!-- =================================================
-                 BARCODE
-                 ================================================= -->
-
-            <div class="group barcode">
-
-                <label>
-                    Barcode :
-                </label>
-
-
-                <input
-                    type="text"
-                    id="barcode"
-                    placeholder="Scan Barcode"
-                    autocomplete="off"
-                    inputmode="none"
-                    autofocus
-                >
-
-            </div>
-
+            </select>
 
         </div>
 
 
-        <!-- =====================================================
-             SUBMIT BUTTON
-             ===================================================== -->
+        <!-- =================================================
+             NEW PASSWORD
+             ================================================= -->
 
-        <div class="button-row">
+        <div class="group">
 
-            <button
-                onclick="submitData()"
-            >
-                Submit
-            </button>
+            <label for="newPassword">
 
-        </div>
+                New Password :
 
-    </div>
-
-
-
-    <!-- =====================================================
-         PASSWORD POPUP
-         ===================================================== -->
-
-    <div
-        class="popup-overlay"
-        id="passwordPopup"
-    >
-
-        <div class="popup">
-
-            <h3>
-                Enter Password
-            </h3>
+            </label>
 
 
             <input
                 type="password"
-                id="passwordInput"
-                placeholder="Enter Password"
-                autocomplete="off"
+                id="newPassword"
+                placeholder="Enter New Password"
+                autocomplete="new-password"
             >
 
+        </div>
 
-            <br>
-            <br>
 
+        <!-- =================================================
+             CONFIRM PASSWORD
+             ================================================= -->
+
+        <div class="group">
+
+            <label for="confirmPassword">
+
+                Confirm New Password :
+
+            </label>
+
+
+            <input
+                type="password"
+                id="confirmPassword"
+                placeholder="Re-enter New Password"
+                autocomplete="new-password"
+            >
+
+        </div>
+
+
+        <!-- =================================================
+             SUBMIT
+             ================================================= -->
+
+        <div class="button-row">
 
             <button
-                onclick="verifyPassword()"
+                id="submitButton"
+                onclick="updatePassword()"
             >
-                OK
+
+                Update Password
+
             </button>
 
         </div>
 
-    </div>
+
+        <!-- =================================================
+             MESSAGE
+             ================================================= -->
+
+        <div
+            id="message"
+            class="message"
+        ></div>
 
 
+        <div
+            id="loading"
+            class="loading"
+        ></div>
 
-    <!-- =====================================================
-         RESULT POPUP
-         ===================================================== -->
-
-    <div
-        class="popup-overlay"
-        id="resultPopup"
-    >
-
-        <div class="popup">
-
-            <h3
-                id="popupMessage"
-            ></h3>
-
-
-            <button
-                onclick="closePopup()"
-            >
-                OK
-            </button>
-
-        </div>
 
     </div>
 
@@ -389,263 +341,47 @@
 
 
         /********************************************************
-         * GLOBAL VARIABLES
+         * LOAD USERS
          ********************************************************/
 
-        let stationMap = {};
-
-        let tempData = {};
+        loadUsers();
 
 
-        /********************************************************
-         * LOAD STATIONS
-         ********************************************************/
-
-        fetch(
-            '/api/stations'
-        )
-
-        .then(
-            res => res.json()
-        )
-
-        .then(
-            data => {
-
-                const list =
-                    document.getElementById(
-                        'stations'
-                    );
+        function loadUsers() {
 
 
-                data.forEach(
-                    r => {
-
-                        stationMap[
-                            r.Station_Name
-                        ] =
-                            r.Station_ID;
-
-
-                        const opt =
-                            document.createElement(
-                                'option'
-                            );
-
-
-                        opt.value =
-                            r.Station_Name;
-
-
-                        list.appendChild(
-                            opt
-                        );
-
-                    }
+            const usernameSelect =
+                document.getElementById(
+                    "username"
                 );
 
-            }
-        )
 
-        .catch(
-            err => {
-
-                console.error(
-                    "Station loading error:",
-                    err
+            const loading =
+                document.getElementById(
+                    "loading"
                 );
 
-            }
-        );
 
+            loading.innerText =
+                "Loading users...";
 
-
-        /********************************************************
-         * SUBMIT DATA
-         ********************************************************/
-
-        function submitData() {
-
-
-            const stationName =
-                document
-                    .getElementById(
-                        'stationName'
-                    )
-                    .value
-                    .trim();
-
-
-            const stationId =
-                stationMap[
-                    stationName
-                ];
-
-
-            const line =
-                document
-                    .getElementById(
-                        'line'
-                    )
-                    .value;
-
-
-            const barcode =
-                document
-                    .getElementById(
-                        'barcode'
-                    )
-                    .value
-                    .trim();
-
-
-            /****************************************************
-             * VALIDATE STATION AND BARCODE
-             ****************************************************/
-
-            if (
-                !stationId ||
-                !barcode
-            ) {
-
-                showResultPopup(
-                    "Select valid station and scan barcode"
-                );
-
-                return;
-
-            }
-
-
-            /****************************************************
-             * STORE TEMP DATA
-             ****************************************************/
-
-            tempData = {
-
-                stationId,
-
-                line,
-
-                barcode
-
-            };
-
-
-            /****************************************************
-             * SHOW PASSWORD POPUP
-             ****************************************************/
-
-            document
-                .getElementById(
-                    'passwordPopup'
-                )
-                .style.display =
-                "flex";
-
-
-            /****************************************************
-             * FOCUS PASSWORD
-             ****************************************************/
-
-            setTimeout(
-                () => {
-
-                    document
-                        .getElementById(
-                            'passwordInput'
-                        )
-                        .focus();
-
-                },
-                100
-            );
-
-        }
-
-
-
-        /********************************************************
-         * VERIFY PASSWORD
-         *
-         * Password is checked dynamically from:
-         *
-         * taco_treceability.station_status_ok_universal_password
-         ********************************************************/
-
-        function verifyPassword() {
-
-
-            const pwd =
-                document
-                    .getElementById(
-                        'passwordInput'
-                    )
-                    .value
-                    .trim();
-
-
-            /****************************************************
-             * CHECK EMPTY PASSWORD
-             ****************************************************/
-
-            if (!pwd) {
-
-                alert(
-                    "Please enter password"
-                );
-
-                return;
-
-            }
-
-
-            /****************************************************
-             * SEND PASSWORD TO NODE.JS
-             ****************************************************/
 
             fetch(
-                '/api/verify-password',
-                {
-
-                    method:
-                        'POST',
-
-                    headers: {
-
-                        'Content-Type':
-                            'application/json'
-
-                    },
-
-                    body:
-                        JSON.stringify({
-
-                            password:
-                                pwd
-
-                        })
-
-                }
+                "/api/password-users"
             )
 
-
-            /****************************************************
-             * READ PASSWORD RESPONSE
-             ****************************************************/
-
             .then(
-                async res => {
+                async response => {
 
                     const data =
-                        await res.json();
+                        await response.json();
 
 
-                    if (!res.ok) {
+                    if (!response.ok) {
 
                         throw new Error(
                             data.message ||
-                            "Invalid Password"
+                            "Failed to load users"
                         );
 
                     }
@@ -656,204 +392,99 @@
                 }
             )
 
-
-            /****************************************************
-             * PASSWORD VERIFIED
-             ****************************************************/
-
             .then(
-                authData => {
+                data => {
 
 
-                    /********************************************
-                     * USERNAME FROM DATABASE
-                     ********************************************/
-
-                    const username =
-                        authData.username;
+                    usernameSelect.innerHTML =
+                        "";
 
 
-                    console.log(
-                        "Authenticated Username:",
-                        username
+                    /****************************************
+                     * DEFAULT OPTION
+                     ****************************************/
+
+                    const defaultOption =
+                        document.createElement(
+                            "option"
+                        );
+
+
+                    defaultOption.value =
+                        "";
+
+
+                    defaultOption.textContent =
+                        "Select Name";
+
+
+                    usernameSelect.appendChild(
+                        defaultOption
                     );
 
 
-                    /********************************************
-                     * CLOSE PASSWORD POPUP
-                     ********************************************/
+                    /****************************************
+                     * ADD USERS
+                     ****************************************/
 
-                    document
-                        .getElementById(
-                            'passwordPopup'
-                        )
-                        .style.display =
-                        "none";
+                    data.data.forEach(
+                        user => {
 
-
-                    /********************************************
-                     * EXISTING SCAN API
-                     ********************************************/
-
-                    fetch(
-                        '/api/scan',
-                        {
-
-                            method:
-                                'POST',
-
-                            headers: {
-
-                                'Content-Type':
-                                    'application/json'
-
-                            },
-
-                            body:
-                                JSON.stringify({
-
-                                    ...tempData,
-
-                                    username:
-                                        username
-
-                                })
-
-                        }
-                    )
-
-
-                    /********************************************
-                     * PROCESS SCAN RESPONSE
-                     ********************************************/
-
-                    .then(
-                        async res => {
-
-                            const resp =
-                                await res.json();
-
-
-                            if (!res.ok) {
-
-                                throw new Error(
-                                    resp.message ||
-                                    "Scan failed"
+                            const option =
+                                document.createElement(
+                                    "option"
                                 );
 
-                            }
+
+                            option.value =
+                                user.username;
 
 
-                            return resp;
-
-                        }
-                    )
+                            option.textContent =
+                                user.username;
 
 
-                    .then(
-                        resp => {
-
-
-                            /************************************
-                             * EXISTING RESPONSE LOGIC
-                             ************************************/
-
-                            const apiMsg =
-
-                                resp
-                                    .externalApiResponse
-                                    ?.message ||
-
-                                resp
-                                    .externalApiResponse
-                                    ?.msg ||
-
-                                resp.message;
-
-
-                            if (
-                                apiMsg ===
-                                "Station created/updated successfully."
-                            ) {
-
-                                showResultPopup(
-                                    "Station status updated"
+                            usernameSelect
+                                .appendChild(
+                                    option
                                 );
-
-                            } else {
-
-                                showResultPopup(
-                                    apiMsg ||
-                                    "Unknown response"
-                                );
-
-                            }
-
-                        }
-                    )
-
-
-                    /********************************************
-                     * SCAN ERROR
-                     ********************************************/
-
-                    .catch(
-                        err => {
-
-                            console.error(
-                                "Scan error:",
-                                err
-                            );
-
-
-                            showResultPopup(
-                                err.message ||
-                                "Scan failed"
-                            );
 
                         }
                     );
+
+
+                    loading.innerText =
+                        "";
 
                 }
             )
 
-
-            /****************************************************
-             * PASSWORD ERROR
-             ****************************************************/
-
             .catch(
-                err => {
+                error => {
 
                     console.error(
-                        "Password verification error:",
-                        err
+                        "Load users error:",
+                        error
                     );
 
 
-                    alert(
-                        err.message ||
-                        "Invalid Password"
-                    );
+                    usernameSelect.innerHTML =
+                        `
+                        <option value="">
+                            Failed to load users
+                        </option>
+                        `;
 
 
-                    /********************************************
-                     * CLEAR PASSWORD
-                     ********************************************/
-
-                    document
-                        .getElementById(
-                            'passwordInput'
-                        )
-                        .value =
+                    loading.innerText =
                         "";
 
 
-                    document
-                        .getElementById(
-                            'passwordInput'
-                        )
-                        .focus();
+                    showMessage(
+                        error.message ||
+                        "Failed to load users",
+                        false
+                    );
 
                 }
             );
@@ -863,48 +494,341 @@
 
 
         /********************************************************
-         * SHOW RESULT POPUP
+         * UPDATE PASSWORD
          ********************************************************/
 
-        function showResultPopup(msg) {
-
-            document
-                .getElementById(
-                    'popupMessage'
-                )
-                .innerText =
-                msg;
+        function updatePassword() {
 
 
-            document
-                .getElementById(
-                    'resultPopup'
-                )
-                .style.display =
-                "flex";
+            const username =
+                document
+                    .getElementById(
+                        "username"
+                    )
+                    .value;
+
+
+            const newPassword =
+                document
+                    .getElementById(
+                        "newPassword"
+                    )
+                    .value
+                    .trim();
+
+
+            const confirmPassword =
+                document
+                    .getElementById(
+                        "confirmPassword"
+                    )
+                    .value
+                    .trim();
+
+
+            const submitButton =
+                document
+                    .getElementById(
+                        "submitButton"
+                    );
+
+
+            /****************************************************
+             * VALIDATE USERNAME
+             ****************************************************/
+
+            if (!username) {
+
+                showMessage(
+                    "Please select a name",
+                    false
+                );
+
+                return;
+
+            }
+
+
+            /****************************************************
+             * VALIDATE NEW PASSWORD
+             ****************************************************/
+
+            if (!newPassword) {
+
+                showMessage(
+                    "Please enter new password",
+                    false
+                );
+
+                return;
+
+            }
+
+
+            /****************************************************
+             * VALIDATE CONFIRM PASSWORD
+             ****************************************************/
+
+            if (!confirmPassword) {
+
+                showMessage(
+                    "Please confirm new password",
+                    false
+                );
+
+                return;
+
+            }
+
+
+            /****************************************************
+             * CHECK PASSWORD MATCH
+             ****************************************************/
+
+            if (
+                newPassword !==
+                confirmPassword
+            ) {
+
+                showMessage(
+                    "New password and confirm password do not match",
+                    false
+                );
+
+                return;
+
+            }
+
+
+            /****************************************************
+             * DISABLE BUTTON
+             ****************************************************/
+
+            submitButton.disabled =
+                true;
+
+
+            submitButton.innerText =
+                "Updating...";
+
+
+            /****************************************************
+             * CLEAR OLD MESSAGE
+             ****************************************************/
+
+            hideMessage();
+
+
+            /****************************************************
+             * SEND UPDATE REQUEST
+             ****************************************************/
+
+            fetch(
+                "/api/update-password",
+                {
+
+                    method: "POST",
+
+                    headers: {
+
+                        "Content-Type":
+                            "application/json"
+
+                    },
+
+                    body:
+                        JSON.stringify({
+
+                            username:
+                                username,
+
+                            newPassword:
+                                newPassword
+
+                        })
+
+                }
+            )
+
+            .then(
+                async response => {
+
+                    const data =
+                        await response.json();
+
+
+                    if (!response.ok) {
+
+                        throw new Error(
+                            data.message ||
+                            "Password update failed"
+                        );
+
+                    }
+
+
+                    return data;
+
+                }
+            )
+
+            .then(
+                data => {
+
+
+                    /****************************************
+                     * SUCCESS
+                     ****************************************/
+
+                    showMessage(
+                        "Password updated successfully for " +
+                        data.username,
+                        true
+                    );
+
+
+                    /****************************************
+                     * CLEAR PASSWORD FIELDS
+                     ****************************************/
+
+                    document
+                        .getElementById(
+                            "newPassword"
+                        )
+                        .value =
+                        "";
+
+
+                    document
+                        .getElementById(
+                            "confirmPassword"
+                        )
+                        .value =
+                        "";
+
+
+                    /****************************************
+                     * SHOW UPDATED TIME
+                     ****************************************/
+
+                    if (
+                        data.today_date
+                    ) {
+
+                        const timeText =
+                            new Date(
+                                data.today_date
+                            ).toLocaleString();
+
+
+                        showMessage(
+                            "Password updated successfully for " +
+                            data.username +
+                            "\nUpdated on: " +
+                            timeText,
+                            true
+                        );
+
+                    }
+
+                }
+            )
+
+            .catch(
+                error => {
+
+                    console.error(
+                        "Password update error:",
+                        error
+                    );
+
+
+                    showMessage(
+                        error.message ||
+                        "Password update failed",
+                        false
+                    );
+
+                }
+            )
+
+            .finally(
+                () => {
+
+                    /****************************************
+                     * ENABLE BUTTON
+                     ****************************************/
+
+                    submitButton.disabled =
+                        false;
+
+
+                    submitButton.innerText =
+                        "Update Password";
+
+                }
+            );
 
         }
 
 
 
         /********************************************************
-         * CLOSE RESULT POPUP
+         * SHOW MESSAGE
          ********************************************************/
 
-        function closePopup() {
-
-            document
-                .getElementById(
-                    'resultPopup'
-                )
-                .style.display =
-                "none";
+        function showMessage(
+            message,
+            success
+        ) {
 
 
-            location.reload();
+            const messageBox =
+                document.getElementById(
+                    "message"
+                );
+
+
+            messageBox.innerText =
+                message;
+
+
+            messageBox.style.whiteSpace =
+                "pre-line";
+
+
+            messageBox.className =
+                "message " +
+                (
+                    success
+                        ? "success"
+                        : "error"
+                );
+
+
+            messageBox.style.display =
+                "block";
 
         }
 
+
+
+        /********************************************************
+         * HIDE MESSAGE
+         ********************************************************/
+
+        function hideMessage() {
+
+            const messageBox =
+                document.getElementById(
+                    "message"
+                );
+
+
+            messageBox.style.display =
+                "none";
+
+        }
 
     </script>
 
