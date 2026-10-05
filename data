@@ -1,19 +1,249 @@
-C:\Software_Tools\new_OCV\nssm.exe status TataDataDashboard
+@echo off
+setlocal
 
-Also run:
-sc query TataDataDashboard
+set NSSM=C:\Software_Tools\new_OCV\nssm.exe
+set NODE=C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe
+set APPDIR=C:\Software_Tools\new_OCV\MESCellDataV2
+set SERVICE=TataData
 
-Send me the output of both.
-2. Check the dashboard log
-Your BAT is configured to write here:
-C:\Software_Tools\new_OCV\MESCellDataV2\logs\dashboard.log
+if not exist "%APPDIR%\logs" mkdir "%APPDIR%\logs"
 
-And errors here:
-C:\Software_Tools\new_OCV\MESCellDataV2\logs\dashboard-error.log
+echo.
+echo ==========================================
+echo Installing %SERVICE%
+echo ==========================================
+echo.
 
-Open dashboard-error.log first.
-You can also run:
-type "C:\Software_Tools\new_OCV\MESCellDataV2\logs\dashboard-error.log"
+REM Check files
+if not exist "%NSSM%" (
+    echo ERROR: NSSM not found:
+    echo %NSSM%
+    pause
+    exit /b 1
+)
 
-and:
-type "C:\Software_Tools\new_OCV\MESCellDataV2\logs\dashboard.log"
+if not exist "%NODE%" (
+    echo ERROR: Node.js not found:
+    echo %NODE%
+    pause
+    exit /b 1
+)
+
+if not exist "%APPDIR%\mesCellDataService.js" (
+    echo ERROR: JavaScript file not found:
+    echo %APPDIR%\mesCellDataService.js
+    pause
+    exit /b 1
+)
+
+REM Remove existing service if present
+"%NSSM%" stop %SERVICE% >nul 2>&1
+"%NSSM%" remove %SERVICE% confirm >nul 2>&1
+
+REM Install service
+"%NSSM%" install %SERVICE% "%NODE%"
+
+REM Configure service
+"%NSSM%" set %SERVICE% Application "%NODE%"
+"%NSSM%" set %SERVICE% AppDirectory "%APPDIR%"
+"%NSSM%" set %SERVICE% AppParameters "mesCellDataService.js"
+
+"%NSSM%" set %SERVICE% DisplayName "Tata Data"
+"%NSSM%" set %SERVICE% Description "Reads cell data from OPC UA and forwards it to the MES"
+
+REM Automatic startup
+"%NSSM%" set %SERVICE% Start SERVICE_AUTO_START
+
+REM Logs
+"%NSSM%" set %SERVICE% AppStdout "%APPDIR%\logs\service.log"
+"%NSSM%" set %SERVICE% AppStderr "%APPDIR%\logs\service-error.log"
+
+REM Log rotation
+"%NSSM%" set %SERVICE% AppRotateFiles 1
+"%NSSM%" set %SERVICE% AppRotateBytes 10485760
+
+REM Stop method
+"%NSSM%" set %SERVICE% AppStopMethodConsole 15000
+
+REM Restart if Node.js exits
+"%NSSM%" set %SERVICE% AppExit Default Restart
+"%NSSM%" set %SERVICE% AppRestartDelay 5000
+
+echo.
+echo ==========================================
+echo TataData installed successfully
+echo ==========================================
+echo.
+
+"%NSSM%" status %SERVICE%
+
+echo.
+echo Service:
+echo   TataData
+echo.
+echo Application:
+echo   %NODE%
+echo.
+echo Script:
+echo   %APPDIR%\mesCellDataService.js
+echo.
+echo Logs:
+echo   %APPDIR%\logs\service.log
+echo   %APPDIR%\logs\service-error.log
+echo.
+
+echo Starting TataData...
+echo.
+
+"%NSSM%" start %SERVICE%
+
+timeout /t 5 /nobreak >nul
+
+echo.
+echo ==========================================
+echo TataData Status
+echo ==========================================
+echo.
+
+"%NSSM%" status %SERVICE%
+
+echo.
+pause
+
+
+//////////////////////////////
+
+
+@echo off
+setlocal
+
+set NSSM=C:\Software_Tools\new_OCV\nssm.exe
+set NODE=C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe
+set APPDIR=C:\Software_Tools\new_OCV\MESCellDataV2
+set SERVICE=TataDataDashboard
+set PARENT=TataData
+
+if not exist "%APPDIR%\logs" mkdir "%APPDIR%\logs"
+
+echo.
+echo ==========================================
+echo Installing %SERVICE%
+echo ==========================================
+echo.
+
+REM Check files
+if not exist "%NSSM%" (
+    echo ERROR: NSSM not found:
+    echo %NSSM%
+    pause
+    exit /b 1
+)
+
+if not exist "%NODE%" (
+    echo ERROR: Node.js not found:
+    echo %NODE%
+    pause
+    exit /b 1
+)
+
+if not exist "%APPDIR%\Micro Data Service dashboard.js" (
+    echo ERROR: Dashboard JavaScript file not found:
+    echo %APPDIR%\Micro Data Service dashboard.js
+    pause
+    exit /b 1
+)
+
+REM Check TataData service
+echo Checking TataData service...
+echo.
+
+sc query "%PARENT%" >nul 2>&1
+
+if errorlevel 1 (
+    echo ERROR: TataData service is not installed.
+    echo.
+    echo Please install TataData first.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo TataData service exists.
+echo.
+
+REM Remove existing dashboard service if present
+"%NSSM%" stop %SERVICE% >nul 2>&1
+"%NSSM%" remove %SERVICE% confirm >nul 2>&1
+
+REM Install dashboard service
+"%NSSM%" install %SERVICE% "%NODE%"
+
+REM Configure service
+"%NSSM%" set %SERVICE% Application "%NODE%"
+"%NSSM%" set %SERVICE% AppDirectory "%APPDIR%"
+"%NSSM%" set %SERVICE% AppParameters "\"Micro Data Service dashboard.js\""
+
+"%NSSM%" set %SERVICE% DisplayName "Tata Data Dashboard"
+"%NSSM%" set %SERVICE% Description "Tata Data Dashboard Service"
+
+REM Automatic startup
+"%NSSM%" set %SERVICE% Start SERVICE_AUTO_START
+
+REM Make dashboard depend on TataData
+"%NSSM%" set %SERVICE% DependOnService "%PARENT%"
+
+REM Logs
+"%NSSM%" set %SERVICE% AppStdout "%APPDIR%\logs\dashboard.log"
+"%NSSM%" set %SERVICE% AppStderr "%APPDIR%\logs\dashboard-error.log"
+
+REM Log rotation
+"%NSSM%" set %SERVICE% AppRotateFiles 1
+"%NSSM%" set %SERVICE% AppRotateBytes 10485760
+
+REM Restart if Node.js exits
+"%NSSM%" set %SERVICE% AppExit Default Restart
+"%NSSM%" set %SERVICE% AppRestartDelay 5000
+
+echo.
+echo ==========================================
+echo TataDataDashboard installed successfully
+echo ==========================================
+echo.
+
+"%NSSM%" status %SERVICE%
+
+echo.
+echo Service:
+echo   TataDataDashboard
+echo.
+echo Application:
+echo   %NODE%
+echo.
+echo Script:
+echo   %APPDIR%\Micro Data Service dashboard.js
+echo.
+echo Dependency:
+echo   TataData
+echo.
+echo Logs:
+echo   %APPDIR%\logs\dashboard.log
+echo   %APPDIR%\logs\dashboard-error.log
+echo.
+
+echo Starting TataDataDashboard...
+echo.
+
+"%NSSM%" start %SERVICE%
+
+timeout /t 5 /nobreak >nul
+
+echo.
+echo ==========================================
+echo TataDataDashboard Status
+echo ==========================================
+echo.
+
+"%NSSM%" status %SERVICE%
+
+echo.
+pause
