@@ -1,7 +1,71 @@
-SELECT 
-    username,
-    COUNT(*) AS occurrence_count
-FROM taco_treceability.station_status_ok_universal
-WHERE today_date LIKE '2026-10-01%'
-GROUP BY username
-ORDER BY occurrence_count DESC;
+@echo off
+setlocal
+
+set NSSM=C:\Software_Tools\new_OCV\nssm.exe
+set NODE=C:\Software_Tools\new_OCV\node-v24.21.0-win-x64\node.exe
+set APPDIR=C:\Software_Tools\new_OCV\MESCellDataV2
+
+if not exist "%APPDIR%\logs" mkdir "%APPDIR%\logs"
+
+echo.
+echo ==========================================
+echo Installing TataData
+echo ==========================================
+
+"%NSSM%" install TataData "%NODE%" "mesCellDataService.js"
+"%NSSM%" set TataData AppDirectory "%APPDIR%"
+"%NSSM%" set TataData DisplayName "Tata Data"
+"%NSSM%" set TataData Description "Reads cell data from OPC UA and forwards it to the MES"
+"%NSSM%" set TataData Start SERVICE_AUTO_START
+"%NSSM%" set TataData AppStdout "%APPDIR%\logs\service.log"
+"%NSSM%" set TataData AppStderr "%APPDIR%\logs\service-error.log"
+"%NSSM%" set TataData AppRotateFiles 1
+"%NSSM%" set TataData AppRotateBytes 10485760
+"%NSSM%" set TataData AppStopMethodConsole 15000
+"%NSSM%" set TataData AppExit Default Restart
+"%NSSM%" set TataData AppRestartDelay 5000
+
+echo.
+echo ==========================================
+echo Installing TataDataDashboard
+echo ==========================================
+
+"%NSSM%" install TataDataDashboard "%NODE%" "Micro Data Service dashboard.js"
+"%NSSM%" set TataDataDashboard AppDirectory "%APPDIR%"
+"%NSSM%" set TataDataDashboard DisplayName "Tata Data Dashboard"
+"%NSSM%" set TataDataDashboard Start SERVICE_AUTO_START
+"%NSSM%" set TataDataDashboard DependOnService TataData
+"%NSSM%" set TataDataDashboard AppStdout "%APPDIR%\logs\dashboard.log"
+"%NSSM%" set TataDataDashboard AppStderr "%APPDIR%\logs\dashboard-error.log"
+"%NSSM%" set TataDataDashboard AppRotateFiles 1
+"%NSSM%" set TataDataDashboard AppExit Default Restart
+
+echo.
+echo ==========================================
+echo Starting TataData
+echo ==========================================
+
+"%NSSM%" start TataData
+
+timeout /t 10 /nobreak
+
+echo.
+echo ==========================================
+echo Starting TataDataDashboard
+echo ==========================================
+
+"%NSSM%" start TataDataDashboard
+
+echo.
+echo ==========================================
+echo Done
+echo ==========================================
+echo.
+echo Services created:
+echo   TataData
+echo   TataDataDashboard
+echo.
+echo Open services.msc to verify.
+echo.
+
+pause
