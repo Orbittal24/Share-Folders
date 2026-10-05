@@ -1,2 +1,7 @@
-21	NULL	03HCB00LG6T2BVG6T0532521
-57	NULL	03HCB00LG6T6BVG6T0029711
+SELECT 
+    username,
+    COUNT(*) AS occurrence_count
+FROM taco_treceability.station_status_ok_universal
+WHERE today_date LIKE '2026-10-01%'
+GROUP BY username
+ORDER BY occurrence_count DESC;
