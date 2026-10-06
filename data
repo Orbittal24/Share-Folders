@@ -1,4 +1,8 @@
-SELECT COUNT(DISTINCT station_id) AS distinct_station_count
+SELECT 
+    station_id,
+    COUNT(*) AS occurrence_count
 FROM taco_treceability.station_status_ok_universal
 WHERE username = 'Vaibhav'
-  AND today_date LIKE '2026-10-05%';
+  AND today_date LIKE '2026-10-05%'
+GROUP BY station_id
+ORDER BY occurrence_count DESC;
