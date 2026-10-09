@@ -1,279 +1,707 @@
-
+ss
 const net = require("net");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const XLSX = require("xlsx");
+const HID = require("node-hid");
+const sql = require("mssql");
 
 // ============================================================
 // TCP SERVER CONFIGURATION
 // ============================================================
 
-const HOST = "0.0.0.0";
+const HOST = "10.9.4.28";
 const PORT = 7287;
 
 // ============================================================
-// CONNECTED TCP CLIENTS
+// USB HID RELAY CONFIGURATION
 // ============================================================
 
-const connectedClients = new Set();
+const USB_RELAY_VID = 0x16C0;
+const USB_RELAY_PID = 0x05DF;
+const USB_RELAY_PRODUCT = "USBRelay2";
+
+const APP_STATUS_RELAY = 1;
+const BUZZER_RELAY = 2;
 
 // ============================================================
-// SERVER
+// EXCEL CONFIGURATION
 // ============================================================
 
-const server = net.createServer((socket) => {
-    const clientAddress =
-        `${socket.remoteAddress}:${socket.remotePort}`;
+const EXCEL_FILE_NAME = "buzzer_line.xlsx";
+
+const EXCEL_FILE_PATH = path.join(
+    os.homedir(),
+    "Desktop",
+    EXCEL_FILE_NAME
+);
+
+const EXCEL_SHEET_NAME = "Sheet1";
+const EXCEL_LINE_CELL = "A1";
+
+// ============================================================
+// SQL DATABASE CONFIGURATION
+// ============================================================
+
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin@123",
+    database: "taco_treceability_master",
+    server: "10.9.4.29",
+    port: 1433,
+
+    options: {
+        instanceName: "PROD_SQL_2026",
+        encrypt: false,
+        trustServerCertificate: true
+    },
+
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
+// ============================================================
+// GLOBAL VARIABLES
+// ============================================================
+
+let dbConn = new sql.ConnectionPool(sqlConfig);
+
+let client = null;
+let reconnectTimer = null;
+let buzzerTimer = null;
+
+let buzzerRunning = false;
+let usbRelay = null;
+let appStatusRelayOn = false;
+let shuttingDown = false;
+
+// ============================================================
+// INITIALIZE SQL CONNECTION
+// ============================================================
+
+dbConn.connect()
+    .then(() => {
+        console.log("Connected to database: 10.9.4.29");
+    })
+    .catch((error) => {
+        console.log("SQL DATABASE CONNECTION ERROR:", error.message);
+    });
+
+// ============================================================
+// GET BUZZER DURATION FROM DATABASE
+// ============================================================
+
+async function getBuzzerDurationFromDatabase(lineNo) {
+    try {
+        if (!dbConn || !dbConn.connected) {
+            console.log("SQL database reconnecting...");
+
+            dbConn = await new sql.ConnectionPool(
+                sqlConfig
+            ).connect();
+
+            console.log("SQL database connected.");
+        }
+
+        const request = dbConn.request();
+
+        request.input(
+            "lineNo",
+            sql.VarChar,
+            String(lineNo).trim()
+        );
+
+        const result = await request.query(`
+            SELECT time_limit
+            FROM taco_treceability.master_line_cell_scanning_status
+            WHERE line_no = @lineNo
+        `);
+
+        if (
+            !result.recordset ||
+            result.recordset.length === 0
+        ) {
+            console.log("TIME LIMIT NOT FOUND");
+            console.log("Line:", lineNo);
+            return null;
+        }
+
+        const timeLimit = result.recordset[0].time_limit;
+
+        if (
+            timeLimit === null ||
+            timeLimit === undefined
+        ) {
+            console.log("INVALID TIME LIMIT: NULL");
+            return null;
+        }
+
+        const durationSeconds = Number(timeLimit);
+
+        if (
+            !Number.isFinite(durationSeconds) ||
+            durationSeconds <= 0
+        ) {
+            console.log("INVALID TIME LIMIT:", timeLimit);
+            return null;
+        }
+
+        console.log("");
+        console.log("==========================================");
+        console.log("BUZZER TIME FROM DATABASE");
+        console.log("==========================================");
+        console.log("Line       :", lineNo);
+        console.log("time_limit :", durationSeconds, "seconds");
+        console.log("==========================================");
+
+        return durationSeconds;
+
+    } catch (error) {
+        console.log("SQL TIME LIMIT READ ERROR");
+        console.log("Line:", lineNo);
+        console.log("Error:", error.message);
+
+        return null;
+    }
+}
+
+// ============================================================
+// INITIALIZE USB HID RELAY
+// ============================================================
+
+function initializeUSBRelay() {
+    try {
+        const devices = HID.devices(
+            USB_RELAY_VID,
+            USB_RELAY_PID
+        );
+
+        if (!devices.length) {
+            throw new Error(
+                `USBRelay2 not found. VID=0x${USB_RELAY_VID.toString(16)}, ` +
+                `PID=0x${USB_RELAY_PID.toString(16)}`
+            );
+        }
+
+        const deviceInfo =
+            devices.find(
+                device => device.product === USB_RELAY_PRODUCT
+            ) ||
+            devices.find(device => device.path);
+
+        if (!deviceInfo) {
+            throw new Error("USB HID device path not found.");
+        }
+
+        usbRelay = new HID.HID(deviceInfo.path);
+
+        console.log("");
+        console.log("==========================================");
+        console.log("USB HID RELAY CONNECTED");
+        console.log("==========================================");
+        console.log("Manufacturer:", deviceInfo.manufacturer || "Unknown");
+        console.log("Product     :", deviceInfo.product || "Unknown");
+        console.log("VID         :", `0x${USB_RELAY_VID.toString(16).toUpperCase()}`);
+        console.log("PID         :", `0x${USB_RELAY_PID.toString(16).toUpperCase()}`);
+        console.log("Path        :", deviceInfo.path);
+        console.log("==========================================");
+
+        // Buzzer must start in OFF state.
+        sendRelayCommand(
+            BUZZER_RELAY,
+            false,
+            "BUZZER OFF AT STARTUP"
+        );
+
+        // Relay 1 indicates that the application is running.
+        appStatusRelayOn = sendRelayCommand(
+            APP_STATUS_RELAY,
+            true,
+            "APPLICATION STATUS ON"
+        );
+
+        return true;
+
+    } catch (error) {
+        console.log("");
+        console.log("==========================================");
+        console.log("USB HID RELAY INITIALIZATION ERROR");
+        console.log("==========================================");
+        console.log("Error:", error.message);
+        console.log("==========================================");
+
+        return false;
+    }
+}
+
+// ============================================================
+// SEND USB HID RELAY COMMAND
+// ============================================================
+
+function sendRelayCommand(relayNumber, turnOn, commandName) {
+    if (!usbRelay) {
+        console.log(
+            `RELAY ${commandName} FAILED: USB relay not connected.`
+        );
+
+        return false;
+    }
+
+    if (relayNumber !== 1 && relayNumber !== 2) {
+        console.log("Invalid relay number:", relayNumber);
+        return false;
+    }
+
+    try {
+        const report = [
+            0x00,
+            turnOn ? 0xFF : 0xFD,
+            relayNumber,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00
+        ];
+
+        usbRelay.sendFeatureReport(report);
+
+        const hexCommand = report
+            .map(value =>
+                value.toString(16).padStart(2, "0")
+            )
+            .join(" ")
+            .toUpperCase();
+
+        console.log("");
+        console.log("==========================================");
+        console.log(`RELAY ${commandName} COMMAND SENT`);
+        console.log("Relay:", relayNumber);
+        console.log("State:", turnOn ? "ON" : "OFF");
+        console.log("HEX  :", hexCommand);
+        console.log("==========================================");
+
+        return true;
+
+    } catch (error) {
+        console.log(`RELAY ${commandName} ERROR:`, error.message);
+        return false;
+    }
+}
+
+// ============================================================
+// CLOSE USB HID RELAY
+// ============================================================
+
+function shutdownUSBRelay() {
+    if (!usbRelay) {
+        return;
+    }
+
+    // Turn OFF the buzzer.
+    sendRelayCommand(
+        BUZZER_RELAY,
+        false,
+        "BUZZER OFF ON SHUTDOWN"
+    );
+
+    // Turn OFF the application status indicator.
+    sendRelayCommand(
+        APP_STATUS_RELAY,
+        false,
+        "APPLICATION STATUS OFF"
+    );
+
+    try {
+        usbRelay.close();
+    } catch (error) {
+        console.log("USB relay close error:", error.message);
+    }
+
+    usbRelay = null;
+    appStatusRelayOn = false;
+}
+
+// ============================================================
+// READ LINE NUMBER FROM EXCEL
+// ============================================================
+
+function getConfiguredLineFromExcel() {
+    try {
+        if (!fs.existsSync(EXCEL_FILE_PATH)) {
+            console.log("EXCEL FILE NOT FOUND:", EXCEL_FILE_PATH);
+            return null;
+        }
+
+        const workbook = XLSX.readFile(EXCEL_FILE_PATH);
+
+        if (!workbook.Sheets[EXCEL_SHEET_NAME]) {
+            console.log("EXCEL SHEET NOT FOUND:", EXCEL_SHEET_NAME);
+            return null;
+        }
+
+        const worksheet = workbook.Sheets[EXCEL_SHEET_NAME];
+        const excelCell = worksheet[EXCEL_LINE_CELL];
+
+        if (
+            !excelCell ||
+            excelCell.v === undefined ||
+            excelCell.v === null
+        ) {
+            console.log("EXCEL LINE NUMBER NOT FOUND");
+            return null;
+        }
+
+        const configuredLine = String(excelCell.v).trim();
+
+        if (!configuredLine) {
+            console.log("Excel line number is empty.");
+            return null;
+        }
+
+        return configuredLine;
+
+    } catch (error) {
+        console.log("EXCEL READ ERROR:", error.message);
+        return null;
+    }
+}
+
+// ============================================================
+// START BUZZER
+// ============================================================
+
+async function startBuzzer(lineNo, cellQr) {
+    // Prevent overlapping buzzer cycles.
+    if (buzzerRunning) {
+        console.log("BUZZER ALREADY RUNNING");
+        console.log(
+            "New buzzer event ignored while current buzzer cycle is active."
+        );
+
+        return;
+    }
+
+    // Get buzzer duration from SQL.
+    const durationSeconds =
+        await getBuzzerDurationFromDatabase(lineNo);
+
+    if (durationSeconds === null) {
+        console.log(
+            "BUZZER WILL NOT START: Valid time_limit unavailable."
+        );
+
+        return;
+    }
+
+    const buzzerDurationMs = durationSeconds * 1000;
+
+    buzzerRunning = true;
 
     console.log("");
     console.log("==========================================");
-    console.log("NEW TCP CONNECTION");
+    console.log("BUZZER START");
     console.log("==========================================");
-    console.log(`Client : ${clientAddress}`);
-    console.log(`Clients connected : ${connectedClients.size + 1}`);
+    console.log("Line     :", lineNo);
+    console.log("CellQR   :", cellQr);
+    console.log("Duration :", durationSeconds, "seconds");
     console.log("==========================================");
 
-    connectedClients.add(socket);
+    // Relay 2 ON: buzzer starts.
+    const relayOnSent = sendRelayCommand(
+        BUZZER_RELAY,
+        true,
+        "BUZZER ON"
+    );
 
-    // Prevent idle connections from being closed automatically.
-    socket.setKeepAlive(true, 10000);
-    socket.setNoDelay(true);
+    if (!relayOnSent) {
+        buzzerRunning = false;
+        return;
+    }
 
-    // Preserve incomplete messages between TCP data events.
-    let receiveBuffer = "";
+    if (buzzerTimer) {
+        clearTimeout(buzzerTimer);
+        buzzerTimer = null;
+    }
+
+    // Automatically switch Relay 2 OFF after SQL time_limit.
+    buzzerTimer = setTimeout(() => {
+        console.log("");
+        console.log("==========================================");
+        console.log(`${durationSeconds} SECONDS COMPLETED`);
+        console.log("Sending buzzer OFF command...");
+        console.log("==========================================");
+
+        sendRelayCommand(
+            BUZZER_RELAY,
+            false,
+            "BUZZER OFF"
+        );
+
+        buzzerRunning = false;
+        buzzerTimer = null;
+
+        console.log("BUZZER AUTO STOPPED");
+        console.log(
+            `Relay OFF after ${durationSeconds} seconds`
+        );
+
+    }, buzzerDurationMs);
+}
+
+// ============================================================
+// PROCESS BUZZER EVENT
+// ============================================================
+
+async function processBuzzerEvent(receivedLine, cellQr) {
+    const configuredLine = getConfiguredLineFromExcel();
+
+    if (configuredLine === null) {
+        console.log("BUZZER EVENT CANNOT BE PROCESSED");
+        console.log("Excel line number could not be read.");
+
+        return;
+    }
+
+    console.log("");
+    console.log("==========================================");
+    console.log("LINE COMPARISON");
+    console.log("==========================================");
+    console.log("Received Line:", receivedLine);
+    console.log("Excel Line   :", configuredLine);
+    console.log("==========================================");
+
+    if (
+        String(receivedLine).trim() ===
+        String(configuredLine).trim()
+    ) {
+        console.log("LINE MATCHED");
+        console.log(
+            `Line ${receivedLine} belongs to this client.`
+        );
+
+        await startBuzzer(receivedLine, cellQr);
+
+    } else {
+        console.log("LINE NOT MATCHED");
+        console.log("Received  :", receivedLine);
+        console.log("Configured:", configuredLine);
+        console.log("Buzzer will NOT start.");
+    }
+}
+
+// ============================================================
+// CONNECT TO TCP SERVER
+// ============================================================
+
+function connectToServer() {
+    if (shuttingDown) {
+        return;
+    }
+
+    console.log("");
+    console.log("==========================================");
+    console.log("BUZZER TCP CLIENT");
+    console.log("==========================================");
+    console.log("Server:", HOST);
+    console.log("Port  :", PORT);
+    console.log("==========================================");
+
+    client = new net.Socket();
+
+    client.setKeepAlive(true, 10000);
+
+    client.connect(PORT, HOST, () => {
+        console.log("");
+        console.log("==========================================");
+        console.log("CONNECTED TO BUZZER TCP SERVER");
+        console.log("==========================================");
+        console.log(`Server: ${HOST}:${PORT}`);
+        console.log("Status: Listening for broadcasts");
+        console.log("==========================================");
+    });
 
     // ========================================================
-    // RECEIVE DATA
+    // RECEIVE TCP DATA
     // ========================================================
 
-    socket.on("data", (data) => {
-        receiveBuffer += data.toString("utf8");
+    client.on("data", async (data) => {
+        const messages = data
+            .toString("utf-8")
+            .split("\n");
 
-        // Process only complete newline-terminated messages.
-        let newlineIndex;
+        for (const message of messages) {
+            const trimmedMessage = message.trim();
 
-        while ((newlineIndex = receiveBuffer.indexOf("\n")) !== -1) {
-            const message = receiveBuffer
-                .slice(0, newlineIndex)
-                .trim();
-
-            receiveBuffer = receiveBuffer.slice(newlineIndex + 1);
-
-            if (!message) {
+            if (!trimmedMessage) {
                 continue;
             }
 
-            processMessage(socket, message);
-        }
+            console.log("");
+            console.log("==========================================");
+            console.log("BUZZER BROADCAST RECEIVED");
+            console.log("==========================================");
+            console.log("Raw:", trimmedMessage);
 
-        // Avoid unlimited memory use for malformed input.
-        if (receiveBuffer.length > 1024 * 1024) {
-            console.log("ERROR: Incoming message exceeded 1 MB.");
-            socket.destroy();
-        }
-    });
+            try {
+                const payload = JSON.parse(trimmedMessage);
 
-    // ========================================================
-    // CLIENT DISCONNECTED
-    // ========================================================
+                const lineNo = String(
+                    payload.line_no || ""
+                ).trim();
 
-    socket.on("close", () => {
-        connectedClients.delete(socket);
+                const cellQr = String(
+                    payload.cellqr || ""
+                ).trim();
 
-        console.log("");
-        console.log("==========================================");
-        console.log("TCP CLIENT DISCONNECTED");
-        console.log("==========================================");
-        console.log(`Client : ${clientAddress}`);
-        console.log(`Remaining clients : ${connectedClients.size}`);
-        console.log("==========================================");
-    });
-
-    // ========================================================
-    // CLIENT ERROR
-    // ========================================================
-
-    socket.on("error", (error) => {
-        console.log("");
-        console.log("TCP CLIENT ERROR");
-        console.log(`Client : ${clientAddress}`);
-        console.log(`Error  : ${error.message}`);
-        console.log("");
-    });
-});
-
-// ============================================================
-// PROCESS MESSAGE AND BROADCAST
-// ============================================================
-
-function processMessage(sender, rawMessage) {
-    let payload;
-
-    try {
-        payload = JSON.parse(rawMessage);
-    } catch (error) {
-        sendAcknowledgement(sender, {
-            status: "error",
-            message: "Invalid JSON"
-        });
-
-        console.log("Invalid JSON received:", rawMessage);
-        return;
-    }
-
-    const lineNo = String(payload.line_no ?? "").trim();
-    const cellQr = String(payload.cellqr ?? "").trim();
-
-    if (!lineNo) {
-        sendAcknowledgement(sender, {
-            status: "error",
-            message: "line_no is required"
-        });
-
-        console.log("Rejected message: line_no is missing.");
-        return;
-    }
-
-    // Keep the existing buzzer-client message format.
-    const broadcastMessage = JSON.stringify({
-        line_no: lineNo,
-        cellqr: cellQr
-    }) + "\n";
-
-    console.log("");
-    console.log("==========================================");
-    console.log("BUZZER EVENT RECEIVED");
-    console.log("==========================================");
-    console.log(`Line   : ${lineNo}`);
-    console.log(`CellQR : ${cellQr}`);
-    console.log(`Clients currently connected: ${connectedClients.size}`);
-    console.log("==========================================");
-
-    let successCount = 0;
-    let failureCount = 0;
-
-    // ========================================================
-    // BROADCAST TO ALL CONNECTED CLIENTS
-    // ========================================================
-
-    for (const client of connectedClients) {
-        // Do not send the broadcast back to the sending socket.
-        // The sender receives an acknowledgement instead.
-        if (client === sender) {
-            continue;
-        }
-
-        if (client.destroyed || !client.writable) {
-            connectedClients.delete(client);
-            continue;
-        }
-
-        try {
-            client.write(broadcastMessage, (error) => {
-                if (error) {
-                    console.log(
-                        `Broadcast write error: ${error.message}`
-                    );
+                if (!lineNo) {
+                    console.log("line_no missing.");
+                    continue;
                 }
-            });
 
-            successCount++;
-        } catch (error) {
-            failureCount++;
+                console.log("Line  :", lineNo);
+                console.log("CellQR:", cellQr);
 
-            console.log(
-                `Broadcast failed: ${error.message}`
-            );
+                await processBuzzerEvent(lineNo, cellQr);
+
+            } catch (error) {
+                console.log("");
+                console.log("==========================================");
+                console.log("INVALID JSON RECEIVED");
+                console.log("==========================================");
+                console.log("Data :", trimmedMessage);
+                console.log("Error:", error.message);
+                console.log("==========================================");
+            }
         }
-    }
+    });
 
-    console.log("");
-    console.log("==========================================");
-    console.log("BUZZER BROADCAST COMPLETED");
-    console.log("==========================================");
-    console.log(`Line             : ${lineNo}`);
-    console.log(`CellQR           : ${cellQr}`);
-    console.log(`Clients sent to  : ${successCount}`);
-    console.log(`Write failures   : ${failureCount}`);
-    console.log("==========================================");
-    console.log("");
+    // ========================================================
+    // TCP CONNECTION CLOSED
+    // ========================================================
 
-    // Acknowledge the FastAPI sender.
-    sendAcknowledgement(sender, {
-        status: "success",
-        line_no: lineNo,
-        cellqr: cellQr,
-        clients_sent: successCount,
-        message: "Broadcast completed"
+    client.on("close", () => {
+        console.log("TCP CONNECTION CLOSED");
+
+        if (!shuttingDown) {
+            scheduleReconnect();
+        }
+    });
+
+    // ========================================================
+    // TCP ERROR
+    // ========================================================
+
+    client.on("error", (error) => {
+        console.log("");
+        console.log("==========================================");
+        console.log("TCP ERROR");
+        console.log("==========================================");
+        console.log(error.message);
+        console.log("==========================================");
     });
 }
 
 // ============================================================
-// SEND ACKNOWLEDGEMENT TO SENDER
+// TCP RECONNECT
 // ============================================================
 
-function sendAcknowledgement(socket, response) {
-    if (socket.destroyed || !socket.writable) {
+function scheduleReconnect() {
+    if (shuttingDown || reconnectTimer) {
         return;
     }
 
-    socket.write(JSON.stringify(response) + "\n");
+    console.log("Reconnecting in 3 seconds...");
+
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+
+        if (!shuttingDown) {
+            connectToServer();
+        }
+    }, 3000);
 }
 
 // ============================================================
-// SERVER ERROR
+// APPLICATION SHUTDOWN
 // ============================================================
 
-server.on("error", (error) => {
-    console.log("");
-    console.log("==========================================");
-    console.log("TCP SERVER ERROR");
-    console.log("==========================================");
-    console.log(`Error : ${error.message}`);
-    console.log("==========================================");
-
-    if (error.code === "EADDRINUSE") {
-        console.log(`Port ${PORT} is already in use.`);
+function shutdownClient() {
+    if (shuttingDown) {
+        return;
     }
 
-    if (error.code === "EADDRNOTAVAIL") {
-        console.log(`Check whether the server IP is available.`);
+    shuttingDown = true;
+
+    console.log("Stopping buzzer client...");
+
+    if (buzzerTimer) {
+        clearTimeout(buzzerTimer);
+        buzzerTimer = null;
     }
-});
 
-// ============================================================
-// START SERVER
-// ============================================================
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
 
-server.listen(PORT, HOST, () => {
-    console.log("");
-    console.log("================================================");
-    console.log("BUZZER TCP SERVER STARTED");
-    console.log("================================================");
-    console.log(`Bind address : ${HOST}`);
-    console.log(`Port         : ${PORT}`);
-    console.log(`Client IP    : 10.9.4.28:${PORT}`);
-    console.log("Status       : Listening for connections");
-    console.log("Mode         : Multiple TCP clients");
-    console.log("================================================");
-    console.log("");
-});
+    buzzerRunning = false;
 
-// ============================================================
-// GRACEFUL SHUTDOWN
-// ============================================================
+    shutdownUSBRelay();
 
-function shutdown() {
-    console.log("\nStopping buzzer TCP server...");
-
-    for (const client of connectedClients) {
+    if (client) {
         client.destroy();
+        client = null;
     }
 
-    connectedClients.clear();
-
-    server.close(() => {
-        console.log("Buzzer TCP server stopped.");
-        process.exit(0);
-    });
+    if (dbConn && dbConn.connected) {
+        dbConn.close().catch(() => {});
+    }
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => {
+    shutdownClient();
+    process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+    shutdownClient();
+    process.exit(0);
+});
+
+process.on("uncaughtException", (error) => {
+    console.log("UNCAUGHT EXCEPTION:", error.message);
+    shutdownClient();
+    process.exit(1);
+});
+
+// ============================================================
+// START APPLICATION
+// ============================================================
+
+console.log("");
+console.log("================================================");
+console.log("BUZZER CLIENT STARTING");
+console.log("================================================");
+console.log(`TCP Server  : ${HOST}:${PORT}`);
+console.log(`Excel File  : ${EXCEL_FILE_PATH}`);
+console.log(`Excel Sheet : ${EXCEL_SHEET_NAME}`);
+console.log(`Excel Cell  : ${EXCEL_LINE_CELL}`);
+console.log(
+    `USB Relay VID: 0x${USB_RELAY_VID.toString(16).toUpperCase()}`
+);
+console.log(
+    `USB Relay PID: 0x${USB_RELAY_PID.toString(16).toUpperCase()}`
+);
+console.log(`Status Relay: ${APP_STATUS_RELAY}`);
+console.log(`Buzzer Relay: ${BUZZER_RELAY}`);
+console.log("Buzzer Time : Database time_limit seconds");
+console.log("================================================");
+
+// Initialize the USB relay and then start TCP communication.
+initializeUSBRelay();
+connectToServer();
