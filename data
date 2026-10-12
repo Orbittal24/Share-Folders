@@ -1,4 +1,3 @@
-
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -8,13 +7,12 @@ const { Server } = require("socket.io");
 // =====================================================
 // CONFIGURATION
 // =====================================================
-
-const PORT = 3000;
+const PORT = 3211;
 
 const sqlConfig = {
     user: "user_mis",
     password: "admin@123",
-    database: "taco_treceability",
+    database: "cell_scanning_master",
     server: "10.9.4.29",
     port: 1433,
     options: {
@@ -31,108 +29,77 @@ const sqlConfig = {
     requestTimeout: 120000
 };
 
-// These are schema.table names in the configured database.
-const SOURCE_TABLE = "[taco_treceability].[production_count]";
-const TARGET_TABLE = "[taco_treceability].[production_count_1]";
+// Source and destination tables are built only from
+// validated line numbers (1–20).
+const SCHEMA = "[taco_treceability]";
+const HTML_FILE = path.join(
+    __dirname,
+    "production_count_ui_newMIS.html"
+);
 
-const HTML_FILE = path.join(__dirname, "index.html");
-
-// sr_no is excluded because the destination may use IDENTITY.
-// All remaining columns are copied using their original names.
 const COLUMNS = [
-    "battery_id",
-    "battery_pack_name",
-    "cell_qr_code",
-    "battery_status",
-    "module_name",
-    "module_status",
-    "module_id",
+    "pack_name",
+    "pack_id",
+    "line_id",
+    "pack_no",
     "module_barcode",
-    "cell_status",
-    "date_time_start",
-    "shift",
-    "line",
-    "username",
-    "final_qr_code_status",
-    "final_qr_code",
-    "CustomerQRCode",
-    "date_time_end",
-    "total_module",
-    "today_date",
+    "module_number",
+    "module_name",
+    "cellqr",
+    "pack_status",
+    "module_status",
+    "cellqr_status",
     "rownum",
-    "moduleNumber",
-    "shift_incharge",
-    "shift_supervisor",
-    "range_from",
-    "range_to",
-    "cell_voltage",
     "cell_ir",
-    "ocv_machine_location",
+    "cell_voltage",
+    "cell_kvalue",
+    "cell_negativeVolatge",
+    "cell_class_grade",
+    "capacity",
+    "cell_thickness",
+    "cell_laserStatus",
+    "cell_count",
+    "cell_batch",
+    "cell_plantCode",
     "ocv_scanned_time",
-    "ocv_kvalue",
-    "ocv_class",
-    "ocv_capacity",
-    "negative_voltage",
-    "cell_thikness",
-    "laser_status"
+    "ocv_mc_no",
+    "current_dateTime",
+    "updated_dateTime"
 ];
 
-const COLUMN_LIST = COLUMNS.map(
-    column => `[${column}]`
-).join(", ");
+const COLUMN_LIST = COLUMNS
+    .map(column => `[${column}]`)
+    .join(", ");
 
 let pool = null;
 let poolPromise = null;
 let backupRunning = false;
 
 // =====================================================
-// HTTP SERVER
-// Serves index.html. Socket.IO handles its own client
-// script and all database-operation events.
+// VALIDATE TABLE NAME AND GET SOURCE/TARGET
 // =====================================================
+function getTables(tableName) {
+    const match = /^running_production_count_line([1-9]|1[0-9]|20)$/
+        .exec(String(tableName || ""));
 
-const server = http.createServer((req, res) => {
-    let requestPath;
-
-    try {
-        requestPath = new URL(
-            req.url,
-            "http://localhost"
-        ).pathname;
-    } catch {
-        res.writeHead(400);
-        return res.end("Invalid request");
+    if (!match) {
+        throw new Error(
+            "Please select a valid production count table (Line 1–20)."
+        );
     }
 
-    if (requestPath !== "/" && requestPath !== "/index.html") {
-        res.writeHead(404);
-        return res.end("Not found");
-    }
+    const line = Number(match[1]);
 
-    fs.readFile(HTML_FILE, (error, content) => {
-        if (error) {
-            console.error("HTML file error:", error.message);
-            res.writeHead(500);
-            return res.end("Unable to load index.html");
-        }
-
-        res.writeHead(200, {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-store"
-        });
-
-        res.end(content);
-    });
-});
-
-const io = new Server(server, {
-    maxHttpBufferSize: 1e6
-});
+    return {
+        source: `${SCHEMA}.[running_production_count_line${line}]`,
+        target: `${SCHEMA}.[running_production_count_line${line}_backup]`,
+        label: `Line ${line}`
+    };
+}
 
 // =====================================================
 // SQL CONNECTION POOL
 // =====================================================
-
 async function connectDatabase() {
     if (pool && pool.connected) {
         return pool;
@@ -145,7 +112,10 @@ async function connectDatabase() {
     pool = new sql.ConnectionPool(sqlConfig);
 
     pool.on("error", error => {
-        console.error("SQL connection pool error:", error.message);
+        console.error(
+            "SQL connection pool error:",
+            error.message
+        );
     });
 
     poolPromise = pool.connect()
@@ -163,12 +133,12 @@ async function connectDatabase() {
 }
 
 // =====================================================
-// INPUT VALIDATION
+// VALIDATE FILTERS
 // =====================================================
-
 function validateFilters(data) {
     const date = String(data?.date || "").trim();
     const mode = data?.mode;
+    const tables = getTables(data?.tableName);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         throw new Error("Please select a valid date.");
@@ -194,42 +164,57 @@ function validateFilters(data) {
             .trim()
             .toLowerCase();
 
-        if (!["running", "pause"].includes(status)) {
+        if (!["running", "stopped"].includes(status)) {
             throw new Error(
-                "Status must be running or pause."
+                "Status must be Running or Stopped."
             );
         }
     }
 
-    return { date, mode, status };
+    return {
+        date,
+        mode,
+        status,
+        ...tables,
+        tableName: data.tableName
+    };
 }
 
 // =====================================================
-// SHARED DATE/STATUS FILTER
-// today_date may contain either DATE or DATETIME values.
+// DATE / STATUS FILTER
+// current_dateTime may contain DATE or DATETIME values.
 // =====================================================
-
-function filterSql(mode) {
-    const statusCondition = mode === "status"
+function filterSql(filters) {
+    const statusCondition = filters.mode === "status"
         ? `
-            AND LOWER(LTRIM(RTRIM([battery_status]))) = @status
+            AND LOWER(
+                LTRIM(
+                    RTRIM(
+                        CONVERT(varchar(30), [pack_status])
+                    )
+                )
+            ) = @status
         `
         : "";
 
     return `
-        WHERE [today_date] >= @startDate
-          AND [today_date] < DATEADD(day, 1, @startDate)
+        WHERE [current_dateTime] >= @startDate
+          AND [current_dateTime] < DATEADD(day, 1, @startDate)
           ${statusCondition}
     `;
 }
 
 function applyFilters(request, filters) {
-    request.input("startDate", sql.Date, filters.date);
+    request.input(
+        "startDate",
+        sql.Date,
+        filters.date
+    );
 
     if (filters.mode === "status") {
         request.input(
             "status",
-            sql.VarChar(20),
+            sql.VarChar(30),
             filters.status
         );
     }
@@ -238,41 +223,38 @@ function applyFilters(request, filters) {
 }
 
 // =====================================================
-// SCAN
-// Returns the number of matching source records.
-// No rows are inserted or deleted during scanning.
+// SCAN RECORDS
+// Does not insert or delete anything.
 // =====================================================
-
 async function scanRecords(filters) {
     const db = await connectDatabase();
 
-    const query = `
+    const request = applyFilters(
+        db.request(),
+        filters
+    );
+
+    const result = await request.query(`
         SELECT COUNT_BIG(*) AS total
-        FROM ${SOURCE_TABLE}
-        ${filterSql(filters.mode)};
-    `;
+        FROM ${filters.source}
+        ${filterSql(filters)};
+    `);
 
-    const request = applyFilters(db.request(), filters);
-    const result = await request.query(query);
-
-    // BigInt-safe serialization for Socket.IO.
     return result.recordset[0].total.toString();
 }
 
 // =====================================================
-// SHIFT EXACTLY ONE RECORD
+// SHIFT ONE RECORD TRANSACTIONALLY
 //
-// Transaction:
-// 1. Insert one record into the destination.
-// 2. Verify the insert affected exactly one row.
-// 3. Delete that source record.
-// 4. Verify the delete affected exactly one row.
-// 5. Commit both operations.
+// 1. Insert into backup table.
+// 2. Verify exactly one row was inserted.
+// 3. Delete the source record.
+// 4. Verify exactly one row was deleted.
+// 5. Commit the transaction.
 //
-// Any error triggers rollback.
+// If anything fails, rollback the transaction.
 // =====================================================
-
-async function shiftOneRecord(db, srNo) {
+async function shiftOneRecord(db, filters, srNo) {
     const transaction = new sql.Transaction(db);
 
     await transaction.begin(
@@ -280,48 +262,61 @@ async function shiftOneRecord(db, srNo) {
     );
 
     try {
-        const insertQuery = `
-            INSERT INTO ${TARGET_TABLE} (${COLUMN_LIST})
-            SELECT ${COLUMN_LIST}
-            FROM ${SOURCE_TABLE} WITH (UPDLOCK, ROWLOCK)
-            WHERE [sr_no] = @srNo;
-        `;
-
+        // STEP 1: INSERT INTO BACKUP
         const insertRequest = new sql.Request(transaction);
 
-        insertRequest.input("srNo", sql.Int, srNo);
-
-        const insertResult = await insertRequest.query(
-            insertQuery
+        insertRequest.input(
+            "srNo",
+            sql.Int,
+            srNo
         );
 
-        if (insertResult.rowsAffected[0] !== 1) {
-            throw new Error(
-                `Expected one inserted row for sr_no ${srNo}, ` +
-                `but got ${insertResult.rowsAffected[0]}.`
-            );
-        }
-
-        // Delete the source record only after the insert succeeds.
-        const deleteRequest = new sql.Request(transaction);
-
-        deleteRequest.input("srNo", sql.Int, srNo);
-
-        const deleteResult = await deleteRequest.query(`
-            DELETE FROM ${SOURCE_TABLE}
+        const insertResult = await insertRequest.query(`
+            INSERT INTO ${filters.target} (${COLUMN_LIST})
+            SELECT ${COLUMN_LIST}
+            FROM ${filters.source} WITH (UPDLOCK, ROWLOCK)
             WHERE [sr_no] = @srNo;
         `);
 
-        if (deleteResult.rowsAffected[0] !== 1) {
+        const insertedRows = insertResult.rowsAffected
+            .reduce((sum, count) => sum + count, 0);
+
+        if (insertedRows !== 1) {
             throw new Error(
-                `Expected one deleted source row for sr_no ${srNo}, ` +
-                `but got ${deleteResult.rowsAffected[0]}.`
+                `Expected exactly one inserted backup row for sr_no ${srNo}, ` +
+                `but got ${insertedRows}.`
             );
         }
 
+        // STEP 2: DELETE SOURCE ONLY AFTER INSERT SUCCESS
+        const deleteRequest = new sql.Request(transaction);
+
+        deleteRequest.input(
+            "srNo",
+            sql.Int,
+            srNo
+        );
+
+        const deleteResult = await deleteRequest.query(`
+            DELETE FROM ${filters.source}
+            WHERE [sr_no] = @srNo;
+        `);
+
+        const deletedRows = deleteResult.rowsAffected
+            .reduce((sum, count) => sum + count, 0);
+
+        if (deletedRows !== 1) {
+            throw new Error(
+                `Expected exactly one deleted source row for sr_no ${srNo}, ` +
+                `but got ${deletedRows}.`
+            );
+        }
+
+        // STEP 3: COMMIT BOTH OPERATIONS
         await transaction.commit();
 
         return true;
+
     } catch (error) {
         try {
             await transaction.rollback();
@@ -337,16 +332,13 @@ async function shiftOneRecord(db, srNo) {
 }
 
 // =====================================================
-// BACKUP
-// Select matching IDs once, then process sequentially.
-// Stops at the first failure so the failed row can be
-// investigated and retried after a fresh scan.
+// SHIFT MATCHING RECORDS
+// Processes records sequentially and stops at first failure.
 // =====================================================
-
 async function shiftRecords(filters, socket) {
     if (backupRunning) {
         throw new Error(
-            "Another backup is running. Please wait."
+            "Another shift operation is running. Please wait."
         );
     }
 
@@ -355,8 +347,8 @@ async function shiftRecords(filters, socket) {
     let total = 0;
     let shifted = 0;
     let failed = 0;
-    let lastError = null;
     let failedSrNo = null;
+    let lastError = null;
 
     try {
         const db = await connectDatabase();
@@ -368,30 +360,41 @@ async function shiftRecords(filters, socket) {
 
         const selected = await selectRequest.query(`
             SELECT [sr_no]
-            FROM ${SOURCE_TABLE}
-            ${filterSql(filters.mode)}
+            FROM ${filters.source}
+            ${filterSql(filters)}
             ORDER BY [sr_no] ASC;
         `);
 
-        const ids = selected.recordset.map(row => row.sr_no);
+        const ids = selected.recordset.map(
+            row => row.sr_no
+        );
+
         total = ids.length;
 
         socket.emit("backup-started", {
             total,
-            message: "Backup started."
+            source: filters.source,
+            target: filters.target,
+            message: "Shift started."
         });
 
         for (const srNo of ids) {
             try {
-                await shiftOneRecord(db, srNo);
+                await shiftOneRecord(
+                    db,
+                    filters,
+                    srNo
+                );
+
                 shifted++;
+
             } catch (error) {
                 failed++;
                 failedSrNo = srNo;
                 lastError = error.message;
 
                 console.error(
-                    `Backup failed for sr_no ${srNo}:`,
+                    `Shift failed for sr_no ${srNo}:`,
                     error.message
                 );
 
@@ -403,7 +406,7 @@ async function shiftRecords(filters, socket) {
                     error: lastError
                 });
 
-                // Do not skip the failed record.
+                // Stop at the failed record.
                 break;
             }
 
@@ -422,40 +425,102 @@ async function shiftRecords(filters, socket) {
             failed,
             failedSrNo,
             lastError,
+            source: filters.source,
+            target: filters.target,
             message: failed
-                ? "Backup stopped at the failed record. The failed source record was retained."
-                : "Backup completed successfully."
+                ? "Shift stopped at the failed record. That record remains in the source table."
+                : "Shift completed successfully."
         };
 
         socket.emit("backup-complete", response);
 
         return response;
+
     } finally {
         backupRunning = false;
     }
 }
 
 // =====================================================
+// HTTP SERVER
+// =====================================================
+const server = http.createServer((req, res) => {
+    let requestPath;
+
+    try {
+        requestPath = new URL(
+            req.url,
+            "http://localhost"
+        ).pathname;
+
+    } catch {
+        res.writeHead(400);
+        return res.end("Invalid request");
+    }
+
+    if (
+        requestPath !== "/" &&
+        requestPath !== "/production_count_ui_newMIS.html"
+    ) {
+        res.writeHead(404);
+        return res.end("Not found");
+    }
+
+    fs.readFile(HTML_FILE, (error, content) => {
+        if (error) {
+            console.error(
+                "HTML file error:",
+                error.message
+            );
+
+            res.writeHead(500);
+
+            return res.end(
+                "Unable to load production_count_ui_newMIS.html"
+            );
+        }
+
+        res.writeHead(200, {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-store"
+        });
+
+        res.end(content);
+    });
+});
+
+const io = new Server(server, {
+    maxHttpBufferSize: 1e6
+});
+
+// =====================================================
 // SOCKET.IO EVENTS
 // =====================================================
-
 io.on("connection", socket => {
-    console.log("Frontend connected:", socket.id);
+    console.log(
+        "Frontend connected:",
+        socket.id
+    );
 
     socket.emit("connection-status", {
         connected: true,
         message: "Connected to backup server."
     });
 
+    // -------------------------------------------------
     // SCAN BUTTON
+    // -------------------------------------------------
     socket.on("scan-records", async (data, acknowledge) => {
         try {
             const filters = validateFilters(data);
+
             const total = await scanRecords(filters);
 
             const response = {
                 success: true,
                 total,
+                source: filters.source,
+                target: filters.target,
                 message: "Scan completed."
             };
 
@@ -464,15 +529,22 @@ io.on("connection", socket => {
             if (typeof acknowledge === "function") {
                 acknowledge(response);
             }
+
         } catch (error) {
-            console.error("Scan error:", error.message);
+            console.error(
+                "Scan error:",
+                error.message
+            );
 
             const response = {
                 success: false,
                 message: error.message
             };
 
-            socket.emit("operation-error", response);
+            socket.emit(
+                "operation-error",
+                response
+            );
 
             if (typeof acknowledge === "function") {
                 acknowledge(response);
@@ -480,11 +552,17 @@ io.on("connection", socket => {
         }
     });
 
+    // -------------------------------------------------
     // SHIFT TO BACKUP BUTTON
+    // -------------------------------------------------
     socket.on("shift-backup", async (data, acknowledge) => {
         try {
             const filters = validateFilters(data);
-            const result = await shiftRecords(filters, socket);
+
+            const result = await shiftRecords(
+                filters,
+                socket
+            );
 
             if (typeof acknowledge === "function") {
                 acknowledge({
@@ -492,15 +570,22 @@ io.on("connection", socket => {
                     ...result
                 });
             }
+
         } catch (error) {
-            console.error("Backup error:", error.message);
+            console.error(
+                "Shift error:",
+                error.message
+            );
 
             const response = {
                 success: false,
                 message: error.message
             };
 
-            socket.emit("operation-error", response);
+            socket.emit(
+                "operation-error",
+                response
+            );
 
             if (typeof acknowledge === "function") {
                 acknowledge(response);
@@ -520,21 +605,23 @@ io.on("connection", socket => {
 // =====================================================
 // START SERVER
 // =====================================================
-
 server.listen(PORT, () => {
     console.log("==========================================");
-    console.log("PRODUCTION COUNT BACKUP SERVER");
+    console.log("PRODUCTION COUNT NEW MIS BACKUP SERVER");
     console.log("==========================================");
     console.log(`Frontend: http://localhost:${PORT}`);
-    console.log("Database: taco_treceability");
-    console.log("Source: production_count");
-    console.log("Destination: production_count_1");
+    console.log("Database: cell_scanning_master");
+    console.log(
+        "Tables: running_production_count_line1..20 and matching *_backup tables"
+    );
     console.log("Transport: Socket.IO");
     console.log("==========================================");
 });
 
-// Graceful shutdown
-process.on("SIGINT", async () => {
+// =====================================================
+// GRACEFUL SHUTDOWN
+// =====================================================
+async function shutdown() {
     console.log("Shutting down server...");
 
     io.close();
@@ -543,9 +630,15 @@ process.on("SIGINT", async () => {
         try {
             await pool.close();
         } catch (error) {
-            console.error("SQL shutdown error:", error.message);
+            console.error(
+                "SQL shutdown error:",
+                error.message
+            );
         }
     }
 
     process.exit(0);
-});
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
