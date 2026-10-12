@@ -1,24 +1,13 @@
 
-function filterSql(filters) {
-    const statusCondition =
-        filters.mode === "status"
-            ? `
-                AND LOWER(
-                    LTRIM(
-                        RTRIM(
-                            CONVERT(VARCHAR(30), [pack_status])
-                        )
-                    )
-                ) = @status
-            `
-            : "";
+function filterSql(mode) {
+    const statusCondition = mode === "status"
+        ? `
+            AND LOWER(LTRIM(RTRIM([battery_status]))) = @status
+        `
+        : "";
 
     return `
-        WHERE [current_dateTime] < DATEADD(
-                DAY,
-                1,
-                @startDate
-          )
+        WHERE [today_date] < DATEADD(day, 1, @startDate)
           ${statusCondition}
     `;
 }
