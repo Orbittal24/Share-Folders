@@ -1,1 +1,24 @@
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\SQL_CPU_Monitor\CPU_Monitor.ps1"
+USE SQLCPUMonitoring;
+GO
+
+SELECT TOP (10)
+    capture_time,
+    machine_name,
+    total_cpu_percent,
+    sqlservr_cpu_percent,
+    logical_processors
+FROM dbo.WindowsCpuLog
+ORDER BY log_id DESC;
+
+
+///////////////
+
+SELECT TOP (10)
+    capture_time,
+    database_name,
+    total_cpu_ms,
+    execution_count,
+    last_execution_time,
+    query_text
+FROM dbo.QueryCpuHistory
+ORDER BY log_id DESC;
