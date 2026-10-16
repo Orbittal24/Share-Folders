@@ -1,3 +1,13 @@
-SELECT name
-FROM sys.databases
-WHERE name IN ('SQLMonitoringDB', 'SQLCPUMonitoring');
+USE SQLMonitoringDB;
+GO
+
+IF DATABASE_PRINCIPAL_ID('user_mis') IS NULL
+BEGIN
+    CREATE USER [user_mis] FOR LOGIN [user_mis];
+END;
+GO
+
+GRANT SELECT, INSERT
+ON dbo.SQLQueryExecutionLogs
+TO [user_mis];
+GO
