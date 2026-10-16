@@ -1,15 +1,88 @@
-USE SQLCPUMonitoring;
+
+USE msdb;
 GO
 
-EXEC dbo.CaptureQueryCpuHistory;
+IF NOT EXISTS (
+    SELECT 1
+    FROM dbo.sysjobs
+    WHERE name = N'MES - Query CPU History'
+)
+BEGIN
+    EXEC dbo.sp_add_job
+        @job_name = N'MES - Query CPU History',
+        @enabled = 1,
+        @description =
+            N'Captures SQL query CPU history every minute.';
+END;
 GO
 
-SELECT TOP (20)
-    capture_time,
-    database_name,
-    total_cpu_ms,
-    execution_count,
-    last_execution_time,
-    query_text
-FROM dbo.QueryCpuHistory
-ORDER BY log_id DESC;
+IF NOT EXISTS (
+    SELECT 1
+    FROM msdb.dbo.sysjobsteps AS s
+    INNER JOIN msdb.dbo.sysjobs AS j
+        ON s.job_id = j.job_id
+    WHERE j.name = N'MES - Query CPU History'
+)
+BEGIN
+    EXEC dbo.sp_add_jobstep
+        @job_name = N'MES - Query CPU History',
+        @step_name = N'Capture query CPU',
+        @subsystem = N'TSQL',
+        @database_name = N'SQLCPUMonitoring',
+        @command = N'EXEC dbo.CaptureQueryCpuHistory;',
+        @retry_attempts = 2,
+        @retry_interval = 1;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM msdb.dbo.sysschedules
+    WHERE name = N'MES - Query CPU Every Minute'
+)
+BEGIN
+    EXEC dbo.sp_add_schedule
+        @schedule_name = N'MES - Query CPU Every Minute',
+        @enabled = 1,
+        @freq_type = 4,
+        @freq_interval = 1,
+        @freq_subday_type = 4,
+        @freq_subday_interval = 1,
+        @active_start_time = 000000;
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM msdb.dbo.sysjobschedules AS js
+    INNER JOIN msdb.dbo.sysjobs AS j
+        ON js.job_id = j.job_id
+    INNER JOIN msdb.dbo.sysschedules AS s
+        ON js.schedule_id = s.schedule_id
+    WHERE j.name = N'MES - Query CPU History'
+      AND s.name = N'MES - Query CPU Every Minute'
+)
+BEGIN
+    EXEC dbo.sp_attach_schedule
+        @job_name = N'MES - Query CPU History',
+        @schedule_name = N'MES - Query CPU Every Minute';
+END;
+GO
+
+IF NOT EXISTS (
+    SELECT 1
+    FROM msdb.dbo.sysjobservers AS js
+    INNER JOIN msdb.dbo.sysjobs AS j
+        ON js.job_id = j.job_id
+    WHERE j.name = N'MES - Query CPU History'
+)
+BEGIN
+    EXEC dbo.sp_add_jobserver
+        @job_name = N'MES - Query CPU History';
+END;
+GO
+
+-- Start the job immediately for initial verification
+EXEC msdb.dbo.sp_start_job
+    @job_name = N'MES - Query CPU History';
+GO
