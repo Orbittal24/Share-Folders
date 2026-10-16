@@ -1,4 +1,38 @@
-SELECT r.session_id, r.blocking_session_id, r.wait_type, r.wait_time, t.text
-FROM sys.dm_exec_requests r
-CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-WHERE r.blocking_session_id <> 0;
+
+USE SQLMonitoringDB;
+GO
+
+IF OBJECT_ID('dbo.SQLBlockingExecutionLogs', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SQLBlockingExecutionLogs
+    (
+        LogID BIGINT IDENTITY(1,1) PRIMARY KEY,
+
+        CaptureTimestamp DATETIME2(3) NOT NULL,
+
+        -- Blocked session details
+        BlockedSessionID INT NOT NULL,
+        BlockedDatabaseName SYSNAME NULL,
+        WaitType NVARCHAR(120) NULL,
+        WaitTimeMs BIGINT NULL,
+        BlockedQueryText NVARCHAR(MAX) NULL,
+
+        -- Blocking session details
+        BlockingSessionID INT NOT NULL,
+        BlockingHostProcessID INT NULL,
+        BlockingStatus NVARCHAR(30) NULL,
+        BlockingOpenTransactionCount INT NULL,
+        BlockingLastRequestEndTime DATETIME NULL,
+        BlockingQueryText NVARCHAR(MAX) NULL
+    );
+
+    CREATE INDEX IX_SQLBlockingExecutionLogs_CaptureTimestamp
+    ON dbo.SQLBlockingExecutionLogs(CaptureTimestamp);
+
+    CREATE INDEX IX_SQLBlockingExecutionLogs_BlockingSessionID
+    ON dbo.SQLBlockingExecutionLogs(BlockingSessionID);
+
+    CREATE INDEX IX_SQLBlockingExecutionLogs_BlockedSessionID
+    ON dbo.SQLBlockingExecutionLogs(BlockedSessionID);
+END;
+GO
