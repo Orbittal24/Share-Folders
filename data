@@ -1,6 +1,67 @@
-set "SQL_SERVER=10.9.4.29"
-set "SQL_PORT=1433"
-set "SQL_USER=user_mis"
-set "SQL_PASSWORD=YOUR_ROTATED_PASSWORD"
+USE master;
+GO
 
-npm install @tediousjs/connection-string
+IF DB_ID(N'SQLCPUMonitoring') IS NULL
+BEGIN
+    CREATE DATABASE SQLCPUMonitoring;
+END;
+GO
+
+USE SQLCPUMonitoring;
+GO
+
+-- Query CPU snapshots and interval deltas
+IF OBJECT_ID(N'dbo.QueryCpuLog', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.QueryCpuLog
+    (
+        log_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        capture_time DATETIME2(0) NOT NULL,
+        database_name SYSNAME NULL,
+        query_text NVARCHAR(MAX) NULL,
+        execution_count BIGINT NOT NULL,
+        executions_delta BIGINT NOT NULL,
+        total_cpu_ms DECIMAL(19,2) NOT NULL,
+        cpu_delta_ms DECIMAL(19,2) NOT NULL,
+        avg_cpu_ms DECIMAL(19,2) NULL,
+        last_execution_time DATETIME NULL
+    );
+
+    CREATE INDEX IX_QueryCpuLog_CaptureTime
+        ON dbo.QueryCpuLog(capture_time);
+END;
+GO
+
+-- Previous cumulative statistics used to calculate CPU deltas
+IF OBJECT_ID(N'dbo.QueryCpuBaseline', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.QueryCpuBaseline
+    (
+        query_key BINARY(32) NOT NULL PRIMARY KEY,
+        total_worker_time BIGINT NOT NULL,
+        execution_count BIGINT NOT NULL,
+        query_text NVARCHAR(MAX) NULL,
+        database_name SYSNAME NULL,
+        last_execution_time DATETIME NULL,
+        last_seen DATETIME2(0) NOT NULL
+    );
+END;
+GO
+
+-- Actual Windows CPU measurements
+IF OBJECT_ID(N'dbo.WindowsCpuLog', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WindowsCpuLog
+    (
+        log_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+        capture_time DATETIME2(0) NOT NULL,
+        machine_name NVARCHAR(128) NOT NULL,
+        total_cpu_percent DECIMAL(6,2) NOT NULL,
+        sqlservr_cpu_percent DECIMAL(6,2) NULL,
+        logical_processors INT NOT NULL
+    );
+
+    CREATE INDEX IX_WindowsCpuLog_CaptureTime
+        ON dbo.WindowsCpuLog(capture_time);
+END;
+GO
