@@ -17,3 +17,12 @@ BEGIN
         ON dbo.WindowsCpuLog(capture_time);
 END;
 GO
+
+
+/////////////////////
+USE SQLCPUMonitoring;
+GO
+
+SELECT name
+FROM sys.tables
+WHERE name IN ('QueryCpuHistory', 'WindowsCpuLog');
