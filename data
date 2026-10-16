@@ -1,7 +1,24 @@
--- Delete the old stored procedure
-DROP PROCEDURE IF EXISTS dbo.LogRecentSQLQueries;
+USE MISDB;
 GO
 
--- Delete the old logging table and its stored data
-DROP TABLE IF EXISTS dbo.SQLQueryExecutionLogs;
+CREATE TABLE dbo.SQLQueryExecutionLogs
+(
+    LogID BIGINT IDENTITY(1,1) PRIMARY KEY,
+    CaptureTimestamp DATETIME2(3) NOT NULL,
+    DatabaseName SYSNAME NULL,
+    QueryText NVARCHAR(MAX) NULL,
+    LastExecutionTime DATETIME NULL,
+    ExecutionCount BIGINT NULL,
+    TotalCPUMs BIGINT NULL,
+    TotalElapsedMs BIGINT NULL,
+    LogicalReads BIGINT NULL,
+    PhysicalReads BIGINT NULL,
+    LogicalWrites BIGINT NULL
+);
+
+CREATE INDEX IX_SQLQueryExecutionLogs_CaptureTimestamp
+ON dbo.SQLQueryExecutionLogs(CaptureTimestamp);
+
+CREATE INDEX IX_SQLQueryExecutionLogs_DatabaseName
+ON dbo.SQLQueryExecutionLogs(DatabaseName);
 GO
