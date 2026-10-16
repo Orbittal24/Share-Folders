@@ -1,1 +1,6 @@
+
+
+
 node --check CPU_SQL_consumption_logs.js
+
+node --trace-uncaught CPU_SQL_consumption_logs.js
