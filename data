@@ -1,56 +1,7 @@
-CREATE TABLE dbo.SQLQueryExecutionLogs
-(
-    LogID BIGINT IDENTITY(1,1) PRIMARY KEY,
-    CaptureTimestamp DATETIME2(3) NOT NULL,
-    DatabaseName SYSNAME NULL,
-    QueryText NVARCHAR(MAX) NULL,
-    LastExecutionTime DATETIME NULL,
-    ExecutionCount BIGINT NULL,
-    TotalCPUMs BIGINT NULL,
-    TotalElapsedMs BIGINT NULL,
-    LogicalReads BIGINT NULL,
-    PhysicalReads BIGINT NULL,
-    LogicalWrites BIGINT NULL
-);
+-- Delete the old stored procedure
+DROP PROCEDURE IF EXISTS dbo.LogRecentSQLQueries;
 GO
 
-/////////////////////////////////
-
-CREATE OR ALTER PROCEDURE dbo.LogRecentSQLQueries
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DECLARE @CaptureTime DATETIME2(3) = SYSDATETIME();
-
-    INSERT INTO dbo.SQLQueryExecutionLogs
-    (
-        CaptureTimestamp,
-        DatabaseName,
-        QueryText,
-        LastExecutionTime,
-        ExecutionCount,
-        TotalCPUMs,
-        TotalElapsedMs,
-        LogicalReads,
-        PhysicalReads,
-        LogicalWrites
-    )
-    SELECT
-        @CaptureTime,
-        DB_NAME(st.dbid),
-        st.text,
-        qs.last_execution_time,
-        qs.execution_count,
-        qs.total_worker_time / 1000,
-        qs.total_elapsed_time / 1000,
-        qs.total_logical_reads,
-        qs.total_physical_reads,
-        qs.total_logical_writes
-    FROM sys.dm_exec_query_stats AS qs
-    CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
-    WHERE
-        qs.last_execution_time >= DATEADD(MINUTE, -1, GETDATE())
-        AND qs.last_execution_time <= GETDATE();
-END;
+-- Delete the old logging table and its stored data
+DROP TABLE IF EXISTS dbo.SQLQueryExecutionLogs;
 GO
