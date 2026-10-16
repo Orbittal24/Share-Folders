@@ -1,9 +1,40 @@
-USE SQLCPUMonitoring;
+USE msdb;
 GO
 
-SELECT
-    name,
-    create_date,
-    modify_date
-FROM sys.procedures
-WHERE name = 'CaptureQueryCpu';
+-- Stop the query monitoring job if running
+IF EXISTS (
+    SELECT 1
+    FROM dbo.sysjobs
+    WHERE name = N'MES - SQL CPU Query Monitoring'
+)
+BEGIN
+    EXEC dbo.sp_stop_job
+        @job_name = N'MES - SQL CPU Query Monitoring';
+END;
+GO
+
+-- Delete query monitoring job
+IF EXISTS (
+    SELECT 1
+    FROM dbo.sysjobs
+    WHERE name = N'MES - SQL CPU Query Monitoring'
+)
+BEGIN
+    EXEC dbo.sp_delete_job
+        @job_name = N'MES - SQL CPU Query Monitoring',
+        @delete_unused_schedule = 1;
+END;
+GO
+
+-- Delete retention job if it exists
+IF EXISTS (
+    SELECT 1
+    FROM dbo.sysjobs
+    WHERE name = N'MES - SQL CPU Log Retention'
+)
+BEGIN
+    EXEC dbo.sp_delete_job
+        @job_name = N'MES - SQL CPU Log Retention',
+        @delete_unused_schedule = 1;
+END;
+GO
