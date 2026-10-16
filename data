@@ -1,24 +1,16 @@
-USE SQLCPUMonitoring;
+USE master;
 GO
 
-SELECT TOP (10)
-    capture_time,
-    machine_name,
-    total_cpu_percent,
-    sqlservr_cpu_percent,
-    logical_processors
-FROM dbo.WindowsCpuLog
-ORDER BY log_id DESC;
+IF DB_ID(N'SQLCPUMonitoring') IS NOT NULL
+BEGIN
+    ALTER DATABASE SQLCPUMonitoring
+        SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+
+    DROP DATABASE SQLCPUMonitoring;
+END;
+GO
 
 
-///////////////
-
-SELECT TOP (10)
-    capture_time,
-    database_name,
-    total_cpu_ms,
-    execution_count,
-    last_execution_time,
-    query_text
-FROM dbo.QueryCpuHistory
-ORDER BY log_id DESC;
+SELECT name
+FROM sys.databases
+WHERE name = N'SQLCPUMonitoring';
