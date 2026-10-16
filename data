@@ -1,8 +1,138 @@
+
 USE SQLCPUMonitoring;
 GO
 
-SELECT
-    DB_NAME() AS CurrentDatabase,
-    OBJECT_ID('dbo.QueryCpuLog') AS QueryLogTable,
-    OBJECT_ID('dbo.QueryCpuBaseline') AS BaselineTable,
-    OBJECT_ID('dbo.WindowsCpuLog') AS WindowsCpuLogTable;
+CREATE OR ALTER PROCEDURE dbo.CaptureQueryCpu
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @CaptureTime DATETIME2(0) = SYSDATETIME();
+
+    SELECT
+        HASHBYTES(
+            'SHA2_256',
+            CONVERT(VARBINARY(MAX), qs.sql_handle)
+            + CONVERT(VARBINARY(MAX), qs.plan_handle)
+            + CONVERT(VARBINARY(MAX),
+                CONVERT(VARCHAR(20), qs.statement_start_offset))
+            + CONVERT(VARBINARY(MAX),
+                CONVERT(VARCHAR(20), qs.statement_end_offset))
+        ) AS query_key,
+        qs.total_worker_time,
+        qs.execution_count,
+        DB_NAME(qt.dbid) AS database_name,
+        SUBSTRING(
+            qt.text,
+            (qs.statement_start_offset / 2) + 1,
+            (
+                (
+                    CASE qs.statement_end_offset
+                        WHEN -1 THEN DATALENGTH(qt.text)
+                        ELSE qs.statement_end_offset
+                    END - qs.statement_start_offset
+                ) / 2
+            ) + 1
+        ) AS query_text,
+        qs.last_execution_time
+    INTO #CurrentQueries
+    FROM sys.dm_exec_query_stats AS qs
+    CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS qt;
+
+    CREATE UNIQUE CLUSTERED INDEX IX_CurrentQueries
+        ON #CurrentQueries(query_key);
+
+    -- Initialize baseline on first execution
+    IF NOT EXISTS (
+        SELECT 1 FROM dbo.QueryCpuBaseline
+    )
+    BEGIN
+        INSERT INTO dbo.QueryCpuBaseline (
+            query_key, total_worker_time, execution_count,
+            query_text, database_name, last_execution_time,
+            last_seen
+        )
+        SELECT
+            query_key, total_worker_time, execution_count,
+            query_text, database_name, last_execution_time,
+            @CaptureTime
+        FROM #CurrentQueries;
+
+        RETURN;
+    END;
+
+    -- Capture top 10 queries by CPU delta
+    INSERT INTO dbo.QueryCpuLog (
+        capture_time, database_name, query_text,
+        execution_count, executions_delta, total_cpu_ms,
+        cpu_delta_ms, avg_cpu_ms, last_execution_time
+    )
+    SELECT TOP (10)
+        @CaptureTime,
+        c.database_name,
+        c.query_text,
+        c.execution_count,
+        CASE
+            WHEN b.query_key IS NULL
+              OR c.execution_count < b.execution_count
+            THEN 0
+            ELSE c.execution_count - b.execution_count
+        END,
+        c.total_worker_time / 1000.0,
+        d.cpu_delta / 1000.0,
+        (c.total_worker_time / 1000.0)
+            / NULLIF(c.execution_count, 0),
+        c.last_execution_time
+    FROM #CurrentQueries AS c
+    INNER JOIN dbo.QueryCpuBaseline AS b
+        ON b.query_key = c.query_key
+    CROSS APPLY (
+        SELECT CASE
+            WHEN c.total_worker_time >= b.total_worker_time
+            THEN c.total_worker_time - b.total_worker_time
+            ELSE c.total_worker_time
+        END AS cpu_delta
+    ) AS d
+    WHERE d.cpu_delta > 0
+    ORDER BY d.cpu_delta DESC;
+
+    -- Update existing baselines
+    UPDATE b
+    SET
+        b.total_worker_time = c.total_worker_time,
+        b.execution_count = c.execution_count,
+        b.query_text = c.query_text,
+        b.database_name = c.database_name,
+        b.last_execution_time = c.last_execution_time,
+        b.last_seen = @CaptureTime
+    FROM dbo.QueryCpuBaseline AS b
+    INNER JOIN #CurrentQueries AS c
+        ON c.query_key = b.query_key;
+
+    -- Add newly observed query plans
+    INSERT INTO dbo.QueryCpuBaseline (
+        query_key, total_worker_time, execution_count,
+        query_text, database_name, last_execution_time,
+        last_seen
+    )
+    SELECT
+        c.query_key, c.total_worker_time, c.execution_count,
+        c.query_text, c.database_name, c.last_execution_time,
+        @CaptureTime
+    FROM #CurrentQueries AS c
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM dbo.QueryCpuBaseline AS b
+        WHERE b.query_key = c.query_key
+    );
+
+    -- Remove plans no longer in the cache
+    DELETE b
+    FROM dbo.QueryCpuBaseline AS b
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM #CurrentQueries AS c
+        WHERE c.query_key = b.query_key
+    );
+END;
+GO
