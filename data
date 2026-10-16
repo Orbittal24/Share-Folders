@@ -1,4 +1,13 @@
-USE MISDB;
+USE master;
+GO
+
+IF DB_ID('SQLMonitoringDB') IS NULL
+BEGIN
+    CREATE DATABASE SQLMonitoringDB;
+END;
+GO
+
+USE SQLMonitoringDB;
 GO
 
 CREATE TABLE dbo.SQLQueryExecutionLogs
