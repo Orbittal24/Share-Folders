@@ -1,17 +1,35 @@
 USE master;
 GO
 
-IF DB_ID(N'SQLCPUMonitoring') IS NOT NULL
-BEGIN
-    ALTER DATABASE SQLCPUMonitoring
-        SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-
-    DROP DATABASE SQLCPUMonitoring;
-END;
+IF DB_ID(N'SQLCPUMonitoring') IS NULL
+    CREATE DATABASE SQLCPUMonitoring;
 GO
 
+USE SQLCPUMonitoring;
+GO
 
-SELECT
-    name
-FROM sys.databases
-WHERE name = N'SQLCPUMonitoring';
+CREATE TABLE dbo.QueryCpuHistory
+(
+    log_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    capture_time DATETIME2(0) NOT NULL,
+    query_key VARBINARY(64) NOT NULL,
+    database_name SYSNAME NULL,
+    query_text NVARCHAR(MAX) NULL,
+    creation_time DATETIME NULL,
+    execution_count BIGINT NOT NULL,
+    total_cpu_ms BIGINT NOT NULL,
+    total_elapsed_ms BIGINT NOT NULL,
+    logical_reads BIGINT NOT NULL,
+    physical_reads BIGINT NOT NULL,
+    logical_writes BIGINT NOT NULL,
+    last_execution_time DATETIME NULL
+);
+GO
+
+CREATE INDEX IX_QueryCpuHistory_CaptureTime
+ON dbo.QueryCpuHistory(capture_time);
+GO
+
+CREATE INDEX IX_QueryCpuHistory_QueryKey
+ON dbo.QueryCpuHistory(query_key, capture_time);
+GO
