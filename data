@@ -1,35 +1,87 @@
-USE master;
+USE SQLCPUMonitoring;
 GO
 
-IF DB_ID(N'SQLCPUMonitoring') IS NULL
-    CREATE DATABASE SQLCPUMonitoring;
+CREATE OR ALTER PROCEDURE dbo.CaptureQueryCpuHistory
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @CaptureTime DATETIME2(0) = SYSDATETIME();
+
+    INSERT INTO dbo.QueryCpuHistory
+    (
+        capture_time,
+        query_key,
+        database_name,
+        query_text,
+        creation_time,
+        execution_count,
+        total_cpu_ms,
+        total_elapsed_ms,
+        logical_reads,
+        physical_reads,
+        logical_writes,
+        last_execution_time
+    )
+    SELECT
+        @CaptureTime,
+
+        HASHBYTES(
+            'SHA2_256',
+            CONVERT(VARBINARY(MAX), qs.sql_handle)
+            + CONVERT(VARBINARY(MAX), qs.plan_handle)
+            + CONVERT(VARBINARY(MAX),
+                CONVERT(VARCHAR(20), qs.statement_start_offset))
+            + CONVERT(VARBINARY(MAX),
+                CONVERT(VARCHAR(20), qs.statement_end_offset))
+        ),
+
+        DB_NAME(st.dbid),
+        SUBSTRING(
+            st.text,
+            (qs.statement_start_offset / 2) + 1,
+            (
+                (
+                    CASE qs.statement_end_offset
+                        WHEN -1 THEN DATALENGTH(st.text)
+                        ELSE qs.statement_end_offset
+                    END - qs.statement_start_offset
+                ) / 2
+            ) + 1
+        ),
+
+        qs.creation_time,
+        qs.execution_count,
+        qs.total_worker_time / 1000,
+        qs.total_elapsed_time / 1000,
+        qs.total_logical_reads,
+        qs.total_physical_reads,
+        qs.total_logical_writes,
+        qs.last_execution_time
+
+    FROM sys.dm_exec_query_stats AS qs
+    CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st;
+END;
 GO
+
+////////////////////////////////////////////////
 
 USE SQLCPUMonitoring;
 GO
 
-CREATE TABLE dbo.QueryCpuHistory
-(
-    log_id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    capture_time DATETIME2(0) NOT NULL,
-    query_key VARBINARY(64) NOT NULL,
-    database_name SYSNAME NULL,
-    query_text NVARCHAR(MAX) NULL,
-    creation_time DATETIME NULL,
-    execution_count BIGINT NOT NULL,
-    total_cpu_ms BIGINT NOT NULL,
-    total_elapsed_ms BIGINT NOT NULL,
-    logical_reads BIGINT NOT NULL,
-    physical_reads BIGINT NOT NULL,
-    logical_writes BIGINT NOT NULL,
-    last_execution_time DATETIME NULL
-);
+EXEC dbo.CaptureQueryCpuHistory;
 GO
 
-CREATE INDEX IX_QueryCpuHistory_CaptureTime
-ON dbo.QueryCpuHistory(capture_time);
-GO
-
-CREATE INDEX IX_QueryCpuHistory_QueryKey
-ON dbo.QueryCpuHistory(query_key, capture_time);
-GO
+SELECT TOP (20)
+    capture_time,
+    database_name,
+    total_cpu_ms,
+    execution_count,
+    total_elapsed_ms,
+    logical_reads,
+    physical_reads,
+    logical_writes,
+    last_execution_time,
+    query_text
+FROM dbo.QueryCpuHistory
+ORDER BY log_id DESC;
