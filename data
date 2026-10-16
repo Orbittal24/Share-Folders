@@ -2,3 +2,5 @@ set "SQL_SERVER=10.9.4.29"
 set "SQL_PORT=1433"
 set "SQL_USER=user_mis"
 set "SQL_PASSWORD=YOUR_ROTATED_PASSWORD"
+
+npm install @tediousjs/connection-string
