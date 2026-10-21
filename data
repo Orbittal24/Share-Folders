@@ -1,1 +1,75 @@
-AUTH "Gotion@123Strong!"
+
+   // ============================================================
+   // CELL SCANNING BUZZER + INVALID CELL ACKNOWLEDGEMENT
+   // ============================================================
+
+   // ❌ If validation failed
+   if (
+     validationData?.result_summary?.some(
+       (item) => item.status?.toLowerCase() === "invalid",
+     )
+   ) {
+     // 🔔 Check database status and trigger buzzer if ON
+     const buzzerStatusRes = await triggerCellBuzzer(lineId, cellqr);
+
+     // ✅ Show popup ONLY when database status is ON
+     if (
+       String(buzzerStatusRes?.buzzer_status || "").toUpperCase() === "ON"
+     ) {
+       // 🛑 Show popup and wait until the operator clicks OK
+       await Swal.fire({
+         icon: "error",
+         title: "Invalid Cell QR!",
+         html: `
+           <div style="text-align:center; font-size:16px;">
+             <p style="margin-bottom:12px;">
+               The scanned Cell QR is <strong style="color:#dc2626;">INVALID</strong>.
+             </p>
+
+             <div style="
+               background:#fee2e2;
+               border:2px solid #dc2626;
+               border-radius:8px;
+               padding:12px;
+               margin:10px 0;
+               overflow-wrap:anywhere;
+             ">
+               <div style="font-size:12px; color:#7f1d1d; margin-bottom:5px;">
+                 Cell QR
+               </div>
+               <div style="
+                 font-size:18px;
+                 font-weight:bold;
+                 color:#991b1b;
+                 font-family:monospace;
+               ">
+                 ${String(cellqr).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}
+               </div>
+             </div>
+
+             <p style="color:#444; margin-top:12px;">
+               Please acknowledge this invalid scan to continue.
+             </p>
+           </div>
+         `,
+         confirmButtonText: "OK",
+         confirmButtonColor: "#dc2626",
+         allowOutsideClick: false,
+         allowEscapeKey: false,
+         allowEnterKey: false,
+         showConfirmButton: true,
+         focusConfirm: true,
+       });
+     }
+
+     // ✅ Preserve existing invalid Cell QR result
+     // OFF: no popup. ON: popup appears and waits for acknowledgement.
+     return {
+       overallStatus: "invalid",
+       data: validationData,
+     };
+   }
+
+   // ============================================================
+   // CELL SCANNING BUZZER + INVALID CELL ACKNOWLEDGEMENT END
+   // ============================================================
