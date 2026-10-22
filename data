@@ -1,329 +1,47 @@
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const sql = require("mssql");
-const { Server } = require("socket.io");
-
-const PORT = 3212;
-// Main database for live production and backup tables.
-const sqlConfig = {
-    user: "user_mis",
-    password: "admin@123",
-    database: "cell_scanning_master",
-    server: "10.9.4.29",
-    port: 1433,
-    options: {
-        instanceName: "PROD_SQL_2026",
-        encrypt: false,
-        trustServerCertificate: true
-    },
-    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
-    connectionTimeout: 15000,
-    requestTimeout: 120000
-};
-
-// Separate database connection used only for master_pack lookup.
-const masterPackSqlConfig = {
-    user: "user_mis",
-    password: "admin@123",
-    database: "taco_treceability_master",
-    server: "10.9.4.29",
-    port: 1433,
-    options: {
-        instanceName: "PROD_SQL_2026",
-        encrypt: false,
-        trustServerCertificate: true
-    },
-    pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
-    connectionTimeout: 15000,
-    requestTimeout: 120000
-};
-const HTML_FILE = path.join(__dirname, "production_count_ui_newMIS.html");
-// sr_no is excluded: destination may have an IDENTITY column.
-const COLUMNS = [
-    "pack_name", "pack_id", "line_id", "pack_no", "module_barcode",
-    "module_number", "module_name", "cellqr", "pack_status", "module_status",
-    "cellqr_status", "rownum", "cell_ir", "cell_voltage", "cell_kvalue",
-    "cell_negativeVolatge", "cell_class_grade", "capacity", "cell_thickness",
-    "cell_laserStatus", "cell_count", "cell_batch", "cell_plantCode",
-    "ocv_scanned_time", "ocv_mc_no", "current_dateTime", "updated_dateTime"
-];
-const COLUMN_LIST = COLUMNS.map(c => `[${c}]`).join(", ");
-let pool = null;
-let poolPromise = null;
-let masterPackPool = null;
-let masterPackPoolPromise = null;
-let shiftRunning = false;
-
-function getTables(tableName) {
-    const match = /^running_production_count_line([1-9]|1[0-9]|20)$/.exec(String(tableName || ""));
-    if (!match) throw new Error("Please select a valid production count table (Line 1-20).");
-    const line = Number(match[1]);
-    return {
-        line,
-        live: `[running_production_count_line${line}]`,
-        backup: `[running_production_count_line${line}_backup]`,
-        label: `Line ${line}`
-    };
-}
-
-async function connectDatabase() {
-    if (pool && pool.connected) return pool;
-    if (poolPromise) return poolPromise;
-    pool = new sql.ConnectionPool(sqlConfig);
-    pool.on("error", err => console.error("SQL connection pool error:", err.message));
-    poolPromise = pool.connect().then(p => {
-        console.log("SQL Server connected. Database:", sqlConfig.database);
-        return p;
-    }).catch(err => {
-        pool = null;
-        poolPromise = null;
-        throw err;
-    });
-    return poolPromise;
-}
-
-async function connectMasterPackDatabase() {
-    if (masterPackPool && masterPackPool.connected) return masterPackPool;
-    if (masterPackPoolPromise) return masterPackPoolPromise;
-
-    masterPackPool = new sql.ConnectionPool(masterPackSqlConfig);
-    masterPackPool.on("error", err => {
-        console.error("Master pack SQL pool error:", err.message);
-    });
-
-    masterPackPoolPromise = masterPackPool.connect()
-        .then(db => {
-            console.log(
-                "Connected to master pack database:",
-                masterPackSqlConfig.database
-            );
-            return db;
-        })
-        .catch(err => {
-            masterPackPool = null;
-            masterPackPoolPromise = null;
-            throw err;
-        });
-
-    return masterPackPoolPromise;
-}
-
-function validateSelection(data) {
-    const packNo = String(data?.packNo ?? "").trim();
-    if (!/^\d{6}$/.test(packNo)) throw new Error("Pack Number must contain exactly 6 digits.");
-    const packIdText = String(data?.packId ?? "").trim();
-    if (!/^\d+$/.test(packIdText)) throw new Error("Please select a valid Pack Name.");
-    const packId = Number(packIdText);
-    if (!Number.isSafeInteger(packId)) throw new Error("Selected Pack_ID is invalid.");
-    const tables = getTables(data?.tableName);
-    return { packNo, packId, ...tables, tableName: data.tableName };
-}
-
-async function getPackList() {
-    const db = await connectDatabase();
-    // Query as supplied: taco_treceability is the schema name in the connected database.
-    const result = await db.request().query(`
-        SELECT Pack_ID, Pack_Name
-        FROM taco_treceability.master_pack
-        ORDER BY Pack_Name;
-    `);
-    return result.recordset;
-}
-
-async function scanRecords(filters) {
-    const db = await connectDatabase();
-    const request = db.request();
-    request.input("packNo", sql.VarChar(6), filters.packNo);
-    request.input("packId", sql.Int, filters.packId);
-    const result = await request.query(`
-        SELECT COUNT_BIG(*) AS total
-        FROM ${filters.backup}
-        WHERE CONVERT(VARCHAR(50), [pack_no]) = @packNo
-          AND [pack_id] = @packId;
-    `);
-    return result.recordset[0].total.toString();
-}
-
-// One backup row is moved per transaction. The backup row is deleted only after
-// the live-table insert is verified, and both operations commit/rollback together.
-async function shiftOneRecord(db, filters, srNo) {
-    const transaction = new sql.Transaction(db);
-    await transaction.begin(sql.ISOLATION_LEVEL.READ_COMMITTED);
-    try {
-        const insertRequest = new sql.Request(transaction);
-        insertRequest.input("srNo", sql.Int, srNo);
-        insertRequest.input("packNo", sql.VarChar(6), filters.packNo);
-        insertRequest.input("packId", sql.Int, filters.packId);
-        const insertResult = await insertRequest.query(`
-            INSERT INTO ${filters.live} (${COLUMN_LIST})
-            SELECT ${COLUMN_LIST}
-            FROM ${filters.backup} WITH (UPDLOCK, ROWLOCK)
-            WHERE [sr_no] = @srNo
-              AND CONVERT(VARCHAR(50), [pack_no]) = @packNo
-              AND [pack_id] = @packId;
-        `);
-        const inserted = insertResult.rowsAffected.reduce((a, b) => a + b, 0);
-        if (inserted !== 1) throw new Error(`Expected 1 live-table insert for backup sr_no ${srNo}; got ${inserted}.`);
-
-        const deleteRequest = new sql.Request(transaction);
-        deleteRequest.input("srNo", sql.Int, srNo);
-        deleteRequest.input("packNo", sql.VarChar(6), filters.packNo);
-        deleteRequest.input("packId", sql.Int, filters.packId);
-        const deleteResult = await deleteRequest.query(`
-            DELETE FROM ${filters.backup}
-            WHERE [sr_no] = @srNo
-              AND CONVERT(VARCHAR(50), [pack_no]) = @packNo
-              AND [pack_id] = @packId;
-        `);
-        const deleted = deleteResult.rowsAffected.reduce((a, b) => a + b, 0);
-        if (deleted !== 1) throw new Error(`Expected 1 backup-table delete for sr_no ${srNo}; got ${deleted}.`);
-        await transaction.commit();
-        return true;
-    } catch (error) {
-        try { await transaction.rollback(); } catch (rollbackError) {
-            console.error(`Rollback failed for sr_no ${srNo}:`, rollbackError.message);
-        }
-        throw error;
-    }
-}
-
-async function shiftRecords(filters, socket) {
-    if (shiftRunning) throw new Error("Another shift operation is running. Please wait.");
-    shiftRunning = true;
-    let shifted = 0;
-    let failed = 0;
-    let failedSrNo = null;
-    let lastError = null;
-    let total = 0;
-    try {
-        const db = await connectDatabase();
-        const select = db.request();
-        select.input("packNo", sql.VarChar(6), filters.packNo);
-        select.input("packId", sql.Int, filters.packId);
-        const selected = await select.query(`
-            SELECT [sr_no]
-            FROM ${filters.backup}
-            WHERE CONVERT(VARCHAR(50), [pack_no]) = @packNo
-              AND [pack_id] = @packId
-            ORDER BY [sr_no] ASC;
-        `);
-        const ids = selected.recordset.map(r => r.sr_no);
-        total = ids.length;
-        socket.emit("shift-started", {
-            total, source: filters.backup, target: filters.live,
-            packNo: filters.packNo, packId: filters.packId, line: filters.label,
-            message: "Shift started. Each backup record will be removed only after its live-table insert is verified."
-        });
-        for (const srNo of ids) {
-            try {
-                await shiftOneRecord(db, filters, srNo);
-                shifted++;
-            } catch (error) {
-                failed++;
-                failedSrNo = srNo;
-                lastError = error.message;
-                socket.emit("shift-progress", { total, shifted, failed, currentSrNo: srNo, error: lastError });
-                break;
-            }
-            socket.emit("shift-progress", { total, shifted, failed, currentSrNo: srNo, error: null });
-        }
-        const response = {
-            total, shifted, failed, failedSrNo, lastError,
-            source: filters.backup, target: filters.live,
-            message: failed
-                ? "Shift stopped at the failed record. The failed backup record was retained."
-                : "Shift completed successfully."
-        };
-        socket.emit("shift-complete", response);
-        return response;
-    } finally {
-        shiftRunning = false;
-    }
-}
-
-const server = http.createServer((req, res) => {
-    let pathname;
-    try { pathname = new URL(req.url, "http://localhost").pathname; }
-    catch { res.writeHead(400); return res.end("Invalid request"); }
-    if (pathname !== "/" && pathname !== "/production_count_ui_newMIS.html") {
-        res.writeHead(404); return res.end("Not found");
-    }
-    fs.readFile(HTML_FILE, (error, content) => {
-        if (error) {
-            console.error("HTML file error:", error.message);
-            res.writeHead(500); return res.end("Unable to load production_count_ui_newMIS.html");
-        }
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-        res.end(content);
-    });
-});
-const io = new Server(server, { maxHttpBufferSize: 1e6 });
-io.on("connection", socket => {
-    console.log("Frontend connected:", socket.id);
-    socket.emit("connection-status", { connected: true, message: "Connected to backup server." });
-
-    socket.on("get-pack-list", async (_data, acknowledge) => {
-        try {
-            const packs = await getPackList();
-            if (typeof acknowledge === "function") acknowledge({ success: true, packs });
-        } catch (error) {
-            console.error("Pack list error:", error.message);
-            if (typeof acknowledge === "function") acknowledge({ success: false, message: error.message });
-        }
-    });
-
-    socket.on("scan-records", async (data, acknowledge) => {
-        try {
-            const filters = validateSelection(data);
-            const total = await scanRecords(filters);
-            const response = { success: true, total, source: filters.backup, target: filters.live, packNo: filters.packNo, packId: filters.packId, line: filters.label };
-            socket.emit("scan-result", response);
-            if (typeof acknowledge === "function") acknowledge(response);
-        } catch (error) {
-            console.error("Scan error:", error.message);
-            const response = { success: false, message: error.message };
-            socket.emit("operation-error", response);
-            if (typeof acknowledge === "function") acknowledge(response);
-        }
-    });
-
-    socket.on("shift-records", async (data, acknowledge) => {
-        try {
-            const filters = validateSelection(data);
-            const result = await shiftRecords(filters, socket);
-            if (typeof acknowledge === "function") acknowledge({ success: true, ...result });
-        } catch (error) {
-            console.error("Shift error:", error.message);
-            const response = { success: false, message: error.message };
-            socket.emit("operation-error", response);
-            if (typeof acknowledge === "function") acknowledge(response);
-        }
-    });
-    socket.on("disconnect", reason => console.log("Frontend disconnected:", socket.id, reason));
-});
-server.listen(PORT, () => {
-    console.log("==========================================");
-    console.log("PRODUCTION COUNT BACKUP TO LIVE SHIFT SERVER");
-    console.log(`Frontend: http://localhost:${PORT}`);
-    console.log(`Database: ${sqlConfig.database}`);
-    console.log("Live tables: running_production_count_line1..20");
-    console.log("Backup tables: running_production_count_line1_backup..20_backup");
-    console.log("Transport: Socket.IO");
-    console.log("==========================================");
-});
-async function shutdown() {
-    console.log("Shutting down server...");
-    io.close();
-    if (pool) {
-        try { await pool.close(); }
-        catch (error) { console.error("Production SQL shutdown error:", error.message); }
-    }
-    if (masterPackPool) {
-        try { await masterPackPool.close(); }
-        catch (error) { console.error("Master pack SQL shutdown error:", error.message); }
-    }
-    process.exit(0);
-}
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Production Count Backup - New MIS</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:25px;font-family:Arial,Helvetica,sans-serif;background:#f1f5f9;color:#1e293b}.container{max-width:1100px;margin:auto}h1{font-size:28px;margin-bottom:8px}h2{font-size:19px;margin-top:0;color:#b91c1c}.subtitle{color:#64748b;margin-bottom:24px}.card{background:#fff;border-radius:12px;padding:23px;margin-bottom:20px;box-shadow:0 3px 12px rgba(15,23,42,.07)}.fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:20px 0}label{display:block;margin-bottom:8px;font-weight:600}input,select{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:7px;font-size:15px;background:#fff}input:focus,select:focus{outline:2px solid #93c5fd;border-color:#2563eb}.buttons{display:flex;flex-wrap:wrap;gap:12px}button{border:0;padding:12px 21px;border-radius:7px;font-weight:700;font-size:14px;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}.scan-btn{background:#2563eb;color:white}.shift-btn{background:#15803d;color:white}.metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px}.metric{border:1px solid #e2e8f0;background:#f8fafc;border-radius:9px;padding:18px}.metric span{display:block;color:#64748b;font-size:13px;margin-bottom:10px}.metric strong{display:block;font-size:25px;overflow-wrap:anywhere}.connection{display:inline-block;padding:8px 12px;border-radius:20px;background:#fee2e2;color:#991b1b;font-size:13px;margin-bottom:20px}.connection.online{background:#dcfce7;color:#166534}.status{margin-top:16px;padding:14px;border-radius:7px;background:#eff6ff;color:#1d4ed8;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}.status.error{background:#fef2f2;color:#b91c1c}.status.success{background:#f0fdf4;color:#166534}.progress-track{width:100%;height:15px;margin:22px 0 10px;background:#e2e8f0;border-radius:20px;overflow:hidden}.progress-bar{height:100%;width:0;background:#16a34a;transition:width .2s}#progressText{color:#475569;font-size:14px}.hint{font-size:13px;color:#64748b;line-height:1.6;margin-top:20px}.small{font-size:12px;color:#64748b;margin-top:6px}@media(max-width:750px){body{padding:12px}.card{padding:16px}.fields,.metric-grid{grid-template-columns:1fr}}
+</style></head>
+<body><div class="container">
+<h1>Production Count Backup - New MIS</h1><div class="subtitle">Move selected pack records from a line backup table back to its live production table.</div>
+<div id="connection" class="connection">Connecting to server...</div>
+<section class="card"><h2>Pack-wise Shift</h2>
+<div class="fields">
+ <div><label for="packNo">Pack Number (6 digits)</label><input id="packNo" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="Enter 6-digit pack number" autocomplete="off"/><div class="small">Example: 123456</div></div>
+ <div><label for="packSearch">Search Pack Name</label><input id="packSearch" type="text" placeholder="Type to search pack name" autocomplete="off"/><label for="packSelect" style="margin-top:10px">Select Pack Name</label><select id="packSelect"><option value="">Loading pack names...</option></select></div>
+ <div><label for="tableName">Select Line</label><select id="tableName"></select><div class="small">The selected line determines both backup and live tables.</div></div>
+</div>
+<div class="buttons"><button id="scanBtn" class="scan-btn" onclick="scanRecords()">Scan</button><button id="shiftBtn" class="shift-btn" onclick="startShift()">Shift to Live Table</button></div>
+</section>
+<section class="card"><h2>Shift Progress</h2><div class="metric-grid">
+<div class="metric"><span>Records Found</span><strong id="totalCount">—</strong></div><div class="metric"><span>Successfully Shifted</span><strong id="shiftedCount">0</strong></div><div class="metric"><span>Failed Records</span><strong id="failedCount">0</strong></div></div>
+<div class="progress-track"><div id="progressBar" class="progress-bar"></div></div><div id="progressText">No shift operation started.</div>
+<div id="statusMessage" class="status">Enter a six-digit pack number, select a pack name and line, then click Scan.</div>
+<p class="hint">Scan only counts matching records in the selected line's backup table. Shift processes records sequentially. Each record is inserted into the live table and verified before its backup copy is deleted. Both operations are in one SQL transaction. If an operation fails, that record is rolled back, remains in the backup table, and the shift stops.</p>
+</section></div>
+<script>
+const socket=io();let connected=false,shiftInProgress=false,scanned=null,operationTimeout=null;const $=id=>document.getElementById(id);
+for(let line=1;line<=20;line++){const name=`running_production_count_line${line}`;const option=document.createElement('option');option.value=name;option.textContent=`Line ${line}`;$('tableName').appendChild(option)}
+function setMessage(message,type=''){const el=$('statusMessage');el.textContent=message;el.className='status'+(type?' '+type:'')}
+function updateButtons(){const busy=!connected||shiftInProgress;$('scanBtn').disabled=busy;$('shiftBtn').disabled=busy||!scanned||Number(scanned.total)===0}
+function currentSelection(){return{packNo:$('packNo').value.trim(),packId:$('packSelect').value,tableName:$('tableName').value}}
+function validateSelection(s){if(!/^\d{6}$/.test(s.packNo)){setMessage('Pack Number must contain exactly 6 digits.','error');return false}if(!s.packId){setMessage('Please select a Pack Name.','error');return false}if(!s.tableName){setMessage('Please select a Line.','error');return false}return true}
+function resetMetrics(){ $('totalCount').textContent='—';$('shiftedCount').textContent='0';$('failedCount').textContent='0';$('progressBar').style.width='0%';$('progressText').textContent='Waiting...'}
+function startTimeout(){clearTimeout(operationTimeout);operationTimeout=setTimeout(()=>{setMessage('No response received from the server. Check backend/database status before retrying.','error');if(shiftInProgress){shiftInProgress=false;updateButtons()}},120000)}
+function loadPacks(){socket.emit('get-pack-list',{},response=>{if(!response||!response.success){$('packSelect').innerHTML='<option value="">Unable to load pack names</option>';setMessage(response?.message||'Could not load pack names.','error');return}const select=$('packSelect');select.innerHTML='<option value="">Select Pack Name</option>';for(const pack of response.packs){const option=document.createElement('option');option.value=String(pack.Pack_ID);option.textContent=String(pack.Pack_Name??'');option.dataset.search=(String(pack.Pack_Name??'')+' '+String(pack.Pack_ID??'')).toLowerCase();select.appendChild(option)}filterPacks()})}
+function filterPacks(){const term=$('packSearch').value.trim().toLowerCase();const select=$('packSelect');let selectedStillVisible=false;for(const option of select.options){if(!option.value){option.hidden=false;continue}option.hidden=!option.dataset.search.includes(term);if(option.selected&&!option.hidden)selectedStillVisible=true}if(select.selectedOptions[0]?.hidden||!selectedStillVisible)select.value='';invalidateScan()}
+$('packSearch').addEventListener('input',filterPacks);
+function invalidateScan(){scanned=null;updateButtons()}
+function scanRecords(){if(!connected||shiftInProgress)return;const selection=currentSelection();if(!validateSelection(selection))return;scanned=null;resetMetrics();updateButtons();setMessage(`Scanning backup records for Pack Number ${selection.packNo}...`);startTimeout();socket.emit('scan-records',selection,response=>{clearTimeout(operationTimeout);if(!response||!response.success){setMessage(response?.message||'Scan failed.','error');return}scanned={...selection,total:response.total};$('totalCount').textContent=response.total;setMessage(`Scan completed successfully.\nPack Number: ${selection.packNo}\nPack ID: ${selection.packId}\nSource: ${response.source}\nDestination: ${response.target}\nMatching records: ${response.total}`,Number(response.total)>0?'success':'');updateButtons()})}
+function startShift(){if(!connected||shiftInProgress)return;const selection=currentSelection();if(!validateSelection(selection))return;if(!scanned||scanned.packNo!==selection.packNo||scanned.packId!==selection.packId||scanned.tableName!==selection.tableName){setMessage('Please scan again after confirming the exact same Pack Number, Pack Name and Line.','error');return}if(Number(scanned.total)===0){setMessage('No matching backup records are available to shift.','error');return}const lineNo=selection.tableName.replace('running_production_count_line','');const backup=`${selection.tableName}_backup`;const live=selection.tableName;const packName=$('packSelect').selectedOptions[0].textContent;if(!confirm(`Shift ${scanned.total} records?\n\nPack Number: ${selection.packNo}\nPack Name: ${packName}\nPack ID: ${selection.packId}\nSource: ${backup}\nDestination: ${live}\n\nEach backup row will be deleted only after its live-table insert is verified. Continue?`))return;shiftInProgress=true;resetMetrics();$('totalCount').textContent=scanned.total;updateButtons();setMessage(`Starting shift for Line ${lineNo}...`);startTimeout();socket.emit('shift-records',selection,response=>{clearTimeout(operationTimeout);if(!response||!response.success){shiftInProgress=false;updateButtons();setMessage(response?.message||'Could not start shift.','error')}})}
+$('packNo').addEventListener('input',e=>{e.target.value=e.target.value.replace(/\D/g,'').slice(0,6);invalidateScan()});$('packSelect').addEventListener('change',invalidateScan);$('tableName').addEventListener('change',invalidateScan);
+socket.on('connect',()=>{connected=true;$('connection').textContent='Connected to backup server';$('connection').className='connection online';updateButtons();loadPacks()});socket.on('disconnect',()=>{connected=false;scanned=null;clearTimeout(operationTimeout);$('connection').textContent='Disconnected — reconnecting...';$('connection').className='connection';if(shiftInProgress)setMessage('Browser connection lost during shift. Some records may already have committed. Reconnect and scan the backup table before retrying.','error');updateButtons()});socket.on('connect_error',err=>{connected=false;$('connection').textContent='Connection error';$('connection').className='connection';console.error('Socket connection error:',err.message);updateButtons()});socket.on('connection-status',data=>{if(data.connected){connected=true;$('connection').textContent=data.message;$('connection').className='connection online';updateButtons()}});
+socket.on('shift-started',data=>{$('totalCount').textContent=data.total;$('progressText').textContent=`Starting shift: ${data.total} records selected.`;setMessage(`${data.message}\nSource: ${data.source}\nDestination: ${data.target}`)});
+socket.on('shift-progress',data=>{$('totalCount').textContent=data.total;$('shiftedCount').textContent=data.shifted;$('failedCount').textContent=data.failed;const percent=data.total?Math.min(100,Math.round(data.shifted/data.total*100)):0;$('progressBar').style.width=percent+'%';$('progressText').textContent=`${data.shifted} of ${data.total} records committed (${percent}%)`;if(data.error)setMessage(`Shift stopped at backup sr_no ${data.currentSrNo}.\n${data.error}\nThe failed backup record was retained.`,'error')});
+socket.on('shift-complete',data=>{clearTimeout(operationTimeout);shiftInProgress=false;scanned=null;$('totalCount').textContent=data.total;$('shiftedCount').textContent=data.shifted;$('failedCount').textContent=data.failed;const percent=data.total?Math.min(100,Math.round(data.shifted/data.total*100)):0;$('progressBar').style.width=percent+'%';$('progressText').textContent=`${data.shifted} of ${data.total} records committed (${percent}%)`;let message=`${data.message}\n\nSource: ${data.source}\nDestination: ${data.target}\nSelected records: ${data.total}\nSuccessfully shifted: ${data.shifted}\nFailed records: ${data.failed}`;if(data.failedSrNo!==null&&data.failedSrNo!==undefined)message+=`\nFailed sr_no: ${data.failedSrNo}`;if(data.lastError)message+=`\nError: ${data.lastError}`;setMessage(message,data.failed?'error':'success');updateButtons()});socket.on('operation-error',response=>{clearTimeout(operationTimeout);if(shiftInProgress){shiftInProgress=false;scanned=null;updateButtons()}setMessage(response?.message||'An operation failed.','error')});
+</script></body></html>
