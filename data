@@ -4,3 +4,51 @@ ForEach-Object {
   $port = (Get-NetTCPConnection -OwningProcess $_.Id -State Listen -ErrorAction SilentlyContinue).LocalPort
   [PSCustomObject]@{PID=$_.Id; CPUsec=[math]::Round($_.CPU); Port=$port; Cmd=$cmd}
 } | Format-List
+
+
+
+///////////////////////////////////logs
+import os, time, logging, threading, psutil
+from fastapi import Request
+
+os.makedirs("logs", exist_ok=True)
+perf_log = logging.getLogger("perf")
+perf_log.setLevel(logging.INFO)
+_h = logging.FileHandler("logs/api_perf.log")
+_h.setFormatter(logging.Formatter("%(asctime)s|%(levelname)s|%(message)s"))
+perf_log.addHandler(_h)
+perf_log.propagate = False
+
+_inflight, _lock = {}, threading.Lock()
+
+@app.middleware("http")
+async def perf_middleware(request: Request, call_next):
+    rid = id(request)
+    label = f"{request.method} {request.url.path}"
+    with _lock:
+        _inflight[rid] = (label, time.time())
+    t0, status = time.perf_counter(), 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        name = f"{request.method} {route.path}" if route else label  # groups /barcode/{id} together
+        ms = (time.perf_counter() - t0) * 1000
+        with _lock:
+            _inflight.pop(rid, None)
+        perf_log.info(f"{name}|{status}|{ms:.0f}|{request.client.host if request.client else '-'}")
+
+# Every 5 s: if this process is hot, log which requests are in progress
+_proc = psutil.Process(os.getpid())
+def _cpu_sampler():
+    _proc.cpu_percent(None)
+    while True:
+        time.sleep(5)
+        cpu = _proc.cpu_percent(None)
+        if cpu > 50:
+            with _lock:
+                running = [(n, round(time.time() - t, 1)) for n, t in _inflight.values()]
+            perf_log.warning(f"HIGH_CPU {cpu:.0f}% | inflight={running}")
+threading.Thread(target=_cpu_sampler, daemon=True).start()
