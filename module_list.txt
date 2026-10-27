@@ -1149,34 +1149,66 @@ socket.on(
 );
 ///////////////////////////////////////////////////////////////
 //////////////////////
-DECLARE @SQL NVARCHAR(MAX) = '';
+USE [taco_treceability_FinalQRCode_register];
 
-SELECT @SQL = @SQL + '
-SELECT 
-    SrNo,
-    Pack_No,
-    Timestamp,
-    ''' + REPLACE(t.name, '''', '''''') + ''' AS TableName
-FROM [taco_treceability].' + QUOTENAME(t.name) + '
-WHERE Pack_ID = ''21''
-UNION ALL
-'
-FROM sys.tables t
-INNER JOIN sys.schemas s
+
+DECLARE @QRCode NVARCHAR(200) =
+    '504005020864002325102100062865';
+
+DECLARE @SQL NVARCHAR(MAX) = N'';
+
+SELECT @SQL = @SQL
+    + CASE WHEN @SQL = N'' THEN N'' ELSE N' UNION ALL ' END
+    + N'
+    SELECT
+        SrNo,
+        Pack_ID,
+        Pack_No,
+        Module_ID,
+        [Timestamp],
+        FinalQRCode_string,
+        Operator_Name,
+        [Line],
+        [status],
+        N''' + REPLACE(t.name, '''', '''''') + N''' AS TableName
+    FROM ' + QUOTENAME(s.name) + N'.' + QUOTENAME(t.name) + N'
+    WHERE FinalQRCode_string = @QRCode'
+FROM sys.tables AS t
+INNER JOIN sys.schemas AS s
     ON t.schema_id = s.schema_id
-WHERE s.name = 'taco_treceability'
-  AND t.name LIKE 'FinalQRCode_register[_]%';
+WHERE t.name LIKE N'FinalQRCode_register[_]%'
+  AND NOT EXISTS (
+      SELECT required.ColumnName
+      FROM (VALUES
+          (N'SrNo'),
+          (N'Pack_ID'),
+          (N'Pack_No'),
+          (N'Module_ID'),
+          (N'Timestamp'),
+          (N'FinalQRCode_string'),
+          (N'Operator_Name'),
+          (N'Line'),
+          (N'status')
+      ) AS required(ColumnName)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM sys.columns AS c
+          WHERE c.object_id = t.object_id
+            AND c.name = required.ColumnName
+      )
+  );
 
-IF LEN(@SQL) > 0
+IF @SQL <> N''
 BEGIN
-    SET @SQL = LEFT(@SQL, LEN(@SQL) - LEN('UNION ALL' + CHAR(13) + CHAR(10)));
-    EXEC sp_executesql @SQL;
+    EXEC sys.sp_executesql
+        @SQL,
+        N'@QRCode NVARCHAR(200)',
+        @QRCode = @QRCode;
 END
 ELSE
 BEGIN
-    PRINT 'No FinalQRCode_register_ tables found.';
+    PRINT 'No date-wise tables found containing all specified columns.';
 END;
-
 
 ///////////////////////////
 DECLARE @CellQR NVARCHAR(100) = '03HCB01B0000BRFBP0621702';
