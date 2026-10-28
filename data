@@ -1,54 +1,904 @@
-Get-Process python* | Sort-Object CPU -Descending | Select-Object -First 5 Id, CPU, WorkingSet |
-ForEach-Object {
-  $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine
-  $port = (Get-NetTCPConnection -OwningProcess $_.Id -State Listen -ErrorAction SilentlyContinue).LocalPort
-  [PSCustomObject]@{PID=$_.Id; CPUsec=[math]::Round($_.CPU); Port=$port; Cmd=$cmd}
-} | Format-List
 
+const net = require("net");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const XLSX = require("xlsx");
+const HID = require("node-hid");
+const sql = require("mssql");
 
+// ============================================================
+// TCP SERVER CONFIGURATION
+// ============================================================
 
-///////////////////////////////////logs
-import os, time, logging, threading, psutil
-from fastapi import Request
+const HOST = "10.9.4.28";
+const PORT = 7287;
 
-os.makedirs("logs", exist_ok=True)
-perf_log = logging.getLogger("perf")
-perf_log.setLevel(logging.INFO)
-_h = logging.FileHandler("logs/api_perf.log")
-_h.setFormatter(logging.Formatter("%(asctime)s|%(levelname)s|%(message)s"))
-perf_log.addHandler(_h)
-perf_log.propagate = False
+// ============================================================
+// USB HID RELAY CONFIGURATION
+// ============================================================
 
-_inflight, _lock = {}, threading.Lock()
+const USB_RELAY_VID = 0x16C0;
+const USB_RELAY_PID = 0x05DF;
+const USB_RELAY_PRODUCT = "USBRelay2";
 
-@app.middleware("http")
-async def perf_middleware(request: Request, call_next):
-    rid = id(request)
-    label = f"{request.method} {request.url.path}"
-    with _lock:
-        _inflight[rid] = (label, time.time())
-    t0, status = time.perf_counter(), 500
-    try:
-        response = await call_next(request)
-        status = response.status_code
-        return response
-    finally:
-        route = request.scope.get("route")
-        name = f"{request.method} {route.path}" if route else label  # groups /barcode/{id} together
-        ms = (time.perf_counter() - t0) * 1000
-        with _lock:
-            _inflight.pop(rid, None)
-        perf_log.info(f"{name}|{status}|{ms:.0f}|{request.client.host if request.client else '-'}")
+const APP_STATUS_RELAY = 1;
+const BUZZER_RELAY = 2;
 
-# Every 5 s: if this process is hot, log which requests are in progress
-_proc = psutil.Process(os.getpid())
-def _cpu_sampler():
-    _proc.cpu_percent(None)
-    while True:
-        time.sleep(5)
-        cpu = _proc.cpu_percent(None)
-        if cpu > 50:
-            with _lock:
-                running = [(n, round(time.time() - t, 1)) for n, t in _inflight.values()]
-            perf_log.warning(f"HIGH_CPU {cpu:.0f}% | inflight={running}")
-threading.Thread(target=_cpu_sampler, daemon=True).start()
+// ============================================================
+// EXCEL CONFIGURATION
+// ============================================================
+
+const EXCEL_FILE_NAME = "buzzer_line.xlsx";
+
+const EXCEL_FILE_PATH = path.join(
+    os.homedir(),
+    "Desktop",
+    EXCEL_FILE_NAME
+);
+
+const EXCEL_SHEET_NAME = "Sheet1";
+const EXCEL_LINE_CELL = "A1";
+
+// ============================================================
+// SQL DATABASE CONFIGURATION
+// ============================================================
+
+const sqlConfig = {
+    user: "user_mis",
+    password: "admin@123",
+    database: "taco_treceability_master",
+    server: "10.9.4.29",
+    port: 1433,
+
+    options: {
+        instanceName: "PROD_SQL_2026",
+        encrypt: false,
+        trustServerCertificate: true
+    },
+
+    pool: {
+        max: 10,
+        min: 0,
+        idleTimeoutMillis: 30000
+    }
+};
+
+// ============================================================
+// GLOBAL VARIABLES
+// ============================================================
+
+let dbConn = new sql.ConnectionPool(sqlConfig);
+
+let client = null;
+let reconnectTimer = null;
+let buzzerTimer = null;
+
+let buzzerRunning = false;
+let usbRelay = null;
+let appStatusRelayOn = false;
+let shuttingDown = false;
+
+// USB AUTO-RECONNECT CONFIGURATION
+let usbMonitorTimer = null;
+let usbInitializationInProgress = false;
+let lastUsbInitErrorLogAt = 0;
+
+const USB_RECONNECT_INTERVAL_MS = 2000;
+const USB_ERROR_LOG_INTERVAL_MS = 10000;
+
+// ============================================================
+// INITIALIZE SQL CONNECTION
+// ============================================================
+
+dbConn.connect()
+    .then(() => {
+        console.log("Connected to database: 10.9.4.29");
+    })
+    .catch((error) => {
+        console.log(
+            "SQL DATABASE CONNECTION ERROR:",
+            error.message
+        );
+    });
+
+// ============================================================
+// GET BUZZER DURATION FROM DATABASE
+// ============================================================
+
+async function getBuzzerDurationFromDatabase(lineNo) {
+    try {
+        if (!dbConn || !dbConn.connected) {
+            console.log("SQL database reconnecting...");
+
+            dbConn = await new sql.ConnectionPool(
+                sqlConfig
+            ).connect();
+
+            console.log("SQL database connected.");
+        }
+
+        const request = dbConn.request();
+
+        request.input(
+            "lineNo",
+            sql.VarChar,
+            String(lineNo).trim()
+        );
+
+        const result = await request.query(`
+            SELECT time_limit
+            FROM taco_treceability.master_line_cell_scanning_status
+            WHERE line_no = @lineNo
+        `);
+
+        if (
+            !result.recordset ||
+            result.recordset.length === 0
+        ) {
+            console.log("TIME LIMIT NOT FOUND");
+            console.log("Line:", lineNo);
+            return null;
+        }
+
+        const timeLimit = result.recordset[0].time_limit;
+
+        if (
+            timeLimit === null ||
+            timeLimit === undefined
+        ) {
+            console.log("INVALID TIME LIMIT: NULL");
+            return null;
+        }
+
+        const durationSeconds = Number(timeLimit);
+
+        if (
+            !Number.isFinite(durationSeconds) ||
+            durationSeconds <= 0
+        ) {
+            console.log("INVALID TIME LIMIT:", timeLimit);
+            return null;
+        }
+
+        console.log("");
+        console.log("==========================================");
+        console.log("BUZZER TIME FROM DATABASE");
+        console.log("==========================================");
+        console.log("Line       :", lineNo);
+        console.log("time_limit :", durationSeconds, "seconds");
+        console.log("==========================================");
+
+        return durationSeconds;
+
+    } catch (error) {
+        console.log("SQL TIME LIMIT READ ERROR");
+        console.log("Line:", lineNo);
+        console.log("Error:", error.message);
+
+        return null;
+    }
+}
+
+// ============================================================
+// INITIALIZE / RECONNECT USB HID RELAY
+// ============================================================
+
+function initializeUSBRelay() {
+    if (
+        shuttingDown ||
+        usbRelay ||
+        usbInitializationInProgress
+    ) {
+        return Boolean(usbRelay);
+    }
+
+    usbInitializationInProgress = true;
+
+    try {
+        const devices = HID.devices(
+            USB_RELAY_VID,
+            USB_RELAY_PID
+        );
+
+        if (!devices.length) {
+            throw new Error(
+                `USBRelay2 not found. VID=0x${USB_RELAY_VID.toString(16)}, ` +
+                `PID=0x${USB_RELAY_PID.toString(16)}`
+            );
+        }
+
+        const deviceInfo =
+            devices.find(
+                device => device.product === USB_RELAY_PRODUCT
+            ) ||
+            devices.find(device => device.path);
+
+        if (!deviceInfo || !deviceInfo.path) {
+            throw new Error("USB HID device path not found.");
+        }
+
+        // Open a fresh HID handle after initial connection or reconnection.
+        usbRelay = new HID.HID(deviceInfo.path);
+
+        console.log("");
+        console.log("==========================================");
+        console.log("USB HID RELAY CONNECTED");
+        console.log("==========================================");
+        console.log(
+            "Manufacturer:",
+            deviceInfo.manufacturer || "Unknown"
+        );
+        console.log(
+            "Product     :",
+            deviceInfo.product || "Unknown"
+        );
+        console.log(
+            "VID         :",
+            `0x${USB_RELAY_VID.toString(16).toUpperCase()}`
+        );
+        console.log(
+            "PID         :",
+            `0x${USB_RELAY_PID.toString(16).toUpperCase()}`
+        );
+        console.log("Path        :", deviceInfo.path);
+        console.log("==========================================");
+
+        // Preserve safe startup/reconnection sequence:
+        // 1. Buzzer OFF
+        // 2. Application-status relay ON (green light)
+
+        const buzzerOffSent = sendRelayCommand(
+            BUZZER_RELAY,
+            false,
+            "BUZZER OFF AT STARTUP/RECONNECT"
+        );
+
+        if (!buzzerOffSent) {
+            disconnectUSBRelay(
+                "Could not send buzzer OFF command."
+            );
+            return false;
+        }
+
+        const statusOnSent = sendRelayCommand(
+            APP_STATUS_RELAY,
+            true,
+            "APPLICATION STATUS ON"
+        );
+
+        if (!statusOnSent) {
+            disconnectUSBRelay(
+                "Could not turn application-status relay ON."
+            );
+            return false;
+        }
+
+        appStatusRelayOn = true;
+
+        console.log(
+            "USB relay ready. Green application-status light should be ON."
+        );
+
+        return true;
+
+    } catch (error) {
+        if (usbRelay) {
+            try {
+                usbRelay.close();
+            } catch (_) {
+                // Ignore errors closing an unavailable USB device.
+            }
+
+            usbRelay = null;
+        }
+
+        appStatusRelayOn = false;
+
+        const now = Date.now();
+
+        // Avoid flooding the console while the USB device is disconnected.
+        if (
+            now - lastUsbInitErrorLogAt >=
+            USB_ERROR_LOG_INTERVAL_MS
+        ) {
+            console.log("");
+            console.log("==========================================");
+            console.log("USB HID RELAY NOT AVAILABLE - WILL RETRY");
+            console.log("==========================================");
+            console.log("Error:", error.message);
+            console.log(
+                `Next USB check in ${USB_RECONNECT_INTERVAL_MS / 1000} seconds.`
+            );
+            console.log("==========================================");
+
+            lastUsbInitErrorLogAt = now;
+        }
+
+        return false;
+
+    } finally {
+        usbInitializationInProgress = false;
+    }
+}
+
+// ============================================================
+// DISCONNECT STALE USB HANDLE
+// ============================================================
+
+function disconnectUSBRelay(reason) {
+    const oldRelay = usbRelay;
+
+    usbRelay = null;
+    appStatusRelayOn = false;
+
+    if (oldRelay) {
+        try {
+            oldRelay.close();
+        } catch (_) {
+            // Device may already have been physically disconnected.
+        }
+    }
+
+    if (!shuttingDown && reason) {
+        console.log("USB RELAY DISCONNECTED:", reason);
+        console.log(
+            "Waiting for USB relay to be reconnected..."
+        );
+    }
+}
+
+// ============================================================
+// AUTOMATIC USB RECONNECTION MONITOR
+// ============================================================
+
+function startUSBRelayMonitor() {
+    if (usbMonitorTimer || shuttingDown) {
+        return;
+    }
+
+    console.log(
+        `USB auto-reconnect monitor started: checking every ${USB_RECONNECT_INTERVAL_MS / 1000} seconds.`
+    );
+
+    usbMonitorTimer = setInterval(() => {
+        if (shuttingDown) {
+            return;
+        }
+
+        // Only attempt initialization when no HID handle is open.
+        if (!usbRelay && !usbInitializationInProgress) {
+            initializeUSBRelay();
+        }
+    }, USB_RECONNECT_INTERVAL_MS);
+}
+
+// ============================================================
+// SEND USB HID RELAY COMMAND
+// ============================================================
+
+function sendRelayCommand(relayNumber, turnOn, commandName) {
+    if (!usbRelay) {
+        console.log(
+            `RELAY ${commandName} FAILED: USB relay not connected.`
+        );
+
+        return false;
+    }
+
+    if (relayNumber !== 1 && relayNumber !== 2) {
+        console.log("Invalid relay number:", relayNumber);
+        return false;
+    }
+
+    try {
+        const report = [
+            0x00,
+            turnOn ? 0xFF : 0xFD,
+            relayNumber,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00
+        ];
+
+        usbRelay.sendFeatureReport(report);
+
+        const hexCommand = report
+            .map(value =>
+                value.toString(16).padStart(2, "0")
+            )
+            .join(" ")
+            .toUpperCase();
+
+        console.log("");
+        console.log("==========================================");
+        console.log(`RELAY ${commandName} COMMAND SENT`);
+        console.log("Relay:", relayNumber);
+        console.log("State:", turnOn ? "ON" : "OFF");
+        console.log("HEX  :", hexCommand);
+        console.log("==========================================");
+
+        return true;
+
+    } catch (error) {
+        console.log(
+            `RELAY ${commandName} ERROR:`,
+            error.message
+        );
+
+        // Discard the stale HID handle.
+        // The USB monitor will detect and reopen the device.
+        disconnectUSBRelay(error.message);
+
+        return false;
+    }
+}
+
+// ============================================================
+// CLOSE USB HID RELAY
+// ============================================================
+
+function shutdownUSBRelay() {
+    if (!usbRelay) {
+        return;
+    }
+
+    // Turn OFF the buzzer.
+    sendRelayCommand(
+        BUZZER_RELAY,
+        false,
+        "BUZZER OFF ON SHUTDOWN"
+    );
+
+    // If the first command failed, the HID handle may already
+    // have been closed by disconnectUSBRelay().
+    if (usbRelay) {
+        sendRelayCommand(
+            APP_STATUS_RELAY,
+            false,
+            "APPLICATION STATUS OFF"
+        );
+    }
+
+    if (usbRelay) {
+        try {
+            usbRelay.close();
+        } catch (error) {
+            console.log(
+                "USB relay close error:",
+                error.message
+            );
+        }
+    }
+
+    usbRelay = null;
+    appStatusRelayOn = false;
+}
+
+// ============================================================
+// READ LINE NUMBER FROM EXCEL
+// ============================================================
+
+function getConfiguredLineFromExcel() {
+    try {
+        if (!fs.existsSync(EXCEL_FILE_PATH)) {
+            console.log(
+                "EXCEL FILE NOT FOUND:",
+                EXCEL_FILE_PATH
+            );
+
+            return null;
+        }
+
+        const workbook = XLSX.readFile(EXCEL_FILE_PATH);
+
+        if (!workbook.Sheets[EXCEL_SHEET_NAME]) {
+            console.log(
+                "EXCEL SHEET NOT FOUND:",
+                EXCEL_SHEET_NAME
+            );
+
+            return null;
+        }
+
+        const worksheet = workbook.Sheets[EXCEL_SHEET_NAME];
+        const excelCell = worksheet[EXCEL_LINE_CELL];
+
+        if (
+            !excelCell ||
+            excelCell.v === undefined ||
+            excelCell.v === null
+        ) {
+            console.log("EXCEL LINE NUMBER NOT FOUND");
+            return null;
+        }
+
+        const configuredLine = String(excelCell.v).trim();
+
+        if (!configuredLine) {
+            console.log("Excel line number is empty.");
+            return null;
+        }
+
+        return configuredLine;
+
+    } catch (error) {
+        console.log("EXCEL READ ERROR:", error.message);
+        return null;
+    }
+}
+
+// ============================================================
+// START BUZZER
+// ============================================================
+
+async function startBuzzer(lineNo, cellQr) {
+    // Prevent overlapping buzzer cycles.
+    if (buzzerRunning) {
+        console.log("BUZZER ALREADY RUNNING");
+        console.log(
+            "New buzzer event ignored while current buzzer cycle is active."
+        );
+
+        return;
+    }
+
+    // Do not attempt to start a buzzer when the USB relay
+    // is disconnected.
+    if (!usbRelay) {
+        console.log(
+            "BUZZER WILL NOT START: USB relay is disconnected."
+        );
+
+        return;
+    }
+
+    // Get buzzer duration from SQL.
+    const durationSeconds =
+        await getBuzzerDurationFromDatabase(lineNo);
+
+    if (durationSeconds === null) {
+        console.log(
+            "BUZZER WILL NOT START: Valid time_limit unavailable."
+        );
+
+        return;
+    }
+
+    // USB may have been disconnected while the SQL query was running.
+    if (!usbRelay) {
+        console.log(
+            "BUZZER WILL NOT START: USB relay disconnected during SQL lookup."
+        );
+
+        return;
+    }
+
+    const buzzerDurationMs = durationSeconds * 1000;
+
+    buzzerRunning = true;
+
+    console.log("");
+    console.log("==========================================");
+    console.log("BUZZER START");
+    console.log("==========================================");
+    console.log("Line     :", lineNo);
+    console.log("CellQR   :", cellQr);
+    console.log("Duration :", durationSeconds, "seconds");
+    console.log("==========================================");
+
+    // Relay 2 ON: buzzer starts.
+    const relayOnSent = sendRelayCommand(
+        BUZZER_RELAY,
+        true,
+        "BUZZER ON"
+    );
+
+    if (!relayOnSent) {
+        buzzerRunning = false;
+        return;
+    }
+
+    if (buzzerTimer) {
+        clearTimeout(buzzerTimer);
+        buzzerTimer = null;
+    }
+
+    // Automatically switch Relay 2 OFF after SQL time_limit.
+    buzzerTimer = setTimeout(() => {
+        console.log("");
+        console.log("==========================================");
+        console.log(
+            `${durationSeconds} SECONDS COMPLETED`
+        );
+        console.log("Sending buzzer OFF command...");
+        console.log("==========================================");
+
+        sendRelayCommand(
+            BUZZER_RELAY,
+            false,
+            "BUZZER OFF"
+        );
+
+        buzzerRunning = false;
+        buzzerTimer = null;
+
+        console.log("BUZZER AUTO STOPPED");
+        console.log(
+            `Relay OFF after ${durationSeconds} seconds`
+        );
+
+    }, buzzerDurationMs);
+}
+
+// ============================================================
+// PROCESS BUZZER EVENT
+// ============================================================
+
+async function processBuzzerEvent(receivedLine, cellQr) {
+    const configuredLine = getConfiguredLineFromExcel();
+
+    if (configuredLine === null) {
+        console.log("BUZZER EVENT CANNOT BE PROCESSED");
+        console.log("Excel line number could not be read.");
+
+        return;
+    }
+
+    console.log("");
+    console.log("==========================================");
+    console.log("LINE COMPARISON");
+    console.log("==========================================");
+    console.log("Received Line:", receivedLine);
+    console.log("Excel Line   :", configuredLine);
+    console.log("==========================================");
+
+    if (
+        String(receivedLine).trim() ===
+        String(configuredLine).trim()
+    ) {
+        console.log("LINE MATCHED");
+        console.log(
+            `Line ${receivedLine} belongs to this client.`
+        );
+
+        await startBuzzer(receivedLine, cellQr);
+
+    } else {
+        console.log("LINE NOT MATCHED");
+        console.log("Received  :", receivedLine);
+        console.log("Configured:", configuredLine);
+        console.log("Buzzer will NOT start.");
+    }
+}
+
+// ============================================================
+// CONNECT TO TCP SERVER
+// ============================================================
+
+function connectToServer() {
+    if (shuttingDown) {
+        return;
+    }
+
+    console.log("");
+    console.log("==========================================");
+    console.log("BUZZER TCP CLIENT");
+    console.log("==========================================");
+    console.log("Server:", HOST);
+    console.log("Port  :", PORT);
+    console.log("==========================================");
+
+    client = new net.Socket();
+
+    client.setKeepAlive(true, 10000);
+
+    client.connect(PORT, HOST, () => {
+        console.log("");
+        console.log("==========================================");
+        console.log("CONNECTED TO BUZZER TCP SERVER");
+        console.log("==========================================");
+        console.log(`Server: ${HOST}:${PORT}`);
+        console.log("Status: Listening for broadcasts");
+        console.log("==========================================");
+    });
+
+    // ========================================================
+    // RECEIVE TCP DATA
+    // ========================================================
+
+    client.on("data", async (data) => {
+        const messages = data
+            .toString("utf-8")
+            .split("\n");
+
+        for (const message of messages) {
+            const trimmedMessage = message.trim();
+
+            if (!trimmedMessage) {
+                continue;
+            }
+
+            console.log("");
+            console.log("==========================================");
+            console.log("BUZZER BROADCAST RECEIVED");
+            console.log("==========================================");
+            console.log("Raw:", trimmedMessage);
+
+            try {
+                const payload = JSON.parse(trimmedMessage);
+
+                const lineNo = String(
+                    payload.line_no || ""
+                ).trim();
+
+                const cellQr = String(
+                    payload.cellqr || ""
+                ).trim();
+
+                if (!lineNo) {
+                    console.log("line_no missing.");
+                    continue;
+                }
+
+                console.log("Line  :", lineNo);
+                console.log("CellQR:", cellQr);
+
+                await processBuzzerEvent(lineNo, cellQr);
+
+            } catch (error) {
+                console.log("");
+                console.log("==========================================");
+                console.log("INVALID JSON RECEIVED");
+                console.log("==========================================");
+                console.log("Data :", trimmedMessage);
+                console.log("Error:", error.message);
+                console.log("==========================================");
+            }
+        }
+    });
+
+    // ========================================================
+    // TCP CONNECTION CLOSED
+    // ========================================================
+
+    client.on("close", () => {
+        console.log("TCP CONNECTION CLOSED");
+
+        if (!shuttingDown) {
+            scheduleReconnect();
+        }
+    });
+
+    // ========================================================
+    // TCP ERROR
+    // ========================================================
+
+    client.on("error", (error) => {
+        console.log("");
+        console.log("==========================================");
+        console.log("TCP ERROR");
+        console.log("==========================================");
+        console.log(error.message);
+        console.log("==========================================");
+    });
+}
+
+// ============================================================
+// TCP RECONNECT
+// ============================================================
+
+function scheduleReconnect() {
+    if (shuttingDown || reconnectTimer) {
+        return;
+    }
+
+    console.log("Reconnecting in 3 seconds...");
+
+    reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+
+        if (!shuttingDown) {
+            connectToServer();
+        }
+    }, 3000);
+}
+
+// ============================================================
+// APPLICATION SHUTDOWN
+// ============================================================
+
+function shutdownClient() {
+    if (shuttingDown) {
+        return;
+    }
+
+    shuttingDown = true;
+
+    if (usbMonitorTimer) {
+        clearInterval(usbMonitorTimer);
+        usbMonitorTimer = null;
+    }
+
+    console.log("Stopping buzzer client...");
+
+    if (buzzerTimer) {
+        clearTimeout(buzzerTimer);
+        buzzerTimer = null;
+    }
+
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+
+    buzzerRunning = false;
+
+    shutdownUSBRelay();
+
+    if (client) {
+        client.destroy();
+        client = null;
+    }
+
+    if (dbConn && dbConn.connected) {
+        dbConn.close().catch(() => {});
+    }
+}
+
+// ============================================================
+// PROCESS SIGNAL HANDLERS
+// ============================================================
+
+process.on("SIGINT", () => {
+    shutdownClient();
+    process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+    shutdownClient();
+    process.exit(0);
+});
+
+process.on("uncaughtException", (error) => {
+    console.log(
+        "UNCAUGHT EXCEPTION:",
+        error.message
+    );
+
+    shutdownClient();
+    process.exit(1);
+});
+
+// ============================================================
+// START APPLICATION
+// ============================================================
+
+console.log("");
+console.log("================================================");
+console.log("BUZZER CLIENT STARTING");
+console.log("================================================");
+console.log(`TCP Server  : ${HOST}:${PORT}`);
+console.log(`Excel File  : ${EXCEL_FILE_PATH}`);
+console.log(`Excel Sheet : ${EXCEL_SHEET_NAME}`);
+console.log(`Excel Cell  : ${EXCEL_LINE_CELL}`);
+
+console.log(
+    `USB Relay VID: 0x${USB_RELAY_VID.toString(16).toUpperCase()}`
+);
+
+console.log(
+    `USB Relay PID: 0x${USB_RELAY_PID.toString(16).toUpperCase()}`
+);
+
+console.log(`Status Relay: ${APP_STATUS_RELAY}`);
+console.log(`Buzzer Relay: ${BUZZER_RELAY}`);
+console.log("Buzzer Time : Database time_limit seconds");
+console.log("================================================");
+
+// Start USB detection/reconnection independently of TCP communication.
+initializeUSBRelay();
+startUSBRelayMonitor();
+connectToServer();
