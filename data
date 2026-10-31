@@ -1,3 +1,19 @@
 node C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2 start buzzer_client_live_2_relay.js --name buzzer-client
 
 node C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2 list
+
+
+Check whether your application is running:
+node C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2 list
+
+
+Check logs:
+node C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2 logs buzzer-client
+
+
+Restart:
+node C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2 restart buzzer-client
+
+
+Stop:
+node C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2 stop buzzer-client
