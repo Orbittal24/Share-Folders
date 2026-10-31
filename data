@@ -1,78 +1,54 @@
-dir C:\project\buzzer\buzzer_client_ready\nssm.exe
-
-C:\project\buzzer\buzzer_client_ready\nssm.exe version
-
-sc create TACO_Test_Service binPath= "C:\Windows\System32\cmd.exe"
-
 
 @echo off
 setlocal
-title TACO Buzzer Service Installer
 
-set "APP_DIR=C:\project\buzzer\buzzer_client_ready"
-set "NSSM=%APP_DIR%\nssm.exe"
-set "SCRIPT=%APP_DIR%\buzzer_client_live_2relay.js"
-set "SERVICE=TACO_Buzzer_Client_2Relay"
-set "LOG_DIR=%APP_DIR%\logs"
+title TACO BUZZER WINDOWS SERVICE
 
 echo ==========================================
 echo       TACO BUZZER SERVICE INSTALLER
 echo ==========================================
 
-:: Check Administrator
-fltmc >nul 2>&1
-if errorlevel 1 (
-    echo Requesting Administrator Access...
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
-    exit /b
+set "APP_DIR=C:\Project\buzzer_client_ready"
+set "SCRIPT=%APP_DIR%\buzzer_client_live_2_relay.js"
+set "NODE=C:\Program Files\nodejs\node.exe"
+set "NSSM=%APP_DIR%\nssm.exe"
+set "SERVICE=TACO_Buzzer_Client"
+
+REM Check Administrator permission
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ERROR: Please run this BAT file as Administrator.
+    pause
+    exit /b 1
 )
 
-echo Administrator permission verified.
-
-:: Check application files
-if not exist "%NSSM%" (
-    echo ERROR: NSSM executable missing!
-    echo Expected: %NSSM%
+REM Check required files
+if not exist "%NODE%" (
+    echo ERROR: Node.js not found: %NODE%
     pause
     exit /b 1
 )
 
 if not exist "%SCRIPT%" (
-    echo ERROR: JavaScript file missing!
+    echo ERROR: JavaScript file not found.
     pause
     exit /b 1
 )
 
-:: Check Node.js
-set "NODE="
-for /f "delims=" %%A in ('where node 2^>nul') do (
-    if not defined NODE set "NODE=%%A"
-)
-
-if not defined NODE (
-    echo ERROR: Node.js not found!
+if not exist "%NSSM%" (
+    echo ERROR: nssm.exe not found.
     pause
     exit /b 1
 )
 
-if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+if not exist "%APP_DIR%\logs" mkdir "%APP_DIR%\logs"
 
-echo Node: %NODE%
-echo NSSM: %NSSM%
-
-:: Test NSSM executable
-"%NSSM%" version
-if errorlevel 1 (
-    echo ERROR: NSSM cannot execute.
-    pause
-    exit /b 1
-)
-
-:: Check existing service
+REM Check whether service already exists
 sc query "%SERVICE%" >nul 2>&1
 
-if errorlevel 1 (
-    echo Installing new service...
+if %errorlevel% neq 0 (
+
+    echo Installing Windows Service...
 
     "%NSSM%" install "%SERVICE%" "%NODE%"
 
@@ -81,70 +57,68 @@ if errorlevel 1 (
         pause
         exit /b 1
     )
+
+    "%NSSM%" set "%SERVICE%" AppParameters "\"%SCRIPT%\""
+    "%NSSM%" set "%SERVICE%" AppDirectory "%APP_DIR%"
+
+    REM Configure automatic restart
+    "%NSSM%" set "%SERVICE%" AppExit Default Restart
+    "%NSSM%" set "%SERVICE%" AppRestartDelay 5000
+
+    REM Configure log files
+    "%NSSM%" set "%SERVICE%" AppStdout "%APP_DIR%\logs\service_output.log"
+    "%NSSM%" set "%SERVICE%" AppStderr "%APP_DIR%\logs\service_error.log"
+
+    "%NSSM%" set "%SERVICE%" AppRotateFiles 1
+    "%NSSM%" set "%SERVICE%" AppRotateOnline 1
+    "%NSSM%" set "%SERVICE%" AppRotateBytes 10485760
+
+    echo Service installed successfully.
+
 ) else (
-    echo Service already exists. Updating configuration...
-
-    "%NSSM%" stop "%SERVICE%" confirm
-
-    "%NSSM%" set "%SERVICE%" Application "%NODE%"
+    echo Service already exists.
 )
 
-:: Configure Node.js script
-"%NSSM%" set "%SERVICE%" AppParameters "\"%SCRIPT%\""
-if errorlevel 1 goto ERROR
-
-"%NSSM%" set "%SERVICE%" AppDirectory "%APP_DIR%"
-if errorlevel 1 goto ERROR
-
-"%NSSM%" set "%SERVICE%" DisplayName "TACO Buzzer Client 2 Relay"
-if errorlevel 1 goto ERROR
-
-"%NSSM%" set "%SERVICE%" Start SERVICE_AUTO_START
-if errorlevel 1 goto ERROR
-
-:: Restart on crash
-"%NSSM%" set "%SERVICE%" AppExit Default Restart
-if errorlevel 1 goto ERROR
-
-"%NSSM%" set "%SERVICE%" AppRestartDelay 5000
-if errorlevel 1 goto ERROR
-
-:: Configure logs
-"%NSSM%" set "%SERVICE%" AppStdout "%LOG_DIR%\buzzer_stdout.log"
-if errorlevel 1 goto ERROR
-
-"%NSSM%" set "%SERVICE%" AppStderr "%LOG_DIR%\buzzer_error.log"
-if errorlevel 1 goto ERROR
-
-"%NSSM%" set "%SERVICE%" AppStdoutCreationDisposition 4
-"%NSSM%" set "%SERVICE%" AppStderrCreationDisposition 4
-
-:: Start service
+REM Start service
 echo.
-echo Starting service...
+echo Starting TACO BUZZER Service...
 
-"%NSSM%" start "%SERVICE%"
+net start "%SERVICE%"
 
-if errorlevel 1 goto ERROR
+if errorlevel 1 (
+    echo.
+    echo ERROR: Unable to start service.
+    echo Check service_error.log
+    pause
+    exit /b 1
+)
 
 echo.
 echo ==========================================
-echo SERVICE INSTALLED SUCCESSFULLY
+echo  TACO BUZZER SERVICE STARTED SUCCESSFULLY
 echo ==========================================
 
-sc query "%SERVICE%"
-
 echo.
-echo Logs: %LOG_DIR%
+echo Service Name: %SERVICE%
+echo Script: %SCRIPT%
+
 pause
-exit /b 0
+///////////////////////////////////////////
 
-:ERROR
+
+@echo off
+
+title TACO BUZZER SERVICE STOP
+
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Please run as Administrator.
+    pause
+    exit /b 1
+)
+
+net stop TACO_Buzzer_Client
+
 echo.
-echo ==========================================
-echo ERROR: SERVICE CONFIGURATION FAILED
-echo ==========================================
-echo Check administrator permission and NSSM.
-sc query "%SERVICE%"
+echo TACO BUZZER SERVICE STOPPED.
 pause
-exit /b 1
