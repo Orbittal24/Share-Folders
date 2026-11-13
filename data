@@ -13,3 +13,13 @@ elseif ($release -ge 528040) {
 else {
     Write-Host ".NET Framework version is older than 4.8"
 }
+
+/////////////////////
+Get-HotFix |
+Where-Object {
+    $_.Description -match ".NET|Security Update" -or
+    $_.HotFixID -match "KB"
+} |
+Sort-Object InstalledOn -Descending |
+Format-Table HotFixID, Description, InstalledOn -AutoSize
+
