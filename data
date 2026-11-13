@@ -1,3 +1,15 @@
-.\\venv\\Scripts\\python.exe -m pip install --upgrade pip
+$release = Get-ItemPropertyValue `
+  -LiteralPath 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' `
+  -Name Release
 
-            .\\venv\\Scripts\\python.exe -m pip install --no-cache-dir -r requirements.txt
+Write-Host "Release Key: $release"
+
+if ($release -ge 533320) {
+    Write-Host ".NET Framework 4.8.1 or later installed"
+}
+elseif ($release -ge 528040) {
+    Write-Host ".NET Framework 4.8 installed"
+}
+else {
+    Write-Host ".NET Framework version is older than 4.8"
+}
