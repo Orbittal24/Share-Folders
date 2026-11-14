@@ -1,25 +1,24 @@
-$release = Get-ItemPropertyValue `
-  -LiteralPath 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' `
-  -Name Release
+```bat
+@echo off
+title Buzzer Client Service
 
-Write-Host "Release Key: $release"
+echo ==========================================
+echo       STARTING BUZZER CLIENT SERVICE
+echo ==========================================
 
-if ($release -ge 533320) {
-    Write-Host ".NET Framework 4.8.1 or later installed"
-}
-elseif ($release -ge 528040) {
-    Write-Host ".NET Framework 4.8 installed"
-}
-else {
-    Write-Host ".NET Framework version is older than 4.8"
-}
+cd /d "C:\Project\buzzer_client_ready"
 
-/////////////////////
-Get-HotFix |
-Where-Object {
-    $_.Description -match ".NET|Security Update" -or
-    $_.HotFixID -match "KB"
-} |
-Sort-Object InstalledOn -Descending |
-Format-Table HotFixID, Description, InstalledOn -AutoSize
+REM Start PM2 using the offline installation
+node "C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2" start "C:\Project\buzzer_client_ready\buzzer_client_live_2_relay.js" --name buzzer-client
 
+echo.
+echo ==========================================
+echo       BUZZER CLIENT START COMMAND SENT
+echo ==========================================
+
+REM Show PM2 process status
+node "C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2" status
+
+echo.
+pause
+```
