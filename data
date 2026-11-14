@@ -1,19 +1,19 @@
 ```bat
 @echo off
-title Buzzer Client Service
+title Stop Buzzer Client Service
 
 echo ==========================================
-echo       STARTING BUZZER CLIENT SERVICE
+echo       STOPPING BUZZER CLIENT SERVICE
 echo ==========================================
 
 cd /d "C:\Project\buzzer_client_ready"
 
-REM Start PM2 using the offline installation
-node "C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2" start "C:\Project\buzzer_client_ready\buzzer_client_live_2_relay.js" --name buzzer-client
+REM Stop PM2 managed buzzer client
+node "C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2" stop buzzer-client
 
 echo.
 echo ==========================================
-echo       BUZZER CLIENT START COMMAND SENT
+echo       BUZZER CLIENT STOP COMMAND SENT
 echo ==========================================
 
 REM Show PM2 process status
