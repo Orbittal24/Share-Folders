@@ -1,24 +1,9 @@
-```bat
-@echo off
-title Stop Buzzer Client Service
+const sslOptions = {
+    key: fs.readFileSync(
+        path.join(__dirname, "certs", "server.key")
+    ),
 
-echo ==========================================
-echo       STOPPING BUZZER CLIENT SERVICE
-echo ==========================================
-
-cd /d "C:\Project\buzzer_client_ready"
-
-REM Stop PM2 managed buzzer client
-node "C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2" stop buzzer-client
-
-echo.
-echo ==========================================
-echo       BUZZER CLIENT STOP COMMAND SENT
-echo ==========================================
-
-REM Show PM2 process status
-node "C:\Project\buzzer_client_ready\PM2_OFFLINE\node_modules\pm2\bin\pm2" status
-
-echo.
-pause
-```
+    cert: fs.readFileSync(
+        path.join(__dirname, "certs", "server.pem")
+    )
+};
