@@ -1,1 +1,726 @@
-Test-NetConnection 10.9.4.28 -Port 9669
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Line Health Dashboard</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11,11,11,0.10);
+  --series-1: #2a78d6;   /* MES server */
+  --series-2: #eb6834;   /* PLC */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --good-ink: #006300;
+  --hover: rgba(11,11,11,0.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --good-ink: #0ca30c;
+    --hover: rgba(255,255,255,0.05);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
+  padding: 14px 24px; background: var(--surface); border-bottom: 1px solid var(--ring);
+}
+header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+header .sub { color: var(--ink-2); }
+header .spacer { flex: 1; }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+select, input[type=search], button {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--axis); border-radius: 6px; padding: 5px 9px;
+}
+button { cursor: pointer; }
+button:hover { background: var(--hover); }
+label.chk { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
+
+nav { display: flex; gap: 2px; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--ring); overflow-x: auto; }
+nav button {
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  padding: 10px 14px; color: var(--ink-2); background: none; white-space: nowrap;
+}
+nav button.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+
+main { padding: 20px 24px 48px; max-width: 1400px; }
+section { display: none; }
+section.active { display: block; }
+h2 { font-size: 15px; margin: 24px 0 10px; font-weight: 650; }
+h2:first-child { margin-top: 0; }
+.hint { color: var(--muted); font-size: 13px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.tile {
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 10px;
+  padding: 14px 16px;
+}
+.tile h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.tile .big { font-size: 22px; font-weight: 650; margin-bottom: 6px; }
+.tile dl { margin: 8px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+.tile dt { color: var(--muted); }
+.tile dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; font-weight: 650;
+  padding: 2px 10px 2px 8px; border-radius: 999px; font-size: 13px;
+  border: 1px solid var(--ring);
+}
+.badge .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.badge.ok .dot { background: var(--good); }
+.badge.warn .dot { background: var(--warning); }
+.badge.bad .dot { background: var(--critical); }
+.badge.idle .dot { background: var(--muted); }
+
+table { border-collapse: collapse; width: 100%; background: var(--surface); border: 1px solid var(--ring); border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--surface); position: sticky; top: 0; }
+td { font-variant-numeric: tabular-nums; }
+td.detail { word-break: break-word; }
+tr:hover td { background: var(--hover); }
+.tablewrap { max-height: 65vh; overflow: auto; border-radius: 8px; }
+
+.kindchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.kindchips button { font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+.kindchips button.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+
+pre.raw {
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 8px;
+  padding: 12px; overflow: auto; font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--ink-2);
+}
+details summary { cursor: pointer; color: var(--ink-2); margin: 12px 0 6px; }
+
+.chartcard { background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 14px 16px; position: relative; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+.legend .key { display: inline-block; width: 16px; height: 2px; vertical-align: middle; margin-right: 6px; }
+.legend .key.dash { background: none; border-top: 2px dashed var(--critical); height: 0; }
+.legend .key.tick { width: 3px; height: 10px; background: var(--critical); }
+svg text { font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+.tooltip {
+  position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--ring);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+  display: none; min-width: 170px; z-index: 5;
+}
+.tooltip .t { color: var(--muted); margin-bottom: 4px; }
+.tooltip .row { display: flex; align-items: center; gap: 8px; }
+.tooltip .row b { font-variant-numeric: tabular-nums; min-width: 64px; }
+.tooltip .row .k { width: 12px; height: 2px; }
+.tooltip .row span { color: var(--ink-2); }
+
+.peers { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.peer a { color: var(--ink); }
+.err { color: var(--critical); }
+.empty { color: var(--muted); padding: 24px; text-align: center; background: var(--surface); border: 1px dashed var(--axis); border-radius: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="title">Line Health</h1>
+    <div class="sub" id="subtitle">loading…</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="controls">
+    <label class="chk">Day <select id="day"></select></label>
+    <label class="chk"><input type="checkbox" id="auto" checked> Auto-refresh 30 s</label>
+    <button id="refresh">Refresh</button>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="latency">Latency</button>
+  <button data-tab="outages">Outages</button>
+  <button data-tab="logs">Logs</button>
+  <button data-tab="problems">Network problems</button>
+  <button data-tab="lines">All lines</button>
+</nav>
+
+<main>
+  <!-- ============================== OVERVIEW -->
+  <section id="overview" class="active">
+    <div class="tiles" id="tiles"></div>
+    <h2>Today so far</h2>
+    <div id="todayTable"></div>
+    <details>
+      <summary>MES service status file (as written by the service)</summary>
+      <pre class="raw" id="mesRaw"></pre>
+    </details>
+    <p class="hint">
+      What to do: if <b>MES server</b> is DOWN on every line at the same time, the problem is the MES server or the
+      network to it. If it is DOWN on one line only, check that PC's network. If the network is OK but the
+      <b>MES data service</b> shows a large "Waiting to send", check the MES service log on the Logs tab.
+    </p>
+  </section>
+
+  <!-- ============================== LATENCY -->
+  <section id="latency">
+    <div class="toolbar">
+      <label class="chk">Check
+        <select id="latCheck">
+          <option value="PING">Ping (network)</option>
+          <option value="TCP">TCP connect (service)</option>
+        </select>
+      </label>
+      <label class="chk">Show
+        <select id="latMetric">
+          <option value="avg_ms">Average per minute</option>
+          <option value="max_ms">Worst per minute</option>
+        </select>
+      </label>
+      <button id="latTableBtn">Show as table</button>
+    </div>
+    <div class="chartcard" id="latCard">
+      <div class="legend" id="latLegend"></div>
+      <div id="latChart"></div>
+      <div class="tooltip" id="latTip"></div>
+    </div>
+    <div id="latTable" style="display:none; margin-top:12px"></div>
+    <p class="hint">One point per minute. Red ticks under the chart mark minutes with at least one failed check.</p>
+  </section>
+
+  <!-- ============================== OUTAGES -->
+  <section id="outages">
+    <p class="hint">Periods where a link was DOWN (3+ failures in a row), the MES service lost the PLC, or the MES service was stopped.</p>
+    <div id="outageTable"></div>
+  </section>
+
+  <!-- ============================== LOGS -->
+  <section id="logs">
+    <div class="toolbar">
+      <label class="chk">Log
+        <select id="logSrc">
+          <option value="net">Network health check</option>
+          <option value="mes">MES data service</option>
+        </select>
+      </label>
+      <input type="search" id="logSearch" placeholder="Search text, QR code…" size="30">
+      <span class="hint" id="logCount"></span>
+      <span class="spacer" style="flex:1"></span>
+      <a id="logDownload" href="#">Download this log</a>
+    </div>
+    <div class="kindchips" id="logKinds"></div>
+    <div class="tablewrap" id="logTable"></div>
+  </section>
+
+  <!-- ============================== PROBLEMS -->
+  <section id="problems">
+    <div class="toolbar">
+      <span class="hint" id="probCount"></span>
+      <span class="spacer" style="flex:1"></span>
+      <a id="probDownload" href="#">Download CSV</a>
+    </div>
+    <h2>By hour</h2>
+    <div class="tablewrap" id="probHourly" style="max-height:35vh"></div>
+    <h2>Latest failed / slow checks</h2>
+    <div class="tablewrap" id="probRecent"></div>
+  </section>
+
+  <!-- ============================== ALL LINES -->
+  <section id="lines">
+    <p class="hint">Status of every line's PC. Lines are added in <code>PEERS</code> at the top of healthDashboard.js on this PC.</p>
+    <div class="peers" id="peerGrid"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ------------------------------------------------------------------ helpers
+const $ = (id) => document.getElementById(id);
+
+// Build DOM safely: text always goes through textContent.
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.appendChild(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+function badge(level, text) {
+  return h("span", { class: "badge " + level }, h("span", { class: "dot" }), text);
+}
+
+function table(cols, rows, empty) {
+  if (!rows.length) return h("div", { class: "empty" }, empty || "Nothing recorded.");
+  return h("table", {},
+    h("thead", {}, h("tr", {}, cols.map((c) => h("th", {}, c.label)))),
+    h("tbody", {}, rows.map((r) => h("tr", {}, cols.map((c) => {
+      const v = c.render ? c.render(r) : r[c.key];
+      return h("td", { class: c.cls }, v == null ? "" : v);
+    })))));
+}
+
+function fill(id, node) { const el = $(id); el.replaceChildren(node); }
+
+async function getJson(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(url + " -> HTTP " + r.status);
+  return r.json();
+}
+
+function ago(sec) {
+  if (sec == null) return "never";
+  if (sec < 60) return sec + " s ago";
+  if (sec < 3600) return Math.floor(sec / 60) + " min ago";
+  return Math.floor(sec / 3600) + " h " + Math.floor((sec % 3600) / 60) + " min ago";
+}
+
+function fmtDur(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + " s";
+  if (s < 3600) return Math.floor(s / 60) + " min " + (s % 60) + " s";
+  return Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min";
+}
+
+const parseTs = (ts) => new Date(ts.replace(" ", "T"));
+
+const STATE_LEVEL = { OK: "ok", SLOW: "warn", FAILING: "warn", DOWN: "bad", WAITING: "idle" };
+
+// ------------------------------------------------------------------ state
+let day = null;
+let currentTab = "overview";
+let logFilter = { src: "net", kind: null, q: "" };
+let logData = null;
+let latData = null;
+let showLatTable = false;
+
+// ------------------------------------------------------------------ overview
+function mesLevel(m, ageSec) {
+  if (!m) return ["bad", "No status file"];
+  if (ageSec != null && ageSec > 120) return ["bad", "NOT RUNNING (status " + ago(ageSec) + ")"];
+  const o = (m.OVERALL || "").toUpperCase();
+  if (o === "OK") return ["ok", "OK"];
+  if (o === "WARNING") return ["warn", "WARNING"];
+  return ["bad", o || "UNKNOWN"];
+}
+
+function linkTile(name, mons, netAge) {
+  const stale = netAge == null || netAge > 60;
+  const worst = mons.reduce((w, m) => {
+    const order = ["OK", "WAITING", "SLOW", "FAILING", "DOWN"];
+    return order.indexOf(m.state) > order.indexOf(w) ? m.state : w;
+  }, "OK");
+  const level = stale ? "idle" : STATE_LEVEL[worst] || "idle";
+  const label = stale ? "Health check not running" : worst;
+  const host = mons[0] ? mons[0].host : "";
+  return h("div", { class: "tile" },
+    h("h3", {}, "Network to " + name),
+    h("div", { class: "big" }, badge(level, label)),
+    h("dl", {},
+      h("dt", {}, "Address"), h("dd", {}, host),
+      mons.map((m) => [
+        h("dt", {}, m.check === "PING" ? "Ping" : "TCP :" + m.port),
+        h("dd", {}, m.state === "OK" || m.state === "SLOW"
+          ? m.lastMs + " ms" + (m.state === "SLOW" ? "  (over limit)" : "")
+          : (m.lastError || m.state) + (m.downSince ? "  — since " + new Date(m.downSince).toLocaleTimeString("en-GB") : "")),
+      ])));
+}
+
+function renderOverview(s) {
+  $("title").textContent = (s.line || "Line") + " — Health";
+  $("subtitle").textContent = "PC " + s.pc + "  ·  updated " + new Date().toLocaleTimeString("en-GB");
+  document.title = s.line + " health";
+
+  const tiles = [];
+  const mons = (s.net && s.net.monitors) || [];
+  const targets = [...new Set(mons.map((m) => m.target))];
+
+  if (!s.net) {
+    tiles.push(h("div", { class: "tile" }, h("h3", {}, "Network health check"),
+      h("div", { class: "big" }, badge("bad", "No data")),
+      h("p", { class: "hint" }, "netHealthCheck.js is not running on this PC, or has never run.")));
+  } else {
+    for (const t of targets) tiles.push(linkTile(t, mons.filter((m) => m.target === t), s.netAgeSec));
+  }
+
+  const [lvl, txt] = mesLevel(s.mes, s.mesAgeSec);
+  const m = s.mes || {};
+  tiles.push(h("div", { class: "tile" },
+    h("h3", {}, "MES data service"),
+    h("div", { class: "big" }, badge(lvl, txt)),
+    h("dl", {},
+      h("dt", {}, "Detail"), h("dd", {}, m.Detail || "-"),
+      h("dt", {}, "Machine (OPC UA)"), h("dd", {}, m["Machine (OPC UA)"] || "-"),
+      h("dt", {}, "Waiting to send"), h("dd", {}, m["Waiting to send"] || "-"),
+      h("dt", {}, "Last cell read"), h("dd", {}, m["Last cell read"] || "-"),
+      h("dt", {}, "Last sent to MES"), h("dd", {}, m["Last sent to MES"] || "-"),
+      h("dt", {}, "Last error"), h("dd", {}, m["Last error"] || "-"),
+      h("dt", {}, "Status file"), h("dd", {}, ago(s.mesAgeSec)))));
+
+  tiles.push(h("div", { class: "tile" },
+    h("h3", {}, "Health check itself"),
+    h("div", { class: "big" }, badge(s.netAgeSec != null && s.netAgeSec < 60 ? "ok" : "bad",
+      s.netAgeSec != null && s.netAgeSec < 60 ? "Running" : "Stopped")),
+    h("dl", {},
+      h("dt", {}, "Last check"), h("dd", {}, ago(s.netAgeSec)),
+      h("dt", {}, "Slow limit"), h("dd", {}, s.net ? s.net.slowLimitMs + " ms" : "-"),
+      h("dt", {}, "Timeout"), h("dd", {}, s.net ? s.net.timeoutMs + " ms" : "-"))));
+
+  $("tiles").replaceChildren(...tiles);
+
+  fill("todayTable", table([
+    { label: "Target", key: "target" },
+    { label: "Check", render: (r) => r.check === "TCP" ? "TCP :" + r.port : "Ping" },
+    { label: "State", render: (r) => badge(STATE_LEVEL[r.state] || "idle", r.state) },
+    { label: "Checks", render: (r) => r.today.checks },
+    { label: "Failed", render: (r) => r.today.failed },
+    { label: "Slow", render: (r) => r.today.slow },
+  ], mons, "No network health data yet."));
+
+  $("mesRaw").textContent = s.mesRaw || "(SERVICE_STATUS.txt not found)";
+}
+
+// ------------------------------------------------------------------ latency chart
+const SERIES_VAR = ["--series-1", "--series-2"];
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function renderLatency() {
+  if (!latData) return;
+  const check = $("latCheck").value;
+  const metric = $("latMetric").value;
+  const rows = latData.rows.filter((r) => r.check === check);
+  const targets = [...new Set(rows.map((r) => r.target))];
+  const limit = (window.__summary && window.__summary.net && window.__summary.net.slowLimitMs) || 10;
+
+  // Legend: always present for >= 2 series; also explains threshold + fail ticks.
+  const legend = targets.map((t, i) =>
+    h("span", {}, h("span", { class: "key", style: "background:var(" + SERIES_VAR[i % 2] + ")" }), t));
+  legend.push(h("span", {}, h("span", { class: "key dash" }), limit + " ms limit"));
+  legend.push(h("span", {}, h("span", { class: "key tick" }), "minute with a failure"));
+  fill("latLegend", h("div", { class: "legend" }, legend));
+
+  // Minute index 0..1439
+  const minuteOf = (r) => { const [hh, mm] = r.minute.slice(11, 16).split(":"); return +hh * 60 + +mm; };
+  const series = targets.map((t) => rows.filter((r) => r.target === t)
+    .map((r) => ({ x: minuteOf(r), y: r[metric] === "" ? null : +r[metric], failed: +r.failed, checks: +r.checks, r })));
+
+  const chartEl = $("latChart");
+  if (!rows.length) {
+    chartEl.replaceChildren(h("div", { class: "empty" }, "No latency data for this day. (Written once per minute by netHealthCheck.js.)"));
+    $("latTable").replaceChildren();
+    return;
+  }
+
+  const W = Math.max(600, chartEl.clientWidth || 900), H = 320;
+  const m = { l: 48, r: 16, t: 10, b: 46 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+
+  const xs = series.flat().map((p) => p.x);
+  let x0 = Math.min(...xs), x1 = Math.max(...xs);
+  if (x1 - x0 < 30) { x1 = x0 + 30; }
+  const ys = series.flat().map((p) => p.y).filter((v) => v != null);
+  const yMax = Math.max(limit * 1.5, ...ys) * 1.08;
+
+  const X = (x) => m.l + ((x - x0) / (x1 - x0)) * pw;
+  const Y = (y) => m.t + ph - (y / yMax) * ph;
+
+  const NS = "http://www.w3.org/2000/svg";
+  const s = (tag, attrs) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img", "aria-label": "Latency per minute" });
+
+  // y grid + ticks
+  const step = niceStep(yMax / 5);
+  for (let v = 0; v <= yMax; v += step) {
+    svg.appendChild(s("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: cssVar("--grid"), "stroke-width": 1 }));
+    const t = s("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }); t.textContent = fmtNum(v); svg.appendChild(t);
+  }
+  const yl = s("text", { x: 4, y: m.t + 8 }); yl.textContent = "ms"; svg.appendChild(yl);
+
+  // x ticks every hour (or 15 min for short spans)
+  const span = x1 - x0, xStep = span > 360 ? 60 : span > 120 ? 30 : 15;
+  for (let v = Math.ceil(x0 / xStep) * xStep; v <= x1; v += xStep) {
+    const t = s("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" });
+    t.textContent = String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
+    svg.appendChild(t);
+  }
+  svg.appendChild(s("line", { x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0), stroke: cssVar("--axis"), "stroke-width": 1 }));
+
+  // threshold
+  svg.appendChild(s("line", { x1: m.l, x2: W - m.r, y1: Y(limit), y2: Y(limit), stroke: cssVar("--critical"), "stroke-width": 1.5, "stroke-dasharray": "5 4" }));
+
+  // series lines (gaps where a minute had no successful sample)
+  series.forEach((pts, i) => {
+    let d = "", pen = false;
+    for (const p of pts) {
+      if (p.y == null) { pen = false; continue; }
+      d += (pen ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p.y).toFixed(1);
+      pen = true;
+    }
+    svg.appendChild(s("path", { d, fill: "none", stroke: cssVar(SERIES_VAR[i % 2]), "stroke-width": 2, "stroke-linejoin": "round" }));
+  });
+
+  // failure ticks, one row per series under the axis
+  series.forEach((pts, i) => {
+    for (const p of pts) if (p.failed > 0) {
+      svg.appendChild(s("rect", { x: X(p.x) - 1.5, y: H - m.b + 22 + i * 9, width: 3, height: 7, fill: cssVar("--critical"), rx: 1 }));
+    }
+  });
+
+  // crosshair + hover
+  const cross = s("line", { y1: m.t, y2: m.t + ph, stroke: cssVar("--axis"), "stroke-width": 1, visibility: "hidden" });
+  svg.appendChild(cross);
+  const dots = series.map((_, i) => { const c = s("circle", { r: 4, fill: cssVar(SERIES_VAR[i % 2]), stroke: cssVar("--surface"), "stroke-width": 2, visibility: "hidden" }); svg.appendChild(c); return c; });
+  const hit = s("rect", { x: m.l, y: m.t, width: pw, height: ph + 40, fill: "transparent" });
+  svg.appendChild(hit);
+
+  const tip = $("latTip");
+  const card = $("latCard");
+  hit.addEventListener("pointermove", (ev) => {
+    const box = svg.getBoundingClientRect();
+    const px = (ev.clientX - box.left) * (W / box.width);
+    const xm = Math.round(x0 + ((px - m.l) / pw) * (x1 - x0));
+    cross.setAttribute("x1", X(xm)); cross.setAttribute("x2", X(xm)); cross.setAttribute("visibility", "visible");
+    tip.replaceChildren(h("div", { class: "t" },
+      String(Math.floor(xm / 60)).padStart(2, "0") + ":" + String(xm % 60).padStart(2, "0") + "  ·  " + check));
+    series.forEach((pts, i) => {
+      const p = nearest(pts, xm);
+      const ok = p && Math.abs(p.x - xm) <= 2;
+      if (ok && p.y != null) { dots[i].setAttribute("cx", X(p.x)); dots[i].setAttribute("cy", Y(p.y)); dots[i].setAttribute("visibility", "visible"); }
+      else dots[i].setAttribute("visibility", "hidden");
+      tip.appendChild(h("div", { class: "row" },
+        h("span", { class: "k", style: "background:var(" + SERIES_VAR[i % 2] + ")" }),
+        h("b", {}, ok ? (p.y == null ? "no reply" : fmtNum(p.y) + " ms") : "–"),
+        h("span", {}, targets[i] + (ok && p.failed ? "  · " + p.failed + "/" + p.checks + " failed" : ""))));
+    });
+    tip.style.display = "block";
+    const cb = card.getBoundingClientRect();
+    let left = ev.clientX - cb.left + 14;
+    if (left + 220 > cb.width) left = ev.clientX - cb.left - 220;
+    tip.style.left = left + "px";
+    tip.style.top = (ev.clientY - cb.top + 10) + "px";
+  });
+  hit.addEventListener("pointerleave", () => {
+    tip.style.display = "none"; cross.setAttribute("visibility", "hidden");
+    dots.forEach((d) => d.setAttribute("visibility", "hidden"));
+  });
+
+  chartEl.replaceChildren(svg);
+
+  // table view
+  const tbl = $("latTable");
+  tbl.style.display = showLatTable ? "block" : "none";
+  if (showLatTable) {
+    tbl.replaceChildren(h("div", { class: "tablewrap" }, table([
+      { label: "Minute", render: (r) => r.minute.slice(11) },
+      { label: "Target", key: "target" },
+      { label: "Checks", key: "checks" },
+      { label: "Failed", key: "failed" },
+      { label: "Slow", key: "slow" },
+      { label: "Min ms", key: "min_ms" },
+      { label: "Avg ms", key: "avg_ms" },
+      { label: "Max ms", key: "max_ms" },
+    ], rows.slice().reverse())));
+  }
+}
+
+function nearest(pts, x) {
+  let best = null;
+  for (const p of pts) if (!best || Math.abs(p.x - x) < Math.abs(best.x - x)) best = p;
+  return best;
+}
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+}
+function fmtNum(v) { return v >= 10 ? String(Math.round(v)) : String(Math.round(v * 10) / 10); }
+
+// ------------------------------------------------------------------ outages
+function renderOutages(d) {
+  const now = new Date();
+  fill("outageTable", table([
+    { label: "What", key: "what" },
+    { label: "Started", render: (r) => r.start.slice(11, 19) },
+    { label: "Ended", render: (r) => r.end ? r.end.slice(11, 19) : badge("bad", "still ongoing") },
+    { label: "Duration", render: (r) => fmtDur((r.end ? parseTs(r.end) : now) - parseTs(r.start)) },
+    { label: "Detail", key: "startDetail", cls: "detail" },
+  ], d.rows, "No outages recorded on this day."));
+}
+
+// ------------------------------------------------------------------ logs
+const KIND_LEVEL = {
+  DOWN: "bad", FAIL: "warn", SLOW: "warn", "SLOW-END": "idle", RECOVERED: "ok", OK: "ok", CRASH: "bad", ERROR: "bad",
+  OPCUA_LOST: "bad", OPCUA_RECONNECTED: "ok", OPCUA_CONNECTED: "ok", DB_ERROR: "bad", UNCLEAN_SHUTDOWN: "bad",
+  START_FAILED: "bad", SUBSCRIPTION_TERMINATED: "bad", STATUS_FILE_ALTERED: "warn", PURGE_ERROR: "bad",
+};
+
+function renderLogs() {
+  if (!logData) return;
+  const q = logFilter.q.toLowerCase();
+  const rows = logData.rows.filter((r) =>
+    (!logFilter.kind || r.kind === logFilter.kind) &&
+    (!q || (r.kind + " " + r.detail + " " + r.ts).toLowerCase().includes(q)));
+
+  const kinds = Object.entries(logData.kinds).sort((a, b) => b[1] - a[1]);
+  fill("logKinds", h("div", { class: "kindchips" },
+    h("button", { class: logFilter.kind ? "" : "on", onclick: () => { logFilter.kind = null; renderLogs(); } }, "All (" + logData.total + ")"),
+    kinds.map(([k, n]) => h("button", {
+      class: logFilter.kind === k ? "on" : "",
+      onclick: () => { logFilter.kind = logFilter.kind === k ? null : k; renderLogs(); },
+    }, k + " (" + n + ")"))));
+
+  $("logCount").textContent = rows.length + " shown" +
+    (logData.total > logData.rows.length ? " (newest " + logData.rows.length + " of " + logData.total + " lines — download for all)" : "");
+  $("logDownload").href = "/download?src=" + logData.src + "&name=" +
+    encodeURIComponent((logData.src === "net" ? "health-" : "service-") + logData.day + ".log");
+
+  fill("logTable", table([
+    { label: "Time", render: (r) => r.ts.slice(11) },
+    { label: "Event", render: (r) => KIND_LEVEL[r.kind] ? badge(KIND_LEVEL[r.kind], r.kind) : r.kind },
+    { label: "Detail", key: "detail", cls: "detail" },
+  ], rows.slice(0, 2000), "No log lines for this day / filter."));
+}
+
+// ------------------------------------------------------------------ problems
+function renderProblems(d) {
+  $("probCount").textContent = d.total + " failed or slow checks on " + d.day;
+  $("probDownload").href = "/download?src=net&name=" + encodeURIComponent("problems-" + d.day + ".csv");
+  fill("probHourly", table([
+    { label: "Hour", key: "hour" },
+    { label: "Target", key: "target" },
+    { label: "Check", key: "check" },
+    { label: "Result", render: (r) => badge(r.result === "FAIL" ? "bad" : "warn", r.result) },
+    { label: "Count", key: "count" },
+    { label: "Worst ms", render: (r) => r.worst_ms == null ? "" : r.worst_ms },
+  ], d.hourly, "No failed or slow checks on this day."));
+  fill("probRecent", table([
+    { label: "Time", render: (r) => (r.timestamp || "").slice(11) },
+    { label: "Target", key: "target" },
+    { label: "Address", key: "host" },
+    { label: "Check", key: "check" },
+    { label: "Result", render: (r) => badge(r.result === "FAIL" ? "bad" : "warn", r.result) },
+    { label: "ms", key: "latency_ms" },
+    { label: "Detail", key: "detail", cls: "detail" },
+  ], d.recent, "Nothing recorded."));
+}
+
+// ------------------------------------------------------------------ all lines
+async function renderPeers(self) {
+  const list = [{ name: self.line + " (this PC)", url: "" }].concat(self.peers || []);
+  const cards = list.map((p) => {
+    const card = h("div", { class: "tile peer" }, h("h3", {}, p.name), h("div", { class: "hint" }, "loading…"));
+    (async () => {
+      try {
+        const s = p.url ? await getJson(p.url.replace(/\/$/, "") + "/api/summary") : self;
+        const mons = (s.net && s.net.monitors) || [];
+        const netStale = s.netAgeSec == null || s.netAgeSec > 60;
+        const [lvl, txt] = mesLevel(s.mes, s.mesAgeSec);
+        card.replaceChildren(
+          h("h3", {}, p.url ? h("a", { href: p.url, target: "_blank" }, p.name) : p.name),
+          h("dl", {},
+            [...new Set(mons.map((m) => m.target))].map((t) => {
+              const ms = mons.filter((m) => m.target === t);
+              const order = ["OK", "WAITING", "SLOW", "FAILING", "DOWN"];
+              const worst = ms.reduce((w, m) => order.indexOf(m.state) > order.indexOf(w) ? m.state : w, "OK");
+              const ping = ms.find((m) => m.check === "PING");
+              return [h("dt", {}, t), h("dd", {},
+                netStale ? badge("idle", "no data") : badge(STATE_LEVEL[worst], worst),
+                ping && ping.lastMs != null ? "  " + ping.lastMs + " ms" : "")];
+            }),
+            h("dt", {}, "MES service"), h("dd", {}, badge(lvl, txt)),
+            h("dt", {}, "Waiting to send"), h("dd", {}, (s.mes && s.mes["Waiting to send"]) || "-"),
+            h("dt", {}, "Last sent"), h("dd", {}, (s.mes && s.mes["Last sent to MES"]) || "-"),
+            h("dt", {}, "PC"), h("dd", {}, s.pc)));
+      } catch (err) {
+        card.replaceChildren(h("h3", {}, p.name), badge("bad", "Dashboard unreachable"),
+          h("div", { class: "hint" }, p.url + " — " + err.message));
+      }
+    })();
+    return card;
+  });
+  $("peerGrid").replaceChildren(...cards);
+}
+
+// ------------------------------------------------------------------ loading
+async function loadDays() {
+  const { days } = await getJson("/api/days");
+  const sel = $("day");
+  const keep = sel.value;
+  sel.replaceChildren(...days.map((d, i) => h("option", { value: d }, i === 0 ? d + " (today)" : d)));
+  sel.value = days.includes(keep) ? keep : days[0];
+  day = sel.value;
+}
+
+async function refresh() {
+  try {
+    const s = await getJson("/api/summary");
+    window.__summary = s;
+    renderOverview(s);
+    const q = "?day=" + day;
+    if (currentTab === "latency") { latData = await getJson("/api/latency" + q); renderLatency(); }
+    if (currentTab === "outages") renderOutages(await getJson("/api/outages" + q));
+    if (currentTab === "logs") { logData = await getJson("/api/events" + q + "&src=" + logFilter.src); renderLogs(); }
+    if (currentTab === "problems") renderProblems(await getJson("/api/problems" + q));
+    if (currentTab === "lines") renderPeers(s);
+  } catch (err) {
+    $("subtitle").replaceChildren(h("span", { class: "err" }, "Cannot reach the dashboard server: " + err.message));
+  }
+}
+
+$("tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-tab]");
+  if (!b) return;
+  currentTab = b.dataset.tab;
+  document.querySelectorAll("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll("main section").forEach((s) => s.classList.toggle("active", s.id === currentTab));
+  refresh();
+});
+$("day").addEventListener("change", () => { day = $("day").value; refresh(); });
+$("refresh").addEventListener("click", async () => { await loadDays(); refresh(); });
+$("latCheck").addEventListener("change", renderLatency);
+$("latMetric").addEventListener("change", renderLatency);
+$("latTableBtn").addEventListener("click", () => {
+  showLatTable = !showLatTable;
+  $("latTableBtn").textContent = showLatTable ? "Hide table" : "Show as table";
+  renderLatency();
+});
+$("logSrc").addEventListener("change", () => { logFilter.src = $("logSrc").value; logFilter.kind = null; refresh(); });
+$("logSearch").addEventListener("input", () => { logFilter.q = $("logSearch").value; renderLogs(); });
+window.addEventListener("resize", () => { if (currentTab === "latency") renderLatency(); });
+
+setInterval(() => {
+  // Only auto-refresh while looking at today; past days don't change.
+  if ($("auto").checked && $("day").selectedIndex === 0) refresh();
+}, 30000);
+
+(async () => { await loadDays(); refresh(); })();
+</script>
+</body>
+</html>
