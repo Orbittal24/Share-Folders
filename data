@@ -1,3 +1,491 @@
+// ===========================================================================
+// NETWORK HEALTH CHECK  (standalone -- no npm packages needed)
+//
+// Runs alongside mesCellDataService.js and watches the links it depends on:
+//
+//   PING  ICMP round-trip to each host       -> pure network health
+//   TCP   connect to each host:port           -> is the service accepting?
+//
+// What gets logged:
+//   - every failure (timeout, refused, unreachable)
+//   - every check slower than LATENCY_WARN_MS (default 10 ms)
+//   - DOWN / RECOVERED transitions with outage duration
+//   - a summary per target every SUMMARY_MIN minutes (min/avg/p95/max)
+//
+// Files (one per day, readable in Notepad / Excel):
+//   logs\health-YYYY-MM-DD.log       events, outages, summaries
+//   logs\problems-YYYY-MM-DD.csv     one row per failed or slow check
+//   logs\latency-YYYY-MM-DD.csv      per-minute min/avg/max per target (for charts)
+//   HEALTH_STATUS.txt                current state, rewritten every few seconds
+//   HEALTH_STATUS.json               same, for the dashboard (healthDashboard.js)
+//
+// Every line carries the PC name, so logs from all 5 systems can be merged
+// and compared to see whether a problem hit one line or all of them.
+//
+// Run:     node netHealthCheck.js
+// Report:  node netHealthCheck.js --report            (today)
+//          node netHealthCheck.js --report 2026-11-19
+// ===========================================================================
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const net = require("net");
+const path = require("path");
+const { execFile } = require("child_process");
+
+// ===========================================================================
+// CONFIG
+// ===========================================================================
+const TARGETS = [
+    { name: "MES server", host: "10.9.4.28",     port: 9814 },
+    { name: "PLC",        host: "192.168.250.1", port: 4840 },
+];
+
+const LATENCY_WARN_MS = 10;       // slower than this = logged as SLOW
+const TIMEOUT_MS = 2000;          // no answer within this = FAIL
+
+const PING_INTERVAL_MS = 2000;    // ICMP is cheap -- check often
+const TCP_INTERVAL_MS = 10000;    // TCP opens a real connection on the server;
+                                  // keep this gentle (5 PCs x every 10 s)
+
+const DOWN_AFTER_FAILS = 3;       // consecutive failures before declaring DOWN
+const SUMMARY_MIN = 15;
+const STATUS_EVERY_MS = 5000;
+
+const BASE_DIR = "C:\\Software_Tools\\new_OCV\\NetHealth";
+const LOG_DIR = path.join(BASE_DIR, "logs");
+const STATUS_FILE = path.join(BASE_DIR, "HEALTH_STATUS.txt");
+const STATUS_JSON = path.join(BASE_DIR, "HEALTH_STATUS.json");
+const LOG_RETENTION_DAYS = 90;
+
+const PC = os.hostname();
+
+// ===========================================================================
+// LOGGING
+// ===========================================================================
+fs.mkdirSync(LOG_DIR, { recursive: true });
+
+const p2 = (n) => String(n).padStart(2, "0");
+const p3 = (n) => String(n).padStart(3, "0");
+
+function dayOf(d) {
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
+
+function stampOf(d) {
+    return `${dayOf(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}.${p3(d.getMilliseconds())}`;
+}
+
+function logLine(kind, detail) {
+    const d = new Date();
+    const line = `${stampOf(d)}  ${PC}  ${String(kind).padEnd(10)}  ${detail}`;
+    console.log(line);
+    try {
+        fs.appendFileSync(path.join(LOG_DIR, `health-${dayOf(d)}.log`), line + "\r\n", "utf8");
+    } catch (err) {
+        console.error("[log] write failed:", err.message);
+    }
+}
+
+function csvField(v) {
+    const s = v == null ? "" : String(v);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function logProblem(target, check, result, ms, detail) {
+    const d = new Date();
+    const file = path.join(LOG_DIR, `problems-${dayOf(d)}.csv`);
+    try {
+        if (!fs.existsSync(file)) {
+            fs.writeFileSync(file, "timestamp,pc,target,host,check,result,latency_ms,detail\r\n", "utf8");
+        }
+        fs.appendFileSync(file, [
+            stampOf(d), PC, target.name, target.host + (check === "TCP" ? ":" + target.port : ""),
+            check, result, ms == null ? "" : ms, detail || "",
+        ].map(csvField).join(",") + "\r\n", "utf8");
+    } catch (err) {
+        console.error("[csv] write failed:", err.message);
+    }
+}
+
+function cleanOldLogs() {
+    try {
+        const cutoff = Date.now() - LOG_RETENTION_DAYS * 86400000;
+        for (const f of fs.readdirSync(LOG_DIR)) {
+            const full = path.join(LOG_DIR, f);
+            if (fs.statSync(full).mtimeMs < cutoff) fs.unlinkSync(full);
+        }
+    } catch (_) { /* best effort */ }
+}
+
+// ===========================================================================
+// CHECKS  -- each resolves { ok, ms, detail }, never rejects
+// ===========================================================================
+function checkTcp(host, port) {
+    return new Promise((resolve) => {
+        const t0 = process.hrtime.bigint();
+        const sock = new net.Socket();
+        let done = false;
+
+        const finish = (ok, detail) => {
+            if (done) return;
+            done = true;
+            const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+            sock.destroy();
+            resolve({ ok, ms: Math.round(ms * 10) / 10, detail });
+        };
+
+        sock.setTimeout(TIMEOUT_MS);
+        sock.once("connect", () => finish(true, ""));
+        sock.once("timeout", () => finish(false, `no answer within ${TIMEOUT_MS} ms`));
+        sock.once("error", (err) => finish(false, err.code || err.message));
+        sock.connect(port, host);
+    });
+}
+
+const PING_EXE = process.platform === "win32"
+    ? path.join(process.env.SystemRoot || process.env.windir || "C:\\Windows", "System32", "PING.EXE")
+    : "ping";
+let pingRawLogged = 0;
+
+function checkPing(host) {
+    return new Promise((resolve) => {
+        const win = process.platform === "win32";
+        const args = win
+            ? ["-n", "1", "-w", String(TIMEOUT_MS), host]
+            : ["-c", "1", "-W", String(Math.ceil(TIMEOUT_MS / 1000)), host];
+
+        const t0 = Date.now();
+
+        // Full path: a Windows service (NSSM / LocalSystem) does not always
+        // have the same PATH as a logged-in user, so plain "ping" can fail
+        // to start (ENOENT) even though it works from a command prompt.
+        execFile(PING_EXE, args, { timeout: TIMEOUT_MS + 2000, windowsHide: true }, (err, stdout, stderr) => {
+            const out = String(stdout || "");
+
+            // A real echo reply always contains "TTL=" in every Windows
+            // language ("Destination host unreachable" has exit code 0 but
+            // no TTL). The word "time" is translated on non-English system
+            // accounts ("Zeit=", "temps=" ...), so do not depend on it --
+            // take the first "=N ms" / "<N ms" on the reply line instead.
+            const replyLine = out.split(/\r?\n/).find((l) => /ttl=/i.test(l));
+            if (replyLine) {
+                const m = replyLine.match(/([=<])\s*(\d+(?:[.,]\d+)?)\s*ms/i);
+                let ms;
+                if (m) ms = m[1] === "<" ? 0.5 : parseFloat(m[2].replace(",", "."));
+                else ms = Date.now() - t0;                    // fallback: wall time
+                return resolve({ ok: true, ms, detail: "" });
+            }
+
+            let detail = "no reply";
+            if (err && err.code === "ENOENT") detail = `ping.exe not found (${PING_EXE})`;
+            else if (err && err.killed) detail = "ping did not finish";
+            else if (/unreachable/i.test(out)) detail = "destination unreachable";
+            else if (/timed out|100% packet loss|100% loss/i.test(out)) detail = "request timed out";
+            else if (/could not find host|unknown host/i.test(out)) detail = "unknown host";
+            else if (err && err.code && typeof err.code === "string") detail = `ping failed to start: ${err.code}`;
+
+            // Log the raw ping output the first few times it is not understood,
+            // so the real cause is visible in health-YYYY-MM-DD.log.
+            if (detail === "no reply" || detail.startsWith("ping failed")) {
+                if (pingRawLogged < 5) {
+                    pingRawLogged++;
+                    const raw = (out + " " + String(stderr || "")).replace(/\s+/g, " ").trim().slice(0, 300);
+                    logLine("PING-RAW", `${host}: exit=${err ? err.code : 0} output="${raw}"`);
+                }
+            }
+
+            resolve({ ok: false, ms: Date.now() - t0, detail });
+        });
+    });
+}
+
+// ===========================================================================
+// STATE per target+check
+// ===========================================================================
+function newStat() {
+    return { n: 0, fails: 0, slow: 0, samples: [] };
+}
+
+const monitors = [];
+
+for (const t of TARGETS) {
+    for (const check of ["PING", "TCP"]) {
+        monitors.push({
+            target: t,
+            check,
+            label: `${t.name} ${check}${check === "TCP" ? " " + t.host + ":" + t.port : " " + t.host}`,
+            busy: false,
+            failStreak: 0,
+            firstFailAt: null,
+            down: false,
+            downSince: null,
+            slowStreak: 0,
+            slowMax: 0,
+            last: null,
+            lastOkAt: null,
+            stat: newStat(),
+            today: newStat(),
+            minute: newStat(),
+        });
+    }
+}
+
+function record(mon, res) {
+    const now = new Date();
+    mon.last = { at: now, ...res };
+
+    for (const s of [mon.stat, mon.today, mon.minute]) {
+        s.n++;
+        if (!res.ok) s.fails++;
+        else {
+            if (res.ms > LATENCY_WARN_MS) s.slow++;
+            if (s.samples.length < 20000) s.samples.push(res.ms);
+        }
+    }
+
+    if (!res.ok) {
+        mon.failStreak++;
+        logProblem(mon.target, mon.check, "FAIL", null, res.detail);
+
+        if (mon.failStreak === 1) {
+            mon.firstFailAt = now;
+            logLine("FAIL", `${mon.label}: ${res.detail}`);
+        }
+        if (!mon.down && mon.failStreak >= DOWN_AFTER_FAILS) {
+            mon.down = true;
+            mon.downSince = mon.firstFailAt || now;   // outage starts at the first failure
+            logLine("DOWN", `${mon.label}: ${mon.failStreak} failures in a row (${res.detail})`);
+        }
+        return;
+    }
+
+    // Success.
+    if (mon.down) {
+        const secs = ((now - mon.downSince) / 1000).toFixed(0);
+        logLine("RECOVERED", `${mon.label}: back after ~${secs}s (down since ${stampOf(mon.downSince)})`);
+    } else if (mon.failStreak > 0) {
+        logLine("OK", `${mon.label}: answered again after ${mon.failStreak} failure(s)`);
+    }
+    mon.down = false;
+    mon.downSince = null;
+    mon.failStreak = 0;
+    mon.lastOkAt = now;
+
+    if (res.ms > LATENCY_WARN_MS) {
+        logProblem(mon.target, mon.check, "SLOW", res.ms, `over ${LATENCY_WARN_MS} ms`);
+        if (mon.slowStreak === 0) {
+            logLine("SLOW", `${mon.label}: ${res.ms} ms (limit ${LATENCY_WARN_MS} ms)`);
+        }
+        mon.slowStreak++;
+        mon.slowMax = Math.max(mon.slowMax, res.ms);
+    } else if (mon.slowStreak > 0) {
+        if (mon.slowStreak > 1) {
+            logLine("SLOW-END", `${mon.label}: ${mon.slowStreak} slow checks in a row, worst ${mon.slowMax} ms`);
+        }
+        mon.slowStreak = 0;
+        mon.slowMax = 0;
+    }
+}
+
+async function run(mon) {
+    if (mon.busy) return;              // never overlap checks on one target
+    mon.busy = true;
+    try {
+        const res = mon.check === "TCP"
+            ? await checkTcp(mon.target.host, mon.target.port)
+            : await checkPing(mon.target.host);
+        record(mon, res);
+    } catch (err) {
+        logLine("ERROR", `${mon.label}: check crashed: ${err.message}`);
+    } finally {
+        mon.busy = false;
+    }
+}
+
+// ===========================================================================
+// SUMMARY + STATUS FILE
+// ===========================================================================
+function describe(s) {
+    if (s.n === 0) return "no checks";
+    const a = s.samples.slice().sort((x, y) => x - y);
+    const pct = (q) => a.length ? a[Math.min(a.length - 1, Math.floor(q * a.length))] : "-";
+    const avg = a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : "-";
+    return `checks ${s.n}, failed ${s.fails}, slow ${s.slow}` +
+        (a.length ? ` | min ${a[0]} avg ${avg} p95 ${pct(0.95)} max ${a[a.length - 1]} ms` : "");
+}
+
+// One CSV row per target per minute -- small enough to keep for 90 days and
+// enough to draw a latency chart for any day.
+function writeMinute() {
+    const d = new Date(Date.now() - 30000);            // the minute just finished
+    const minute = `${dayOf(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    const file = path.join(LOG_DIR, `latency-${dayOf(d)}.csv`);
+    try {
+        if (!fs.existsSync(file)) {
+            fs.writeFileSync(file, "minute,pc,target,check,checks,failed,slow,min_ms,avg_ms,max_ms\r\n", "utf8");
+        }
+        let out = "";
+        for (const m of monitors) {
+            const s = m.minute;
+            const a = s.samples;
+            const min = a.length ? Math.min(...a) : "";
+            const max = a.length ? Math.max(...a) : "";
+            const avg = a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) : "";
+            out += [minute, PC, m.target.name, m.check, s.n, s.fails, s.slow, min, avg, max]
+                .map(csvField).join(",") + "\r\n";
+            m.minute = newStat();
+        }
+        fs.appendFileSync(file, out, "utf8");
+    } catch (err) {
+        console.error("[latency] write failed:", err.message);
+    }
+}
+
+function writeSummary() {
+    for (const mon of monitors) {
+        logLine("SUMMARY", `${mon.label}: last ${SUMMARY_MIN} min -> ${describe(mon.stat)}`);
+        mon.stat = newStat();
+    }
+}
+
+function writeStatus() {
+    const lines = monitors.map((m) => {
+        const state = m.down ? "DOWN" : !m.last ? "waiting" : !m.last.ok ? "FAILING"
+            : m.last.ms > LATENCY_WARN_MS ? "SLOW" : "OK";
+        const lastTxt = !m.last ? "-" : m.last.ok ? `${m.last.ms} ms` : m.last.detail;
+        return `  ${m.label.padEnd(36)} ${state.padEnd(8)} last: ${lastTxt}\r\n` +
+               `  ${"".padEnd(36)} today: ${describe(m.today)}`;
+    });
+
+    const anyBad = monitors.some((m) => m.down);
+    const text =
+`==================================================
+     NETWORK HEALTH - ${PC}
+==================================================
+
+  OVERALL     : ${anyBad ? "PROBLEM - a link is DOWN" : "OK"}
+  Checked at  : ${stampOf(new Date())}
+  Slow limit  : ${LATENCY_WARN_MS} ms     Timeout: ${TIMEOUT_MS} ms
+
+${lines.join("\r\n\r\n")}
+
+  Logs: ${LOG_DIR}
+  If "Checked at" is more than 1 minute old, this
+  health check itself has stopped.
+==================================================
+`.replace(/\r?\n/g, "\r\n");
+
+    const json = {
+        pc: PC,
+        checkedAt: new Date().toISOString(),
+        slowLimitMs: LATENCY_WARN_MS,
+        timeoutMs: TIMEOUT_MS,
+        overall: anyBad ? "DOWN" : "OK",
+        monitors: monitors.map((m) => ({
+            target: m.target.name,
+            host: m.target.host,
+            port: m.target.port,
+            check: m.check,
+            state: m.down ? "DOWN" : !m.last ? "WAITING" : !m.last.ok ? "FAILING"
+                : m.last.ms > LATENCY_WARN_MS ? "SLOW" : "OK",
+            lastMs: m.last && m.last.ok ? m.last.ms : null,
+            lastError: m.last && !m.last.ok ? m.last.detail : null,
+            lastAt: m.last ? m.last.at.toISOString() : null,
+            downSince: m.downSince ? m.downSince.toISOString() : null,
+            today: { checks: m.today.n, failed: m.today.fails, slow: m.today.slow },
+        })),
+    };
+
+    try {
+        fs.writeFileSync(STATUS_FILE + ".tmp", text, "utf8");
+        fs.renameSync(STATUS_FILE + ".tmp", STATUS_FILE);
+        fs.writeFileSync(STATUS_JSON + ".tmp", JSON.stringify(json, null, 1), "utf8");
+        fs.renameSync(STATUS_JSON + ".tmp", STATUS_JSON);
+    } catch (err) {
+        console.error("[status] write failed:", err.message);
+    }
+}
+
+// ===========================================================================
+// REPORT MODE  -- summarise a day's problems CSV
+// ===========================================================================
+function report(day) {
+    const file = path.join(LOG_DIR, `problems-${day}.csv`);
+    if (!fs.existsSync(file)) {
+        console.log(`\n  No problems recorded on ${day} (${file} not found).\n`);
+        return;
+    }
+    const rows = fs.readFileSync(file, "utf8").trim().split(/\r?\n/).slice(1).map((l) => l.split(","));
+    const by = {};
+    for (const r of rows) {
+        const key = `${r[2]} ${r[4]}`.padEnd(20) + ` ${r[5]}`;
+        const b = by[key] || (by[key] = { n: 0, first: r[0], last: r[0], max: 0 });
+        b.n++;
+        b.last = r[0];
+        if (r[6]) b.max = Math.max(b.max, parseFloat(r[6]));
+    }
+    console.log(`\n  PROBLEMS on ${day} -- ${PC}\n`);
+    for (const [k, b] of Object.entries(by)) {
+        console.log(`  ${k.padEnd(26)} ${String(b.n).padStart(6)}   first ${b.first.slice(11)}   last ${b.last.slice(11)}` +
+            (b.max ? `   worst ${b.max} ms` : ""));
+    }
+    console.log(`\n  Detail: ${file}\n  Outages: ${path.join(LOG_DIR, `health-${day}.log`)} (search DOWN / RECOVERED)\n`);
+}
+
+// ===========================================================================
+// START
+// ===========================================================================
+if (process.argv[2] === "--report") {
+    report(process.argv[3] || dayOf(new Date()));
+    process.exit(0);
+}
+
+cleanOldLogs();
+logLine("START", `pid=${process.pid} slowLimit=${LATENCY_WARN_MS}ms timeout=${TIMEOUT_MS}ms ` +
+    `targets=${TARGETS.map((t) => `${t.host}:${t.port}`).join(", ")}`);
+
+for (const mon of monitors) {
+    const every = mon.check === "TCP" ? TCP_INTERVAL_MS : PING_INTERVAL_MS;
+    run(mon);
+    setInterval(() => run(mon), every);
+}
+
+let lastDay = dayOf(new Date());
+setInterval(() => {
+    writeStatus();
+    const d = dayOf(new Date());
+    if (d !== lastDay) {                 // new day: reset daily stats, prune
+        lastDay = d;
+        for (const m of monitors) m.today = newStat();
+        cleanOldLogs();
+    }
+}, STATUS_EVERY_MS);
+
+setInterval(writeSummary, SUMMARY_MIN * 60000);
+
+// Align per-minute rows to the clock minute.
+setTimeout(() => {
+    writeMinute();
+    setInterval(writeMinute, 60000);
+}, 60000 - (Date.now() % 60000) + 50);
+
+const stop = (why) => {
+    writeSummary();
+    logLine("STOP", why);
+    process.exit(0);
+};
+process.on("SIGINT", () => stop("SIGINT"));
+process.on("SIGTERM", () => stop("SIGTERM"));
+process.on("uncaughtException", (err) => {
+    logLine("CRASH", err.stack || err.message);
+    process.exit(1);
+});
+
+
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 1. CSS: replace the existing header { ... } rule (lines 29–33) with this, and add the .header-btn rules below it:
 
 css
