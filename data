@@ -94,6 +94,14 @@ function isEmptySlot(c) {
 
 const SEND_INTERVAL_MS = 250;    // how often we try to push a record upstream
 const SEND_TIMEOUT_MS = 5000;    // give up on a socket that never answers
+
+// Uplink speed settings.
+const SEND_WORKERS = 1;          // parallel MES connections. Start with 1; try 2-4 only
+                                 // after confirming the MES handles parallel clients.
+const RECONNECT_DELAY_MS = 1000; // wait after a failed connect/send before retrying
+const LOG_EACH_ACK = true;       // false = only the rate line every RATE_LOG_MS
+                                 // (printing every ack slows down a Windows console)
+const RATE_LOG_MS = 10000;
 const HEARTBEAT_MS = 5000;       // how often the status file is rewritten
 
 const BACKLOG_WARN = 500;
@@ -1320,170 +1328,222 @@ if (RETENTION_DAYS > 0) {
 // ===========================================================================
 // UPLINK
 // ===========================================================================
-let sendInFlight = false; // stops a second socket opening while one is pending
+// Throughput design:
+//   - Each worker keeps ONE WebSocket open and reuses it for every cell,
+//     instead of a fresh TCP + WebSocket handshake per cell.
+//   - The next cell is sent the moment the previous ack arrives, instead of
+//     waiting for the next SEND_INTERVAL_MS tick.
+//   - If the MES closes the socket after each reply, the worker simply
+//     reconnects on demand -- it still works, just without the reuse gain.
+//   - SEND_WORKERS > 1 runs several connections in parallel, each sending a
+//     different cell. Only raise it after confirming the MES accepts it.
+//   - Each worker has at most ONE unacknowledged cell, because the MES reply
+//     does not say which cell it is for.
+const inFlightIds = new Set();
 
-function sendOne(row) {
+// Learned at runtime: true until the MES is seen closing the socket right
+// after a reply. Then every worker switches to one socket per cell.
+let reuseSockets = true;
+const stmtNextBatch = db.prepare(`
+    SELECT id, history_id, cell_qrcode, voltage_val, ir_val, material
+    FROM cells_queue ORDER BY id LIMIT ?
+`);
 
-    if (sendInFlight) return;
-
-    sendInFlight = true;
-
-    const payload = {
-        cell_qrcode: row.cell_qrcode,
-        voltage_val: row.voltage_val,
-        ir_val: row.ir_val,
-        material: row.material,
-    };
-
-    let settled = false;
-
-    const ws = new W3CWebSocket(
-        WS_URL,
-        "echo-protocol"
-    );
-
-    const done = (failReason) => {
-
-        if (settled) return;
-
-        settled = true;
-        sendInFlight = false;
-
-        if (failReason) {
-            try {
-                stmtBumpAttempt.run(
-                    failReason,
-                    row.id
-                );
-            } catch (_) {}
-        }
-
-        try {
-            ws.close();
-        } catch (e) {}
-    };
-
-    // Without this, a server that never answers leaves sendInFlight stuck true
-    // and the queue stops draining silently.
-    const timeout = setTimeout(() => {
-
-        console.error(
-            "send timeout, will retry"
-        );
-
-        noteError(
-            "MES did not respond"
-        );
-
-        done("timeout");
-
-    }, SEND_TIMEOUT_MS);
-
-    ws.onopen = () => {
-
-        try {
-
-            ws.send(
-                JSON.stringify(payload)
-            );
-
-        } catch (err) {
-
-            console.error(
-                "send failed:",
-                err.message
-            );
-
-            noteError(
-                "MES connection problem"
-            );
-
-            clearTimeout(timeout);
-
-            done(
-                "send failed: " + err.message
-            );
-        }
-    };
-
-    ws.onmessage = (e) => {
-
-        // Ack received. If the database write fails here we deliberately leave
-        // the row in the queue -- a duplicate send is recoverable, a silently
-        // lost cell is not.
-        if (confirmSent(row.id, row.history_id)) {
-
-            dbWriteError = null;
-
-            health.cellsSent++;
-
-            health.lastAckAt = new Date();
-
-            // Show exactly what was sent and what the MES replied, so a blank
-            // QR or an error reply from the server is visible on the console.
-            const reply = String(e && e.data != null ? e.data : "")
-                .replace(/\s+/g, " ").slice(0, 120);
-
-            console.log(
-                `acked ${JSON.stringify(row.cell_qrcode)} | MES replied: ${reply} | queue: ${queueDepth()}`
-            );
-        }
-
-        clearTimeout(timeout);
-
-        done(null);
-    };
-
-    ws.onerror = (err) => {
-
-        console.error(
-            "Socket error:",
-            err && err.message
-        );
-
-        noteError(
-            "MES connection problem"
-        );
-
-        clearTimeout(timeout);
-
-        done("socket error");
-    };
-
-    ws.onclose = () => {
-        clearTimeout(timeout);
-        done("closed before ack");
-    };
+function claimNextRow() {
+    const rows = stmtNextBatch.all(SEND_WORKERS + 1);
+    for (const r of rows) {
+        if (!inFlightIds.has(r.id)) return r;
+    }
+    return null;
 }
 
-setInterval(() => {
+// Rate meter, printed every RATE_LOG_MS while there is traffic.
+let sentSinceLastLog = 0;
+let failsSinceLastLog = 0;
 
-    let row;
+function makeWorker(n) {
 
-    try {
-        row = stmtNextQueued.get();
-    } catch (err) {
-        dbWriteError = err.message;
-        return;
+    let ws = null;           // current socket, or null
+    let ready = false;       // socket open and usable
+    let current = null;      // row waiting for an ack
+    let sentAt = 0;
+    let timer = null;
+    let retryAt = 0;         // back-off after a failure
+    let acksOnSocket = 0;    // acks received on the current socket
+
+    function connect() {
+        const my = new W3CWebSocket(WS_URL, "echo-protocol");
+        ws = my;
+        ready = false;
+        acksOnSocket = 0;
+
+        my.onopen = () => {
+            if (my !== ws) return;
+            ready = true;
+            pump();
+        };
+
+        my.onmessage = (e) => {
+            if (my !== ws || !current) return;
+
+            clearTimeout(timer);
+            const row = current;
+            current = null;
+            inFlightIds.delete(row.id);
+            acksOnSocket++;
+
+            // Ack received. If the database write fails we deliberately leave
+            // the row in the queue -- a duplicate send is recoverable, a
+            // silently lost cell is not.
+            if (confirmSent(row.id, row.history_id)) {
+                dbWriteError = null;
+                health.cellsSent++;
+                health.lastAckAt = new Date();
+                sentSinceLastLog++;
+
+                if (LOG_EACH_ACK) {
+                    const reply = String(e && e.data != null ? e.data : "")
+                        .replace(/\s+/g, " ").slice(0, 120);
+                    console.log(
+                        `[w${n}] acked ${JSON.stringify(row.cell_qrcode)} ` +
+                        `${Date.now() - sentAt}ms | MES replied: ${reply}`
+                    );
+                }
+            }
+
+            if (!reuseSockets) {
+                // MES closes after each reply: drop this socket ourselves and
+                // open a fresh one for the next cell straight away.
+                ws = null;
+                ready = false;
+                try { my.close(); } catch (_) {}
+            }
+
+            setImmediate(pump);
+        };
+
+        my.onerror = () => fail(my, "socket error", true);
+        my.onclose = () => fail(my, "closed before ack", false);
     }
 
-    if (!row) return;
+    function fail(my, reason, isError) {
+        if (my !== ws) return;
 
-    if (DRY_RUN) {
+        ws = null;
+        ready = false;
+        clearTimeout(timer);
 
+        try { my.close(); } catch (_) {}
+
+        if (current && !isError && acksOnSocket > 0) {
+            // The MES closed a socket that had already answered: it closes
+            // after every reply. Not a real failure -- resend this cell on a
+            // new socket at once, and stop reusing sockets from now on.
+            inFlightIds.delete(current.id);
+            current = null;
+            if (reuseSockets) {
+                reuseSockets = false;
+                console.log("[uplink] MES closes the connection after each reply -- using one connection per cell");
+                logEvent("UPLINK_MODE", "one connection per cell (MES closes after reply)");
+            }
+        } else if (current) {
+            // A cell was waiting: count it as a failed attempt and back off.
+            try { stmtBumpAttempt.run(reason, current.id); } catch (_) {}
+            inFlightIds.delete(current.id);
+            current = null;
+            failsSinceLastLog++;
+            noteError("MES connection problem");
+            console.error(`[w${n}] ${reason}, will retry`);
+            retryAt = Date.now() + RECONNECT_DELAY_MS;
+        } else if (isError) {
+            // Could not connect at all.
+            failsSinceLastLog++;
+            noteError("MES connection problem");
+            console.error(`[w${n}] cannot connect to MES, will retry`);
+            retryAt = Date.now() + RECONNECT_DELAY_MS;
+        }
+        // A clean close with nothing pending (MES closes after each reply)
+        // reconnects immediately on the next pump.
+
+        setTimeout(pump, Math.max(0, retryAt - Date.now()));
+    }
+
+    function pump() {
+        if (current) return;                    // already waiting for an ack
+        if (Date.now() < retryAt) return;       // backing off
+
+        let row;
+        try {
+            row = claimNextRow();
+        } catch (err) {
+            dbWriteError = err.message;
+            return;
+        }
+        if (!row) return;                       // queue empty
+
+        if (!ws) { connect(); return; }         // pump runs again on open
+        if (!ready) return;
+
+        current = row;
+        inFlightIds.add(row.id);
+        sentAt = Date.now();
+
+        const my = ws;
+
+        timer = setTimeout(() => {
+            noteError("MES did not respond");
+            fail(my, "timeout", true);
+        }, SEND_TIMEOUT_MS);
+
+        try {
+            my.send(JSON.stringify({
+                cell_qrcode: row.cell_qrcode,
+                voltage_val: row.voltage_val,
+                ir_val: row.ir_val,
+                material: row.material,
+            }));
+        } catch (err) {
+            fail(my, "send failed: " + err.message, true);
+        }
+    }
+
+    return { pump };
+}
+
+if (DRY_RUN) {
+
+    setInterval(() => {
+        let row;
+        try { row = stmtNextQueued.get(); } catch (err) { dbWriteError = err.message; return; }
+        if (!row) return;
         // Exercise the full path without touching the MES.
         if (confirmSent(row.id, row.history_id)) {
-
             health.cellsSent++;
             health.lastAckAt = new Date();
         }
+    }, SEND_INTERVAL_MS);
 
-        return;
-    }
+} else {
 
-    sendOne(row);
+    const workers = [];
+    for (let i = 1; i <= SEND_WORKERS; i++) workers.push(makeWorker(i));
 
-}, SEND_INTERVAL_MS);
+    // Idle poll: picks up newly queued cells and resumes after back-off.
+    // While cells are flowing, workers drive themselves from each ack.
+    setInterval(() => workers.forEach((w) => w.pump()), SEND_INTERVAL_MS);
+
+    setInterval(() => {
+        if (sentSinceLastLog === 0 && failsSinceLastLog === 0) return;
+        const secs = RATE_LOG_MS / 1000;
+        console.log(
+            `[uplink] sent ${sentSinceLastLog} in ${secs}s ` +
+            `(${(sentSinceLastLog / secs).toFixed(1)}/s)  failures ${failsSinceLastLog}  ` +
+            `queue: ${queueDepth()}`
+        );
+        sentSinceLastLog = 0;
+        failsSinceLastLog = 0;
+    }, RATE_LOG_MS);
+}
 
 // ===========================================================================
 // OPC UA INGEST
