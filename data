@@ -310,6 +310,22 @@ function fmtDur(ms) {
 
 const parseTs = (ts) => new Date(ts.replace(" ", "T"));
 
+// ---- 12-hour time formatting, used everywhere a time is shown
+// "16:01:27.229" -> "4:01:27.229 pm",  "09:00" -> "9:00 am"
+function t12(hms) {
+  const m = /^(\d{1,2}):(\d{2})(:\d{2}(?:\.\d+)?)?/.exec(hms || "");
+  if (!m) return hms || "";
+  const hr = +m[1];
+  return (hr % 12 || 12) + ":" + m[2] + (m[3] || "") + " " + (hr < 12 ? "am" : "pm");
+}
+// time part of "YYYY-MM-DD HH:MM:SS(.mmm)"
+const ts12 = (ts) => t12((ts || "").slice(11));
+// a Date -> "4:05:13 pm"
+const date12 = (d) => t12(String(d.getHours()).padStart(2, "0") + ":" +
+  String(d.getMinutes()).padStart(2, "0") + ":" + String(d.getSeconds()).padStart(2, "0"));
+// minute of day (0..1439) -> "4:30 pm"
+const min12 = (v) => t12(String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0"));
+
 const STATE_LEVEL = { OK: "ok", SLOW: "warn", FAILING: "warn", DOWN: "bad", WAITING: "idle" };
 
 // ------------------------------------------------------------------ state
@@ -348,13 +364,13 @@ function linkTile(name, mons, netAge) {
         h("dt", {}, m.check === "PING" ? "Ping" : "TCP :" + m.port),
         h("dd", {}, m.state === "OK" || m.state === "SLOW"
           ? m.lastMs + " ms" + (m.state === "SLOW" ? "  (over limit)" : "")
-          : (m.lastError || m.state) + (m.downSince ? "  — since " + new Date(m.downSince).toLocaleTimeString("en-GB") : "")),
+          : (m.lastError || m.state) + (m.downSince ? "  — since " + date12(new Date(m.downSince)) : "")),
       ])));
 }
 
 function renderOverview(s) {
   $("title").textContent = (s.line || "Line") + " — Health";
-  $("subtitle").textContent = "PC " + s.pc + "  ·  updated " + new Date().toLocaleTimeString("en-GB");
+  $("subtitle").textContent = "PC " + s.pc + "  ·  updated " + date12(new Date());
   document.title = s.line + " health";
 
   const tiles = [];
@@ -467,7 +483,7 @@ function renderLatency() {
   const span = x1 - x0, xStep = span > 360 ? 60 : span > 120 ? 30 : 15;
   for (let v = Math.ceil(x0 / xStep) * xStep; v <= x1; v += xStep) {
     const t = s("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" });
-    t.textContent = String(Math.floor(v / 60)).padStart(2, "0") + ":" + String(v % 60).padStart(2, "0");
+    t.textContent = min12(v);
     svg.appendChild(t);
   }
   svg.appendChild(s("line", { x1: m.l, x2: W - m.r, y1: Y(0), y2: Y(0), stroke: cssVar("--axis"), "stroke-width": 1 }));
@@ -507,8 +523,7 @@ function renderLatency() {
     const px = (ev.clientX - box.left) * (W / box.width);
     const xm = Math.round(x0 + ((px - m.l) / pw) * (x1 - x0));
     cross.setAttribute("x1", X(xm)); cross.setAttribute("x2", X(xm)); cross.setAttribute("visibility", "visible");
-    tip.replaceChildren(h("div", { class: "t" },
-      String(Math.floor(xm / 60)).padStart(2, "0") + ":" + String(xm % 60).padStart(2, "0") + "  ·  " + check));
+    tip.replaceChildren(h("div", { class: "t" }, min12(xm) + "  ·  " + check));
     series.forEach((pts, i) => {
       const p = nearest(pts, xm);
       const ok = p && Math.abs(p.x - xm) <= 2;
@@ -538,7 +553,7 @@ function renderLatency() {
   tbl.style.display = showLatTable ? "block" : "none";
   if (showLatTable) {
     tbl.replaceChildren(h("div", { class: "tablewrap" }, table([
-      { label: "Minute", render: (r) => r.minute.slice(11) },
+      { label: "Minute", render: (r) => ts12(r.minute) },
       { label: "Target", key: "target" },
       { label: "Checks", key: "checks" },
       { label: "Failed", key: "failed" },
@@ -567,8 +582,8 @@ function renderOutages(d) {
   const now = new Date();
   fill("outageTable", table([
     { label: "What", key: "what" },
-    { label: "Started", render: (r) => r.start.slice(11, 19) },
-    { label: "Ended", render: (r) => r.end ? r.end.slice(11, 19) : badge("bad", "still ongoing") },
+    { label: "Started", render: (r) => ts12(r.start.slice(0, 19)) },
+    { label: "Ended", render: (r) => r.end ? ts12(r.end.slice(0, 19)) : badge("bad", "still ongoing") },
     { label: "Duration", render: (r) => fmtDur((r.end ? parseTs(r.end) : now) - parseTs(r.start)) },
     { label: "Detail", key: "startDetail", cls: "detail" },
   ], d.rows, "No outages recorded on this day."));
@@ -602,7 +617,7 @@ function renderLogs() {
     encodeURIComponent((logData.src === "net" ? "health-" : "service-") + logData.day + ".log");
 
   fill("logTable", table([
-    { label: "Time", render: (r) => r.ts.slice(11) },
+    { label: "Time", render: (r) => ts12(r.ts) },
     { label: "Event", render: (r) => KIND_LEVEL[r.kind] ? badge(KIND_LEVEL[r.kind], r.kind) : r.kind },
     { label: "Detail", key: "detail", cls: "detail" },
   ], rows.slice(0, 2000), "No log lines for this day / filter."));
@@ -613,7 +628,7 @@ function renderProblems(d) {
   $("probCount").textContent = d.total + " failed or slow checks on " + d.day;
   $("probDownload").href = "/download?src=net&name=" + encodeURIComponent("problems-" + d.day + ".csv");
   fill("probHourly", table([
-    { label: "Hour", key: "hour" },
+    { label: "Hour", render: (r) => t12(r.hour) },
     { label: "Target", key: "target" },
     { label: "Check", key: "check" },
     { label: "Result", render: (r) => badge(r.result === "FAIL" ? "bad" : "warn", r.result) },
@@ -621,7 +636,7 @@ function renderProblems(d) {
     { label: "Worst ms", render: (r) => r.worst_ms == null ? "" : r.worst_ms },
   ], d.hourly, "No failed or slow checks on this day."));
   fill("probRecent", table([
-    { label: "Time", render: (r) => (r.timestamp || "").slice(11) },
+    { label: "Time", render: (r) => ts12(r.timestamp) },
     { label: "Target", key: "target" },
     { label: "Address", key: "host" },
     { label: "Check", key: "check" },
