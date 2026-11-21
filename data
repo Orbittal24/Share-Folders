@@ -1,1 +1,11 @@
-Test-NetConnection 192.168.250.1 -Port 4840
+SELECT
+    COLUMN_NAME,
+    DATA_TYPE,
+    COLUMNPROPERTY(
+        OBJECT_ID('taco_treceability.master_line_cell_scanning_status'),
+        'Srno',
+        'IsIdentity'
+    ) AS IsIdentity
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'master_line_cell_scanning_status'
+AND COLUMN_NAME = 'Srno';
